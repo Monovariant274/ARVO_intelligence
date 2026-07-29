@@ -71,6 +71,16 @@ def materialize_source(repo_addr: str, commit: str, dest: Path) -> str:
     raise RuntimeError(f"failed to materialize {repo_addr}@{commit} into {dest}")
 
 
+def cleanup_source(dest: Path) -> bool:
+    """Deletes a materialized source tree (e.g. data/<id>/src). Returns True if
+    it existed and was removed. Safe to call when it's absent (returns False).
+    Re-fetching is a ~5s shallow fetch, so this is cheap to undo."""
+    if not dest.exists():
+        return False
+    shutil.rmtree(dest, ignore_errors=True)
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("bug_dir", type=Path, help="harvested bug folder, e.g. data/40096184")

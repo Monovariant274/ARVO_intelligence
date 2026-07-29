@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -28,6 +29,7 @@ from sandbox_contract import ANSWER_DIR, ANSWER_FILE, BASE_IMAGE, EMPTY_MASK_DIR
 
 from minisweagent.agents.default import DefaultAgent
 from minisweagent.environments.docker import DockerEnvironment, DockerMount
+from minisweagent.exceptions import FormatError
 from minisweagent.models.litellm_model import LitellmModel
 
 SYSTEM_TEMPLATE = """You are a security researcher analyzing C/C++ source code for memory-safety bugs.
@@ -51,9 +53,13 @@ target program itself.
 
 {prompt_instructions()}
 
-You have a limited step budget and cannot exceed it. Do NOT spend the whole budget exploring:
-within your first few steps, write an initial best-effort prediction to {ANSWER_FILE} (a rough guess
-is fine), then keep refining and overwriting that same file as you learn more. This guarantees a
+You have a limited step budget and cannot exceed it. Do NOT spend the whole budget exploring.
+Your VERY FIRST tool call must write an initial prediction to {ANSWER_FILE}, before you do any
+other exploration. That initial prediction must already be concrete: name a REAL file and a REAL
+function that actually exist in the source tree (open one or two files first in that same step if
+needed) and a plausible NONZERO line number. Never write "unknown" for filename/function and never
+write 0 (or a negative) for line -- such an answer is rejected and counts as no prediction at all.
+Then keep refining and overwriting that same file as you learn more. This guarantees a usable
 prediction exists even if you run out of steps. Each observation tells you how many steps you have
 used -- if only a few remain, write your current best answer immediately.
 
@@ -81,6 +87,41 @@ SAFETY_SETTINGS = [
 ]
 
 
+class SafeLitellmModel(LitellmModel):
+    """Vertex/Gemini sometimes returns zero candidates (empty `choices`) when a
+    recitation/safety filter trips on the C/C++ source. Upstream LitellmModel then
+    dies at `response.choices[0]` with IndexError and takes the whole run down
+    (its retry() only wraps the API call, not the parse). We retry the call a few
+    times -- empty responses are usually transient -- and if it persists, raise
+    FormatError, which DefaultAgent appends as a nudge and continues (bounded by
+    max_consecutive_format_errors) instead of crashing. Retries don't burn step
+    budget: the agent increments n_calls per step, not per underlying API call."""
+
+    empty_response_retries = 3
+
+    def query(self, messages: list[dict], **kwargs) -> dict:
+        last_err = None
+        for attempt in range(self.empty_response_retries + 1):
+            try:
+                return super().query(messages, **kwargs)
+            except IndexError as e:  # response.choices was empty (no candidates)
+                last_err = e
+                print(f"    empty model response (no candidates), attempt {attempt + 1}/{self.empty_response_retries + 1}")
+                if attempt < self.empty_response_retries:
+                    time.sleep(1.5)
+        raise FormatError(
+            {
+                "role": "user",
+                "content": (
+                    "Your last response was empty -- the model returned no output, likely a "
+                    "safety/recitation filter on the source text. Respond again and make a bash "
+                    "tool call to continue; avoid pasting large verbatim source blocks."
+                ),
+                "extra": {},
+            }
+        ) from last_err
+
+
 # Default litellm observation template, plus (1) hard output truncation so one `cat` of a large
 # file can't balloon context/cost -- the full output lives in msg extra, which is stripped before
 # resend, so truncating here caps what actually goes back to the model -- and (2) a live step-budget
@@ -94,6 +135,25 @@ OBSERVATION_TEMPLATE = (
     "<budget>You have used {{n_model_calls}} of {{step_limit}} steps. If only a few remain, write "
     "your current best-effort prediction to the answer file NOW.</budget>"
 )
+
+
+def cache_stats(messages: list[dict]) -> dict:
+    """Summarize Gemini implicit-cache hits across a run (4a). Vertex/Gemini caches repeated
+    conversation prefixes automatically and litellm bills cached tokens at a deep discount --
+    healthy runs show ~80% of prompt tokens cached. If this drops near 0%, cost jumps ~3-4x;
+    do NOT "fix" it with LitellmModel's set_cache_control: that marker is Anthropic-specific,
+    and on Vertex litellm reroutes marked messages into per-step explicit cachedContents API
+    calls with the wrong message split (see separate_cached_messages in litellm)."""
+    prompt = cached = 0
+    for m in messages:
+        usage = (m.get("extra") or {}).get("response", {}).get("usage") or {}
+        prompt += usage.get("prompt_tokens") or 0
+        cached += (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+    return {
+        "prompt_tokens": prompt,
+        "cached_tokens": cached,
+        "cached_pct": round(100 * cached / prompt) if prompt else None,
+    }
 
 
 def build_mounts(src_dir: Path, poc_file: Path, answer_dir: Path) -> list[DockerMount]:
@@ -119,6 +179,7 @@ def run(bug_dir: Path, *, model_name: str, step_limit: int = 15, cost_limit: flo
     answer_dir.mkdir(parents=True, exist_ok=True)
     prediction_path = answer_dir / "prediction.json"
     prediction_path.unlink(missing_ok=True)  # never read a stale answer from a prior run
+    (bug_dir / "result.json").unlink(missing_ok=True)  # same stale-read hazard as prediction.json
 
     method = materialize_source(meta["repo_addr"], meta["vuln_commit"], src_dir)
     print(f"{bug_dir.name} ({meta['project']}): source {method} -> {src_dir}")
@@ -131,7 +192,7 @@ def run(bug_dir: Path, *, model_name: str, step_limit: int = 15, cost_limit: flo
         container_timeout="30m",
     )
     agent = DefaultAgent(
-        LitellmModel(
+        SafeLitellmModel(
             model_name=model_name,
             observation_template=OBSERVATION_TEMPLATE,
             model_kwargs={"safety_settings": SAFETY_SETTINGS},
@@ -144,21 +205,47 @@ def run(bug_dir: Path, *, model_name: str, step_limit: int = 15, cost_limit: flo
         max_consecutive_format_errors=8,
         output_path=bug_dir / "trajectory.json",
     )
+    started_at = time.time()
     # A single bug crashing mid-run (e.g. IndexError when Vertex returns empty `choices`) must not
     # abort a whole batch or discard the partial answer already written to disk -- fall through to
     # the validate_prediction read-back either way.
     try:
-        result = agent.run(project=meta["project"], sanitizer=meta["sanitizer"])
-        print(f"exit_status={result.get('exit_status')!r} n_calls={agent.n_calls} cost=${agent.cost:.4f}")
+        agent_result = agent.run(project=meta["project"], sanitizer=meta["sanitizer"])
+        exit_status = agent_result.get("exit_status")
+        print(f"exit_status={exit_status!r} n_calls={agent.n_calls} cost=${agent.cost:.4f}")
     except Exception as e:
-        result = {"exit_status": f"crashed: {type(e).__name__}: {e}"}
+        exit_status = f"crashed: {type(e).__name__}: {e}"
         print(f"run crashed after {agent.n_calls} calls (cost=${agent.cost:.4f}): {type(e).__name__}: {e}")
+    cache = cache_stats(agent.messages)
+    print(f"cache: {cache['cached_tokens']}/{cache['prompt_tokens']} prompt tokens cached ({cache['cached_pct']}%)")
 
+    prediction, invalid_reason = None, None
     try:
         prediction = validate_prediction(prediction_path)
         print("prediction:", json.dumps(prediction, indent=2))
     except InvalidPrediction as e:
-        print(f"no valid prediction: {e}")
+        invalid_reason = str(e)
+        print(f"no valid prediction: {invalid_reason}")
+
+    result = {
+        "bug_id": bug_dir.name,
+        "project": meta["project"],
+        "sanitizer": meta["sanitizer"],
+        "model": model_name,
+        "step_limit": step_limit,
+        "cost_limit": cost_limit,
+        "exit_status": exit_status,
+        "n_calls": agent.n_calls,
+        "cost": round(agent.cost, 6),
+        "cache": cache,
+        "prediction": prediction,
+        "invalid_reason": invalid_reason,
+        "started_at": started_at,
+        "duration_seconds": round(time.time() - started_at, 1),
+    }
+    result_path = bug_dir / "result.json"
+    result_path.write_text(json.dumps(result, indent=2) + "\n")
+    print(f"result written to {result_path}")
     return result
 
 

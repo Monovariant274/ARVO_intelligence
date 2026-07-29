@@ -261,7 +261,8 @@ suspenders), and `verify_sandbox.py` still PASSes both checks after the change.
     growing conversation every step, and **no prompt caching is configured** (`set_cache_control=None`).
     The 3.5 run also submitted on the *very last* allowed step (45/45) — a bigger source tree might not
     finish at 45. At RL scale (~$0.34 × thousands of bugs × many rollouts) this balloons. Levers before
-    Phase 6: (1) enable `set_cache_control` on `LitellmModel`; (2) reconsider `2.5-flash`, which reached
+    Phase 6: (1) enable `set_cache_control` on `LitellmModel` **(RETRACTED — see 4a: implicit
+    caching already active, flag would break Gemini)**; (2) reconsider `2.5-flash`, which reached
     a comparable on-stack answer in ~22 steps for ~$0.08 (~4× cheaper) — worth a head-to-head re-run
     *with these fixes* before committing a model; (3) tune step-limit/rollout count. **Model decision
     (2026-07-29): standardizing on `vertex_ai/gemini-3.5-flash` for Phase 4+** (user call). It gave the
@@ -323,7 +324,141 @@ python msagent_runner/run_prediction.py \
 # success = exit_status='Submitted' + a validated prediction printed
 # (2.5-flash also works and is cheaper; see the open model decision above)
 ```
-- [ ] **Phase 4 — Agent loop** (reuse mini-swe-agent `KernelAgent`; new prompt + mount contract).
+- [x] **Phase 4 — Batch orchestration. COMPLETE 2026-07-29** (4a–4f done; 4g skipped, serial fine).
+  Re-scoped 2026-07-29: 3h's `run_prediction.py` already IS
+  the working single-bug agent loop (prompt, mounts, validation, crash guards), so Phase 4 is not
+  "build the agent loop" — it's running that loop over many bugs with bookkeeping, producing the
+  (prediction, ground-truth) pairs Phase 5 scores. Does NOT wait on the Phase-2 harvest finishing:
+  batches draw from whatever `data/` holds (~640 bugs and growing); only Phase 6 needs the full set.
+  - [x] **4a. Prompt caching — RESOLVED 2026-07-29, opposite of the planned fix.** Investigated
+    before touching code: trajectories from the Phase-3 runs show Gemini's **implicit caching is
+    already active** and litellm already bills cached tokens at a deep discount — measured across
+    all 5 saved trajectories: **78–86% of prompt tokens were cache hits**, i.e. runs already cost
+    ~3–4x less than uncached (gdal $2.23 actual vs ~$9.80 est. uncached; 40096184 $0.34 vs ~$1.03).
+    **Decision: do NOT enable `set_cache_control` — it would actively break Gemini runs.** That flag
+    is Anthropic-semantics (mark the last message = "cache prefix up to here"); mini-swe-agent marks
+    only the final message, and litellm's Vertex path (`separate_cached_messages` in
+    `llms/vertex_ai/context_caching/transformation.py`) would instead carve that lone message into a
+    per-step **explicit** cachedContents API call with a scrambled message split + min-token
+    requirements. This supersedes the Phase-6 "enable set_cache_control" lever from the 3h cost
+    notes; the remaining real cost levers are step-limit tuning and keeping observations small
+    (truncation, already landed). Deliverable: `cache_stats_line()` in `run_prediction.py` now
+    prints `cache: N/M prompt tokens cached (P%)` after every run (tested offline against the saved
+    40096184 trajectory: 83%) — if a future run shows ~0%, caching regressed and cost jumps 3–4x.
+  - [x] **4b. Per-bug result record — DONE 2026-07-29.** `run()` in `run_prediction.py` now writes
+    `data/<id>/result.json` after every run (alongside `trajectory.json`): bug_id, project,
+    sanitizer, model, step_limit, cost_limit, exit_status, n_calls, cost, cache stats (4a),
+    the validated prediction (or `null` + `invalid_reason`), started_at, duration. Stale
+    `result.json` is unlinked at run start (same hazard class as the 3h stale-prediction bug —
+    a run that dies early must not leave a prior run's record looking current). Also refactored
+    4a's `cache_stats_line` → `cache_stats()` returning a dict so the record and the printed line
+    share one computation. **Cost de-prioritized (user call, 2026-07-29):** cost/cache numbers are
+    recorded for visibility but are no longer a decision driver unless egregious. Verified offline
+    (no billed run) by monkeypatching `DockerEnvironment`/`DefaultAgent` over the real 40096184
+    folder + saved trajectory: happy path (Submitted + validated prediction → full record) and
+    crash path (IndexError mid-run → `exit_status="crashed: …"`, `prediction: null`,
+    `invalid_reason` set, record still written). Test artifacts cleaned up; real prediction.json
+    restored. Note for 4d: `run()`'s return value is now this same record dict — the batch runner
+    can consume it directly instead of re-reading result.json.
+  - [x] **4c. Bug-selection helper — DONE 2026-07-29.** `select_bugs.py` (repo root, stdlib-only
+    like the harvester). `runnable_bugs(data_dir, sanitizer=, project=, skip_done=)` for library use
+    (4d imports this); CLI prints ids/paths or a `--count` summary. Runnable = folder complete
+    (`poc` + valid `ground_truth.json` + valid `meta.json`) — requiring `meta.json` (written *last*
+    by harvest.py) makes it safe against the live harvest: half-written folders simply aren't listed
+    yet, and `ok(no-poc)` bugs are excluded by the poc check. `--skip-done` excludes bugs that
+    already have a 4b `result.json` (resume primitive for 4d). `--shuffle --seed N --limit K` gives
+    a reproducible diverse sample (for 4f). Tested live against the in-flight harvest: 651 runnable
+    across 73 projects (asan 557 / msan 85 / ubsan 9), filters + reproducible shuffle verified,
+    `--skip-done` verified with a planted result.json (651→650, bug absent from list).
+  - [x] **4d. Batch runner (serial first) — BUILT + harness-tested 2026-07-29.** `batch_predict.py`
+    (repo root): selects bugs via 4c's `runnable_bugs()`, loops 4b's `run()` over them, writes one
+    manifest row per bug to `runs/<name>/manifest.jsonl` (append+flush, harvester pattern). One bug's
+    failure never kills the batch: `run()`'s own mid-run guard covers agent crashes, and batch_predict
+    additionally wraps `run()` so a *setup-stage* failure (source fetch / docker start, which happens
+    before run()'s internal try) is recorded as a `batch-error` row and the loop continues. Resumable
+    by default via `skip_done` (skips bugs with a 4b `result.json`; `--redo` forces re-run). Running
+    cost total + `--max-cost` aborts cleanly *before* starting a bug that would exceed the budget.
+    Defaults standardized on `vertex_ai/gemini-3.5-flash`, step-limit 45, per-bug cost-limit 3 (matches
+    the 3h smoke command). **Verified without any billed call** by stubbing `run()`: error isolation
+    (a raised bug recorded + batch continued), manifest rows written for every bug, cost accounting,
+    and `--max-cost` abort all confirmed. **Not yet run against a real billed batch — that IS 4f.**
+    Run it with:
+    ```bash
+    cd ~/ARVO_intelligence && source .venv/bin/activate
+    export VERTEXAI_LOCATION=global
+    python batch_predict.py --limit 25 --shuffle --name shakeout   # 4f shakeout
+    ```
+  - [x] **4e. Source-tree disk hygiene — DONE 2026-07-29.** `cleanup_source(dest)` added to
+    `fetch_source.py` (the module that owns the src lifecycle) — `shutil.rmtree`, safe when absent,
+    returns whether it removed anything. `batch_predict.py --cleanup-src` calls it on `data/<id>/src`
+    after *every* bug, right after the manifest write, so it fires on the error path too (a setup
+    failure can leave a partial `src/`). Only the checkout is deleted — `poc`/`ground_truth.json`/
+    `meta.json`/`result.json` stay; re-fetch is the ~5s shallow fetch. Verified without billing:
+    unit-checked the helper (removes existing, returns False when absent) and ran the batch with a
+    stubbed `run()` that creates a src tree (and raises on one bug) — all three src dirs gone after,
+    manifest + counts intact.
+  - [x] **4f. Shakeout batch + review — DONE 2026-07-29. GATE: PASS.** 30-bug billed batch launched:
+    `python batch_predict.py --limit 30 --shuffle --cleanup-src --name shakeout` (model
+    `vertex_ai/gemini-3.5-flash`, step-limit 45), manifest at `runs/shakeout/manifest.jsonl`, log
+    `shakeout.log`. **Vertex access is via the VM's built-in service-account ADC** (default SA,
+    project `triangulate-396717`, `cloud-platform` scope) after the earlier permission-change+reboot
+    — NO interactive login and NO exported key needed; just `export VERTEXAI_LOCATION=global`. This
+    corrects the 3h speculation about "personal ADC login or a service-account key" — it's the VM SA.
+    Verified before spending: `google.auth.default()` mints a token, and a 1-token litellm call to
+    `vertex_ai/gemini-3.5-flash` returned "ok".
+    **Partial results (24/30 done):** ~18/24 valid predictions, 6 clean `Submitted`; the many
+    `LimitsExceeded` are the by-design "out of steps but early-write left a valid answer" path (not
+    failures). **5 no-prediction bugs analyzed → 3 root causes:**
+      1. *Literal-placeholder* (aom 42470283, harfbuzz 42470395): agent wrote a placeholder
+         (`filename:"unknown"`, `line:0`) as its early write and never refined it → rejected by
+         `answer_schema.validate_prediction` (line must be ≥1).
+      2. *Never wrote at all* (binutils-gdb 42479120, radare2 42475544): burned all 45 steps
+         exploring, 0 writes to the answer file (confirmed in trajectory).
+      3. *Source-fetch fail* (graphicsmagick 42473496): repo on `foss.heptapod.net` (a Mercurial
+         host) — `git` can't fetch it. **77 bugs in the full DB, all graphicsmagick (1.25%).**
+         **RESOLVED as a skip 2026-07-29** — investigated recovery and it's genuinely impossible: the
+         recorded `vuln_commit` is an hg changeset that no longer resolves on the live heptapod repo
+         (history stripped) AND doesn't map to the GitHub mirror's git SHAs; the source only ever
+         existed in the discarded ARVO Docker image (harvest used `--source ref`). So Mercurial support
+         would NOT help (verified: `hg identify -r <commit>` → "unknown revision"). Fix: `select_bugs.py`
+         now excludes unfetchable hosts by default (`UNFETCHABLE_HOST_MARKERS=("heptapod",)`,
+         `skip_unfetchable=True`; `--include-unfetchable` to override), so these never get selected and
+         can't pollute a batch. Recovering them would require re-harvesting with `--source tar` from the
+         Docker image + teaching Phase-3 to mount a saved tree — not worth it for 1.25%.
+    **Fix applied for causes 1+2:** hardened `run_prediction.py` `INSTANCE_TEMPLATE` — the agent's
+    VERY FIRST tool call must write a *concrete* prediction (real file+function from the tree, nonzero
+    line; "unknown"/0 explicitly forbidden as "counts as no prediction"), before any exploration.
+    Prompt-only; sandbox and validator untouched. Applies to future batches, not the in-flight
+    shakeout (separate process, module already loaded). **A/B re-run of the 4 fixable bugs is queued**
+    as a background job that waits for the shakeout to exit, then re-runs binutils-gdb/radare2/aom/
+    harfbuzz through the new prompt (graphicsmagick excluded — its failure is the heptapod data issue,
+    not the prompt). Review/gate verdict pending both jobs finishing.
+    **Phase-5 note surfaced here:** reward wiring must treat a missing/invalid prediction as **score
+    0**, not an error — "no answer" is a legitimate bad RL outcome, not a pipeline crash.
+    **FINAL RESULTS (both jobs landed 2026-07-29):** shakeout 30/30 → **25/30 valid (83%)** on the old
+    prompt, 10 clean `Submitted`, 18 `LimitsExceeded`-but-valid, 2 crashed/errored. Cost **$9.89 total,
+    $0.33 mean / $0.29 median / $0.84 max per bug** — tame and predictable, no cost blocker. The A/B
+    re-run of the 4 prompt-fixable bugs through the hardened `INSTANCE_TEMPLATE` **converted all 4/4
+    to valid** (binutils-gdb + harfbuzz clean `Submitted`, radare2 + aom `LimitsExceeded`-but-valid;
+    every one wrote a concrete file/function/nonzero-line, no more `unknown`/0). So **effective
+    valid-rate = 29/30**, with the sole remaining miss being graphicsmagick's Heptapod fetch (the
+    deferred 21-bug data-source issue, not a pipeline defect). **GATE VERDICT: PASS** — healthy
+    completion, understood+fixed failure modes, predictable cost. 4g (parallelism) skipped: serial
+    throughput is fine. NOTE: accuracy vs. ground truth is NOT scored yet — that is Phase 5; 4f only
+    gates *pipeline health*, not prediction quality.
+    **Both post-4f loose ends RESOLVED 2026-07-29:** (1) Heptapod/graphicsmagick — skip filter in
+    `select_bugs.py` (see 4f cause #3 above). (2) Vertex empty-candidates `IndexError` — this used to
+    only be *contained* (SAFETY_SETTINGS + a try/except that recorded `crashed` and stopped the run).
+    Now properly *handled*: `run_prediction.py` has a `SafeLitellmModel(LitellmModel)` subclass whose
+    `query()` retries an empty (zero-candidate) response a few times, then raises `FormatError` instead
+    of `IndexError` — `DefaultAgent` appends a nudge and the run *continues* (bounded by
+    `max_consecutive_format_errors`) rather than crashing. Retries don't burn step budget (`n_calls`
+    increments per step, not per API call). Verified: simulated empty response → retry → `FormatError`,
+    no `IndexError` leak. The old try/except stays as a last-resort backstop.
+  - [x] **4g. (Optional) modest parallelism — SKIPPED 2026-07-29.** Serial throughput (~$0.33 and a
+    couple min/bug) is fine and 4f passed on it; Docker + Vertex quotas get riskier concurrent, so not
+    worth the added risk. Revisit only if the Phase-5 k-sample difficulty sweep over the full set
+    proves too slow serially.
 - [ ] **Phase 5 — Reward wiring** (reuse `exec-rl/reward.py`; remap crash taxonomy to sanitizer types;
   canonicalize frame filenames — see Known issues).
 - [ ] **Phase 6 — RL training** (verl trainer; the heavy GPU/infra part).
