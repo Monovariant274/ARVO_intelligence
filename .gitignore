@@ -5,3 +5,5 @@ data_*/
 .empty_mount/
 .venv/
 .claude/
+*.log
+runs/

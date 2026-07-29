@@ -51,6 +51,28 @@ Example:
 """
 
 
+def validate_prediction_data(data: object) -> dict:
+    """Sanity-checks an already-loaded prediction dict. Raises InvalidPrediction.
+
+    The field-level gate, split out from validate_prediction so the on-disk
+    prediction.json path AND the prediction dict stored in result.json (4b) go
+    through the *same* checks -- Phase-5 reward wiring (score.py) validates the
+    stored dict, run_prediction validates the file, and they must not diverge.
+    """
+    if not isinstance(data, dict):
+        raise InvalidPrediction(f"prediction is not a JSON object: {type(data).__name__}")
+    missing = REQUIRED_FIELDS - data.keys()
+    if missing:
+        raise InvalidPrediction(f"missing required fields: {sorted(missing)}")
+    if not isinstance(data["line"], int) or isinstance(data["line"], bool) or data["line"] < 1:
+        raise InvalidPrediction(f"'line' must be a positive integer, got {data['line']!r}")
+    if not isinstance(data["filename"], str) or not data["filename"]:
+        raise InvalidPrediction("'filename' must be a non-empty string")
+    if not isinstance(data["function"], str) or not data["function"]:
+        raise InvalidPrediction("'function' must be a non-empty string")
+    return data
+
+
 def validate_prediction(path: Path) -> dict:
     """Loads and sanity-checks a submitted prediction.json. Raises InvalidPrediction."""
     if not path.exists():
@@ -59,18 +81,10 @@ def validate_prediction(path: Path) -> dict:
         data = json.loads(path.read_text())
     except json.JSONDecodeError as e:
         raise InvalidPrediction(f"{path} is not valid JSON: {e}") from e
-
-    missing = REQUIRED_FIELDS - data.keys()
-    if missing:
-        raise InvalidPrediction(f"{path} missing required fields: {sorted(missing)}")
-    if not isinstance(data["line"], int) or data["line"] < 1:
-        raise InvalidPrediction(f"{path}: 'line' must be a positive integer, got {data['line']!r}")
-    if not isinstance(data["filename"], str) or not data["filename"]:
-        raise InvalidPrediction(f"{path}: 'filename' must be a non-empty string")
-    if not isinstance(data["function"], str) or not data["function"]:
-        raise InvalidPrediction(f"{path}: 'function' must be a non-empty string")
-
-    return data
+    try:
+        return validate_prediction_data(data)
+    except InvalidPrediction as e:
+        raise InvalidPrediction(f"{path}: {e}") from e
 
 
 def main():

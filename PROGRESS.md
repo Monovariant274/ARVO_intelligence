@@ -4,6 +4,23 @@ Handoff doc. Read this to resume without re-deriving context.
 
 ---
 
+## LIVE STATUS (as of 2026-07-29 10:43) — two long jobs running, safe to leave
+
+- **sweep1 (Phase 5g pass@k)** — tmux session `sweep1`, launched 10:37. 100 bugs × k=8 = 800 runs,
+  ~128s each → **~28h ETA**, ~$264 (cap $300). First rows landing. Resumable; survives disconnect.
+  - Check:   `wc -l runs/sweep1/manifest.jsonl`  (target 800)  ·  `tail -f runs/sweep1.log`
+  - **When it finishes → LAST STEP OF PHASE 5:** `python difficulty.py runs/sweep1/manifest.jsonl`
+    (writes `runs/sweep1/split.json`). If it died, re-run the same `batch_predict.py` cmd (see 5g).
+  - **Early-stop OK (~50 fully-done bugs) for a PILOT Phase 6:** stop the sweep (`pkill -f 'batch_predict.*sweep1'`,
+    safe to kill mid-bug), then band only complete bugs: `python difficulty.py runs/sweep1/manifest.jsonl --min-samples 8`.
+    Resumable later to grow the set before a serious run. NOTE: early runs are slower/pricier than the
+    128s shakeout est (~200s, ~$0.40/run on bug 42470348), so the $300 cap may bind before 800 runs.
+- **harvest (Phase 2)** — tmux session `harvest`. At ~[478/6138], ~73 candidates/hr → **~3 days ETA**.
+  Independent of sweep1 (sweep locked its 100 bugs at launch). Re-run `python3 frame_clean.py` after.
+  - Check:   `wc -l data/manifest.jsonl`  ·  `tail -f harvest.log`  ·  `tmux ls`
+
+---
+
 ## 1. Goal (one sentence)
 
 Replicate the **`exec-rl`** crash-prediction RL system from the `system-intelligence`
@@ -112,25 +129,17 @@ data/manifest.jsonl  # one line per bug: status, poc_bytes, frame count
 
 - [x] **Phase 1 — Define task** (predict crash_type + ordered frames). Matches exec-rl reward shape.
 - [~] **Phase 2 — Build dataset & prove viable.** Build work DONE: viability confirmed (98.8%),
-  harvester built, validated 5/5 against the DB (skia, graphicsmagick, harfbuzz — all PASS:
-  crash_type/fix_commit match DB, top frame matches independent re-parse, PoC + vuln_commit
-  captured). Re-checked integrity on the full auto-harvested batch (not just the 5 manual
-  examples): as of this writing 485 folders on disk, all structurally clean (poc + ground_truth.json
-  + meta.json present, valid JSON) except 1 known `ok(no-poc)` case; harvest.log shows no real
-  errors. **Restarted 2026-07-29 as a single unified run** in tmux session `harvest` → `./data`:
-  `python3 harvest.py pull --limit 7000 --require-frames` (**`--sanitizer` filter dropped**), so one
-  run now covers the full ~6,067-usable pool across asan+msan+ubsan instead of capping at asan's
-  ~4,253. Resume verified at restart: 557 clean folders on disk, integrity check found 0 half-written
-  folders (no `ground_truth.json`-without-`meta.json` cases). `--limit 7000` > total 6,138 DB rows so
-  it's effectively uncapped; resume skips by `ground_truth.json` existence, so the 557 already-done
-  (asan) bugs are skipped and it harvests forward past them (confirmed manifest ticking up + docker
-  pulling the next `localId`s live). Rate-capped by Docker Hub's anonymous 100 pulls/hr (~30 bugs/hr
-  serial) — the remaining ~5,500 bugs are ~7–8 days of wall-clock; box must stay up.
-  **This supersedes the earlier two-run plan** (finish asan-only at 2000, then a second filter-removed
-  pull) — it's now one filter-free run. Also pulls msan/ubsan images now; fine for harvesting (we
-  parse *recorded* reports, not re-run) — the MSAN-flakiness caveat only bites if we regenerate crashes.
-  **Not a blocker for Phase 3** — the harvested bugs are plenty to build/test the sandbox against;
-  growing toward ~6,067 keeps happening passively in the background.
+  harvester built, validated 5/5 against the DB (crash_type/fix_commit match, top frame matches an
+  independent re-parse, PoC + vuln_commit captured); integrity re-checked on the full auto-harvested
+  batch (all folders structurally clean bar 1 known `ok(no-poc)` case). **Running as a single unified
+  pull** in tmux session `harvest` → `./data`: `python3 harvest.py pull --limit 7000 --require-frames`
+  (no `--sanitizer` filter, so it covers the full ~6,067-usable pool across asan+msan+ubsan;
+  `--limit 7000` > 6,138 DB rows = effectively uncapped). Resume skips by `ground_truth.json`
+  existence. Rate-capped by Docker Hub's anonymous 100 pulls/hr (~30 bugs/hr serial) → remaining
+  ~5,500 bugs ≈ 7–8 days wall-clock; box must stay up. msan/ubsan images are fine to harvest (we
+  parse *recorded* reports, not re-run; the MSAN-flakiness caveat only bites if we regenerate crashes).
+  **Not a blocker for Phase 3+** — harvested bugs are plenty to build/test against; the set grows
+  passively in the background.
 - [x] **Phase 3 — Sandboxed prediction env** (Docker: source + PoC + python, but NO build/run of
   target). **COMPLETE 2026-07-29** — all of 3a–3h done; end-to-end verified with a clean `Submitted`
   run of a real model (`vertex_ai/gemini-3.5-flash`) producing a validated, on-stack prediction inside
@@ -197,124 +206,49 @@ suspenders), and `verify_sandbox.py` still PASSes both checks after the change.
     answer. Tested both ways: accepts a well-formed prediction, rejects (with a specific error) a
     missing file and one missing required fields — confirmed against the incomplete file
     accidentally left over from 3d's test.
-  - [x] 3h. **RAN END-TO-END 2026-07-29 against a real model — blocker cleared.** Run task 3 (crash
-    prediction) for real through mini-swe-agent instead of a hand-simulated dry run.
-    `msagent_runner/` (new folder): dedicated venv (`.venv`, `mini-swe-agent` installed editable
-    from the vendored `sysintel-msagent` copy) + `run_prediction.py`. That script: fetches source
-    (3b), starts mini-swe-agent's `DockerEnvironment` pointed at `arvo-sandbox:base` (3c) using the
-    *same* `sandbox_contract.lockdown_flags()` + `.git`-mask mounts as the manual launcher (3a/3d) —
-    mini-swe-agent always starts its own container rather than attaching to one we launch, so this
-    reuses the contract's flags rather than re-declaring them (refactored `sandbox_contract.py` to
-    expose `lockdown_flags()` + public `EMPTY_MASK_DIR` for this). Prompt built from 3g's
-    `answer_schema.prompt_instructions()`, plus only `project`/`sanitizer` from `meta.json` (never
-    `crash_type`/`fix_commit` — those stay host-side, same leak class as the `.git` mask fixes).
-    After the agent finishes, `run_prediction.py` reads back `answer/prediction.json` and validates it
-    (3g). The LLM call happens on the *host* (litellm → provider); the container never needs network,
-    so `--network none` holds.
+  - [x] 3h. **RAN END-TO-END 2026-07-29 against a real model — COMPLETE.** `msagent_runner/`
+    (new folder): dedicated venv (`.venv`, `mini-swe-agent` installed editable from the vendored
+    `sysintel-msagent` copy) + `run_prediction.py`. That script fetches source (3b), starts
+    mini-swe-agent's `DockerEnvironment` on `arvo-sandbox:base` (3c) reusing
+    `sandbox_contract.lockdown_flags()` + `.git`-mask mounts (mini-swe-agent starts its own
+    container, so `sandbox_contract.py` was refactored to expose `lockdown_flags()` +
+    `EMPTY_MASK_DIR`), builds the prompt from `answer_schema.prompt_instructions()` + only
+    `project`/`sanitizer` from `meta.json` (never `crash_type`/`fix_commit`), then reads back and
+    validates `answer/prediction.json`. LLM call runs on the *host*; container stays `--network none`.
+    Verified clean end-to-end: skia bug 40096184 via `vertex_ai/gemini-3.5-flash`, step-limit 45,
+    `exit_status='Submitted'`, cost ~$0.34, freshly-written validated prediction landing on the real
+    crash frame (`SkGifImageReader.cpp` / `SkGIFLZWContext::doLZW`, type correct).
 
-    **First real run (2026-07-29), skia bug 40096184 via `vertex_ai/gemini-2.5-flash`:** sandbox
-    enforced exactly as designed (`--network none --read-only --cap-drop ALL --user <hostuid>`, `.git`
-    masked), agent wrote a **valid, validated** `prediction.json`. Accuracy vs. the hidden ground
-    truth was genuinely good: predicted `filename` = `src/codec/SkSwizzler.cpp` and `function` =
-    `SkSwizzler::swizzle` both land on the real crash stack (gt depth-1 frame); `line` (335 vs 237/
-    1233) and `crash_type` (heap-buffer-underflow vs -overflow) were off — note `reward.py` scores
-    only file/function/line, not crash type, so the type miss won't hurt the numeric reward.
+    **Fixes discovered during 3h, all now living in `run_prediction.py` code** (kept here only as a
+    changelog; details are in the source):
+    - *RepeatedFormatError* — Gemini emitted a prose "final answer" instead of the bash finish
+      sentinel → 3 consecutive format errors aborted the run. Fix: hardened `SYSTEM`/`INSTANCE`
+      templates (every response must be a bash tool call; finish only via sentinel) +
+      `max_consecutive_format_errors=8`.
+    - *Stale answer read-back* — `run()` never cleared a prior `prediction.json`, so a no-write run
+      reported the previous run's answer. Fix: `unlink(missing_ok=True)` at run start.
+    - *Convergence/budget nudge* — weaker models burned the whole budget without writing. Fix:
+      prompt tells the agent to write a best-effort prediction in its first steps and keep overwriting;
+      `OBSERVATION_TEMPLATE` appends a live `<budget>used N of LIMIT steps</budget>` line.
+    - *Output truncation* — a `cat` of a 492 KB file made one observation ~85% of the resent context
+      ($3.41 run). Fix: `truncate(8000)` in `OBSERVATION_TEMPLATE` + a grep/sed/head nudge (harfbuzz
+      42470093: $3.41 → $0.40).
+    - *Empty-choices IndexError* — Vertex/Gemini returned zero candidates (safety/recitation) →
+      `response.choices[0]` crashed the run. Fix: `SAFETY_SETTINGS` all → `BLOCK_NONE`, plus
+      `agent.run()` wrapped so a mid-run crash records `exit_status="crashed: …"` and still validates
+      any partial answer. (Later fully *handled*, not just contained — see 4f `SafeLitellmModel`.)
 
-    **Bug found + fixed during that run — `RepeatedFormatError`.** `LitellmModel` uses native
-    tool-calls; `parse_toolcall_actions` raises `FormatError` when a response contains **no** bash
-    tool call, and `DefaultAgent` aborts after `max_consecutive_format_errors` (default **3**) in a
-    row. Gemini, once it thought it was done, kept replying with a plain-text "final answer" instead
-    of calling the bash tool to run the finish sentinel → 3 format errors → `RepeatedFormatError`
-    (n_calls=22). The prediction survived only because the file-writing tool calls had already run;
-    the clean `Submitted` exit (env checks first stdout line == `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
-    with rc 0, see `environments/docker.py:_check_finished`) was never reached. Fix in
-    `run_prediction.py`: (a) hardened `SYSTEM_TEMPLATE` + `INSTANCE_TEMPLATE` — every response MUST be
-    a bash tool call, and the finish sentinel must be issued *as* a bash tool call, never as prose;
-    (b) raised `max_consecutive_format_errors=8` so a stray prose turn gets nudged back instead of
-    aborting (step_limit/cost_limit still bound runaway).
+    Robustness confirmed across diverse bugs (ffmpeg/gdal/imagemagick/harfbuzz) — all produced valid,
+    on-stack predictions post-fix. **Cost note (Phase-6 flag):** cost scales with source size + step
+    count (gdal $2.23/44 steps vs $0.34 baseline); `LimitsExceeded` at n_calls=45 is the by-design
+    "out of steps but early-write left a valid answer" path, not a failure. **Model decision: standard
+    on `vertex_ai/gemini-3.5-flash` for Phase 4+** (user call).
 
-    **Second bug found + fixed — stale answer read-back.** `run()` did `answer_dir.mkdir(exist_ok=True)`
-    but never cleared a prior run's `prediction.json`, so a run that wrote *no* answer would read back
-    and print the **previous** run's file as if it were its own (silently poisoning any Phase-4 data).
-    Caught it when a `gemini-3.5-flash` run that hit `LimitsExceeded` printed a prediction byte-identical
-    to an earlier `2.5-flash` run. Fix: `prediction_path.unlink(missing_ok=True)` at the start of
-    `run()`, so a no-write run now honestly reports `no valid prediction: ... agent never wrote an answer`.
+**Model-access: RESOLVED via Vertex AI (2026-07-29).** `vertex_ai/gemini-3.5-flash` through litellm
+with `VERTEXAI_LOCATION=global`, authenticated by the VM's built-in service-account ADC (see 4f for
+the confirmed auth details) — no interactive login, no exported key.
 
-    **Third fix — convergence for weaker models (budget nudge).** `gemini-3.5-flash` explores more and
-    burned its whole 30- then 45-step budget without ever writing an answer. Fixed without touching the
-    sandbox: (a) instance prompt now tells the agent to write an initial best-effort prediction within
-    its first few steps and keep overwriting it; (b) a custom `OBSERVATION_TEMPLATE` appends a live
-    `<budget>used {{n_model_calls}} of {{step_limit}} steps</budget>` line to every observation so the
-    model self-paces. (`step_limit`/`n_model_calls` come from `DefaultAgent.get_template_vars()`.)
-
-    **VERIFIED CLEAN (2026-07-29), skia bug 40096184 via `vertex_ai/gemini-3.5-flash`, step-limit 45:**
-    `exit_status='Submitted'` (clean sentinel finish, not `RepeatedFormatError`/`LimitsExceeded`),
-    n_calls=45, cost **$0.3426**. Prediction was **freshly written this run** (4 write-to-answer commands
-    — the early-write nudge worked) and validated. Accuracy vs. hidden ground truth: `filename` =
-    `third_party/gif/SkGifImageReader.cpp` ✓ and `function` = `SkGIFLZWContext::doLZW` ✓ both match the
-    real depth-4 crash frame, `crash_type` = heap-buffer-overflow ✓ (correct this time), `line` 213 vs
-    299 ✗. **3h is functionally complete** — locked sandbox + real model + clean submit + on-stack
-    prediction, all verified.
-
-    **Cost note (not a bug, but a Phase-6 scaling flag):** $0.34/run is expected for 45 flash steps, but
-    per-call cost grew ~2.7× across the run ($0.0028 → $0.0075) because mini-swe-agent resends the whole
-    growing conversation every step, and **no prompt caching is configured** (`set_cache_control=None`).
-    The 3.5 run also submitted on the *very last* allowed step (45/45) — a bigger source tree might not
-    finish at 45. At RL scale (~$0.34 × thousands of bugs × many rollouts) this balloons. Levers before
-    Phase 6: (1) enable `set_cache_control` on `LitellmModel` **(RETRACTED — see 4a: implicit
-    caching already active, flag would break Gemini)**; (2) reconsider `2.5-flash`, which reached
-    a comparable on-stack answer in ~22 steps for ~$0.08 (~4× cheaper) — worth a head-to-head re-run
-    *with these fixes* before committing a model; (3) tune step-limit/rollout count. **Model decision
-    (2026-07-29): standardizing on `vertex_ai/gemini-3.5-flash` for Phase 4+** (user call). It gave the
-    correct crash type and a clean `Submitted` finish; the ~4× cost gap vs 2.5-flash is deferred to the
-    Phase-6 caching/step-limit tuning above rather than resolved by model downgrade.
-
-    **Robustness check across diverse bugs (2026-07-29) — two more fixes landed in
-    `run_prediction.py`:**
-    - **Output truncation (fix):** harfbuzz (42470093) blew up to **$3.41** because the agent `cat`'d a
-      492 KB source file; with no truncation that single 492 K-char observation was ~85% of the resent
-      context and got re-sent every step, so cost exploded and it never refined past its placeholder
-      guess. Added `truncate(8000, True, …)` to `OBSERVATION_TEMPLATE` (verified: 500 KB input → ~8.2 K
-      chars rendered; small outputs untouched) plus a nudge to use grep/sed/head instead of whole-file
-      `cat`.
-    - **Empty-choices crash (fix):** imagemagick (42470067) died with `IndexError: list index out of
-      range` at `response.choices[0]` (litellm_model.py:129) — Vertex/Gemini returned **zero candidates**
-      (safety/recitation filter). litellm's retry wraps `_query`, not `_parse_actions`, so it doesn't
-      catch this; it crashed the whole run. Two-part fix, both in our code (vendored mini-swe-agent is
-      read-only): (1) `SAFETY_SETTINGS` = all Gemini harm categories → `BLOCK_NONE`, passed via
-      `model_kwargs={"safety_settings": …}` on `LitellmModel` (kills the common safety-block cause;
-      recitation blocks ignore it); (2) `agent.run()` wrapped in try/except → a mid-run crash records
-      `exit_status="crashed: …"`, prints a clean line, and still falls through to `validate_prediction()`
-      so any partial answer on disk survives and one bad bug can't abort a batch.
-    - **Results by bug (all four now validated post-fix):** ffmpeg (40096184) **PASS** — near-exact
-      (`decode_move` rsac.c:299, all fields match). gdal (42470702) **PASS** — clean `Submitted`, 44
-      calls, **$2.23**, real heap-buffer-overflow prediction (`ogrgmldatasource.cpp`
-      `FindAndParseTopElements` line 2781). imagemagick (42470067) **PASS post-fix** — ran 3× with **no
-      traceback** (IndexError fix holds); Submitted once at $0.95, `LimitsExceeded` twice at
-      $0.31/$0.44, each with a valid `use-of-uninitialized-value` prediction. harfbuzz (42470093)
-      **PASS post-fix** — the headline truncation win: **$0.40** vs the old **$3.41** (~8.5× cheaper),
-      real heap-buffer-overflow prediction (`hb-ot-layout-gsub-table.hh` `LigatureSet::sanitize` line
-      761) instead of the old placeholder.
-    - **On `LimitsExceeded` vs `Submitted`:** several re-runs ended `LimitsExceeded` at n_calls=45 —
-      this is **not** a failure. They hit the 45-*step* cap (costs $0.31–$0.44, nowhere near the cost
-      limit), and the early-write instruction guarantees a validated prediction was already on disk.
-      That graceful "out of steps but answer exists" path is by design; a clean `Submitted` is nicer but
-      not required to pass. Model non-determinism drives whether a given run wraps up early or runs to 45.
-    - **Cost flag reinforced:** gdal's **$2.23 / 44 steps** (vs the 40096184 baseline of $0.34) confirms
-      cost scales hard with source size + step count and with no prompt caching. The Phase-6 levers
-      (enable `set_cache_control`, tune step-limit, revisit 2.5-flash) matter more than the single-run
-      numbers suggested.
-
-**Model-access blocker: RESOLVED via Vertex AI (2026-07-29).** The mentor's "no plain key" path
-worked: calling `vertex_ai/gemini-2.5-flash` through litellm with `VERTEXAI_LOCATION=global` succeeded
-end-to-end (real billed run, cost ~$0.08). This supersedes the earlier open question about which auth
-route to use — Vertex is the chosen path. (Historical context, now moot: the VM's built-in service
-account ADC lacked the `cloud-platform` scope Vertex needs; whatever credential the user exported for
-this run — personal ADC login or a service-account key — carries the right scope. The exact
-credential/project used wasn't passed through chat.) **3h now fully closed** — the clean `Submitted`
-run above confirms it.
-
-**How to re-run the 3h smoke test (from the user's shell, with Vertex creds already exported):**
+**How to re-run the 3h smoke test (Vertex creds already exported):**
 ```bash
 cd ~/ARVO_intelligence && source .venv/bin/activate
 export VERTEXAI_LOCATION="global"
@@ -330,137 +264,183 @@ python msagent_runner/run_prediction.py \
   "build the agent loop" — it's running that loop over many bugs with bookkeeping, producing the
   (prediction, ground-truth) pairs Phase 5 scores. Does NOT wait on the Phase-2 harvest finishing:
   batches draw from whatever `data/` holds (~640 bugs and growing); only Phase 6 needs the full set.
-  - [x] **4a. Prompt caching — RESOLVED 2026-07-29, opposite of the planned fix.** Investigated
-    before touching code: trajectories from the Phase-3 runs show Gemini's **implicit caching is
-    already active** and litellm already bills cached tokens at a deep discount — measured across
-    all 5 saved trajectories: **78–86% of prompt tokens were cache hits**, i.e. runs already cost
-    ~3–4x less than uncached (gdal $2.23 actual vs ~$9.80 est. uncached; 40096184 $0.34 vs ~$1.03).
-    **Decision: do NOT enable `set_cache_control` — it would actively break Gemini runs.** That flag
-    is Anthropic-semantics (mark the last message = "cache prefix up to here"); mini-swe-agent marks
-    only the final message, and litellm's Vertex path (`separate_cached_messages` in
-    `llms/vertex_ai/context_caching/transformation.py`) would instead carve that lone message into a
-    per-step **explicit** cachedContents API call with a scrambled message split + min-token
-    requirements. This supersedes the Phase-6 "enable set_cache_control" lever from the 3h cost
-    notes; the remaining real cost levers are step-limit tuning and keeping observations small
-    (truncation, already landed). Deliverable: `cache_stats_line()` in `run_prediction.py` now
-    prints `cache: N/M prompt tokens cached (P%)` after every run (tested offline against the saved
-    40096184 trajectory: 83%) — if a future run shows ~0%, caching regressed and cost jumps 3–4x.
-  - [x] **4b. Per-bug result record — DONE 2026-07-29.** `run()` in `run_prediction.py` now writes
-    `data/<id>/result.json` after every run (alongside `trajectory.json`): bug_id, project,
-    sanitizer, model, step_limit, cost_limit, exit_status, n_calls, cost, cache stats (4a),
-    the validated prediction (or `null` + `invalid_reason`), started_at, duration. Stale
-    `result.json` is unlinked at run start (same hazard class as the 3h stale-prediction bug —
-    a run that dies early must not leave a prior run's record looking current). Also refactored
-    4a's `cache_stats_line` → `cache_stats()` returning a dict so the record and the printed line
-    share one computation. **Cost de-prioritized (user call, 2026-07-29):** cost/cache numbers are
-    recorded for visibility but are no longer a decision driver unless egregious. Verified offline
-    (no billed run) by monkeypatching `DockerEnvironment`/`DefaultAgent` over the real 40096184
-    folder + saved trajectory: happy path (Submitted + validated prediction → full record) and
-    crash path (IndexError mid-run → `exit_status="crashed: …"`, `prediction: null`,
-    `invalid_reason` set, record still written). Test artifacts cleaned up; real prediction.json
-    restored. Note for 4d: `run()`'s return value is now this same record dict — the batch runner
-    can consume it directly instead of re-reading result.json.
-  - [x] **4c. Bug-selection helper — DONE 2026-07-29.** `select_bugs.py` (repo root, stdlib-only
-    like the harvester). `runnable_bugs(data_dir, sanitizer=, project=, skip_done=)` for library use
-    (4d imports this); CLI prints ids/paths or a `--count` summary. Runnable = folder complete
-    (`poc` + valid `ground_truth.json` + valid `meta.json`) — requiring `meta.json` (written *last*
-    by harvest.py) makes it safe against the live harvest: half-written folders simply aren't listed
-    yet, and `ok(no-poc)` bugs are excluded by the poc check. `--skip-done` excludes bugs that
-    already have a 4b `result.json` (resume primitive for 4d). `--shuffle --seed N --limit K` gives
-    a reproducible diverse sample (for 4f). Tested live against the in-flight harvest: 651 runnable
-    across 73 projects (asan 557 / msan 85 / ubsan 9), filters + reproducible shuffle verified,
-    `--skip-done` verified with a planted result.json (651→650, bug absent from list).
-  - [x] **4d. Batch runner (serial first) — BUILT + harness-tested 2026-07-29.** `batch_predict.py`
-    (repo root): selects bugs via 4c's `runnable_bugs()`, loops 4b's `run()` over them, writes one
-    manifest row per bug to `runs/<name>/manifest.jsonl` (append+flush, harvester pattern). One bug's
-    failure never kills the batch: `run()`'s own mid-run guard covers agent crashes, and batch_predict
-    additionally wraps `run()` so a *setup-stage* failure (source fetch / docker start, which happens
-    before run()'s internal try) is recorded as a `batch-error` row and the loop continues. Resumable
-    by default via `skip_done` (skips bugs with a 4b `result.json`; `--redo` forces re-run). Running
-    cost total + `--max-cost` aborts cleanly *before* starting a bug that would exceed the budget.
-    Defaults standardized on `vertex_ai/gemini-3.5-flash`, step-limit 45, per-bug cost-limit 3 (matches
-    the 3h smoke command). **Verified without any billed call** by stubbing `run()`: error isolation
-    (a raised bug recorded + batch continued), manifest rows written for every bug, cost accounting,
-    and `--max-cost` abort all confirmed. **Not yet run against a real billed batch — that IS 4f.**
-    Run it with:
+  - [x] **4a. Prompt caching — RESOLVED 2026-07-29, opposite of the planned fix.** Gemini's
+    **implicit caching is already active** — 78–86% of prompt tokens were cache hits across the 5
+    saved trajectories (so runs already cost ~3–4× less than uncached). **Decision: do NOT enable
+    `set_cache_control`** — it's Anthropic-semantics and litellm's Vertex path would mis-carve
+    mini-swe-agent's single-marked message into a broken per-step explicit cachedContents call. The
+    real cost levers are step-limit tuning + small observations (truncation, landed). Deliverable:
+    `cache_stats()` in `run_prediction.py` prints `cache: N/M prompt tokens cached (P%)` per run — if
+    a future run shows ~0%, caching regressed and cost jumps 3–4×.
+  - [x] **4b. Per-bug result record — DONE 2026-07-29.** `run()` writes `data/<id>/result.json` after
+    every run: bug_id, project, sanitizer, model, step/cost limits, exit_status, n_calls, cost, cache
+    stats, the validated prediction (or `null` + `invalid_reason`), started_at, duration. Stale
+    `result.json` unlinked at run start. `run()`'s return value IS this record dict, so the batch
+    runner consumes it directly. Cost/cache recorded for visibility but **de-prioritized as a decision
+    driver** (user call). Verified offline (happy + crash paths).
+  - [x] **4c. Bug-selection helper — DONE 2026-07-29.** `select_bugs.py` (repo root, stdlib-only).
+    `runnable_bugs(data_dir, sanitizer=, project=, skip_done=, skip_unfetchable=)` for library use;
+    CLI prints ids/paths or a `--count` summary. Runnable = folder complete (`poc` + valid
+    `ground_truth.json` + valid `meta.json`; requiring `meta.json`, written last, makes it safe
+    against the live harvest). `--skip-done` excludes bugs with a 4b `result.json`; `--shuffle --seed
+    N --limit K` gives a reproducible diverse sample. Tested live (651 runnable across 73 projects).
+  - [x] **4d. Batch runner (serial) — BUILT + tested 2026-07-29.** `batch_predict.py` (repo root):
+    selects via `runnable_bugs()`, loops `run()`, writes one manifest row per bug to
+    `runs/<name>/manifest.jsonl` (append+flush). Failure isolation: `run()`'s own guard covers agent
+    crashes, and batch_predict additionally wraps `run()` so a *setup-stage* failure (fetch/docker) is
+    recorded as a `batch-error` row and the loop continues. Resumable via `skip_done` (`--redo`
+    forces); `--max-cost` aborts cleanly before a bug would exceed budget. Defaults:
+    `vertex_ai/gemini-3.5-flash`, step-limit 45, per-bug cost-limit 3. Verified without billing
+    (stubbed `run()`: error isolation, manifest rows, cost accounting, `--max-cost` abort). Run with:
     ```bash
     cd ~/ARVO_intelligence && source .venv/bin/activate
     export VERTEXAI_LOCATION=global
     python batch_predict.py --limit 25 --shuffle --name shakeout   # 4f shakeout
     ```
-  - [x] **4e. Source-tree disk hygiene — DONE 2026-07-29.** `cleanup_source(dest)` added to
-    `fetch_source.py` (the module that owns the src lifecycle) — `shutil.rmtree`, safe when absent,
-    returns whether it removed anything. `batch_predict.py --cleanup-src` calls it on `data/<id>/src`
-    after *every* bug, right after the manifest write, so it fires on the error path too (a setup
-    failure can leave a partial `src/`). Only the checkout is deleted — `poc`/`ground_truth.json`/
-    `meta.json`/`result.json` stay; re-fetch is the ~5s shallow fetch. Verified without billing:
-    unit-checked the helper (removes existing, returns False when absent) and ran the batch with a
-    stubbed `run()` that creates a src tree (and raises on one bug) — all three src dirs gone after,
-    manifest + counts intact.
-  - [x] **4f. Shakeout batch + review — DONE 2026-07-29. GATE: PASS.** 30-bug billed batch launched:
+  - [x] **4e. Source-tree disk hygiene — DONE 2026-07-29.** `cleanup_source(dest)` in `fetch_source.py`
+    (`shutil.rmtree`, safe when absent). `batch_predict.py --cleanup-src` calls it on `data/<id>/src`
+    after *every* bug (fires on the error path too). Only the checkout is deleted; poc/ground_truth/
+    meta/result stay, and re-fetch is the ~5s shallow fetch. Verified without billing.
+  - [x] **4f. Shakeout batch + review — DONE 2026-07-29. GATE: PASS.** 30-bug billed batch:
     `python batch_predict.py --limit 30 --shuffle --cleanup-src --name shakeout` (model
-    `vertex_ai/gemini-3.5-flash`, step-limit 45), manifest at `runs/shakeout/manifest.jsonl`, log
-    `shakeout.log`. **Vertex access is via the VM's built-in service-account ADC** (default SA,
-    project `triangulate-396717`, `cloud-platform` scope) after the earlier permission-change+reboot
-    — NO interactive login and NO exported key needed; just `export VERTEXAI_LOCATION=global`. This
-    corrects the 3h speculation about "personal ADC login or a service-account key" — it's the VM SA.
-    Verified before spending: `google.auth.default()` mints a token, and a 1-token litellm call to
-    `vertex_ai/gemini-3.5-flash` returned "ok".
-    **Partial results (24/30 done):** ~18/24 valid predictions, 6 clean `Submitted`; the many
-    `LimitsExceeded` are the by-design "out of steps but early-write left a valid answer" path (not
-    failures). **5 no-prediction bugs analyzed → 3 root causes:**
-      1. *Literal-placeholder* (aom 42470283, harfbuzz 42470395): agent wrote a placeholder
-         (`filename:"unknown"`, `line:0`) as its early write and never refined it → rejected by
-         `answer_schema.validate_prediction` (line must be ≥1).
-      2. *Never wrote at all* (binutils-gdb 42479120, radare2 42475544): burned all 45 steps
-         exploring, 0 writes to the answer file (confirmed in trajectory).
-      3. *Source-fetch fail* (graphicsmagick 42473496): repo on `foss.heptapod.net` (a Mercurial
-         host) — `git` can't fetch it. **77 bugs in the full DB, all graphicsmagick (1.25%).**
-         **RESOLVED as a skip 2026-07-29** — investigated recovery and it's genuinely impossible: the
-         recorded `vuln_commit` is an hg changeset that no longer resolves on the live heptapod repo
-         (history stripped) AND doesn't map to the GitHub mirror's git SHAs; the source only ever
-         existed in the discarded ARVO Docker image (harvest used `--source ref`). So Mercurial support
-         would NOT help (verified: `hg identify -r <commit>` → "unknown revision"). Fix: `select_bugs.py`
-         now excludes unfetchable hosts by default (`UNFETCHABLE_HOST_MARKERS=("heptapod",)`,
-         `skip_unfetchable=True`; `--include-unfetchable` to override), so these never get selected and
-         can't pollute a batch. Recovering them would require re-harvesting with `--source tar` from the
-         Docker image + teaching Phase-3 to mount a saved tree — not worth it for 1.25%.
-    **Fix applied for causes 1+2:** hardened `run_prediction.py` `INSTANCE_TEMPLATE` — the agent's
-    VERY FIRST tool call must write a *concrete* prediction (real file+function from the tree, nonzero
-    line; "unknown"/0 explicitly forbidden as "counts as no prediction"), before any exploration.
-    Prompt-only; sandbox and validator untouched. Applies to future batches, not the in-flight
-    shakeout (separate process, module already loaded). **A/B re-run of the 4 fixable bugs is queued**
-    as a background job that waits for the shakeout to exit, then re-runs binutils-gdb/radare2/aom/
-    harfbuzz through the new prompt (graphicsmagick excluded — its failure is the heptapod data issue,
-    not the prompt). Review/gate verdict pending both jobs finishing.
-    **Phase-5 note surfaced here:** reward wiring must treat a missing/invalid prediction as **score
-    0**, not an error — "no answer" is a legitimate bad RL outcome, not a pipeline crash.
-    **FINAL RESULTS (both jobs landed 2026-07-29):** shakeout 30/30 → **25/30 valid (83%)** on the old
-    prompt, 10 clean `Submitted`, 18 `LimitsExceeded`-but-valid, 2 crashed/errored. Cost **$9.89 total,
-    $0.33 mean / $0.29 median / $0.84 max per bug** — tame and predictable, no cost blocker. The A/B
-    re-run of the 4 prompt-fixable bugs through the hardened `INSTANCE_TEMPLATE` **converted all 4/4
-    to valid** (binutils-gdb + harfbuzz clean `Submitted`, radare2 + aom `LimitsExceeded`-but-valid;
-    every one wrote a concrete file/function/nonzero-line, no more `unknown`/0). So **effective
-    valid-rate = 29/30**, with the sole remaining miss being graphicsmagick's Heptapod fetch (the
-    deferred 21-bug data-source issue, not a pipeline defect). **GATE VERDICT: PASS** — healthy
-    completion, understood+fixed failure modes, predictable cost. 4g (parallelism) skipped: serial
-    throughput is fine. NOTE: accuracy vs. ground truth is NOT scored yet — that is Phase 5; 4f only
-    gates *pipeline health*, not prediction quality.
-    **Both post-4f loose ends RESOLVED 2026-07-29:** (1) Heptapod/graphicsmagick — skip filter in
-    `select_bugs.py` (see 4f cause #3 above). (2) Vertex empty-candidates `IndexError` — this used to
-    only be *contained* (SAFETY_SETTINGS + a try/except that recorded `crashed` and stopped the run).
-    Now properly *handled*: `run_prediction.py` has a `SafeLitellmModel(LitellmModel)` subclass whose
-    `query()` retries an empty (zero-candidate) response a few times, then raises `FormatError` instead
-    of `IndexError` — `DefaultAgent` appends a nudge and the run *continues* (bounded by
-    `max_consecutive_format_errors`) rather than crashing. Retries don't burn step budget (`n_calls`
-    increments per step, not per API call). Verified: simulated empty response → retry → `FormatError`,
-    no `IndexError` leak. The old try/except stays as a last-resort backstop.
+    `vertex_ai/gemini-3.5-flash`, step-limit 45), manifest `runs/shakeout/manifest.jsonl`, log
+    `shakeout.log`. **Vertex auth = the VM's built-in service-account ADC** (default SA, project
+    `triangulate-396717`, `cloud-platform` scope after the earlier permission-change+reboot) — no
+    interactive login, no exported key; just `export VERTEXAI_LOCATION=global`. Verified before
+    spending (`google.auth.default()` mints a token, 1-token litellm call returned "ok").
+    **Results:** 30/30 → **25/30 valid (83%)** on the old prompt (10 clean `Submitted`, 18
+    `LimitsExceeded`-but-valid, 2 crashed/errored). Cost **$9.89 total, $0.33 mean / $0.29 median /
+    $0.84 max per bug** — predictable, no cost blocker.
+    **5 no-prediction bugs → 3 root causes, all addressed:**
+      1. *Literal-placeholder* (aom, harfbuzz): wrote `filename:"unknown"`/`line:0` and never refined
+         → rejected by validator (line must be ≥1).
+      2. *Never wrote at all* (binutils-gdb, radare2): burned all 45 steps exploring, 0 answer writes.
+      3. *Source-fetch fail* (graphicsmagick): repo on `foss.heptapod.net` (Mercurial) — `git` can't
+         fetch. 77 bugs in DB, all graphicsmagick (1.25%). Genuinely unrecoverable (hg changeset
+         stripped from live repo, doesn't map to the GitHub mirror's git SHAs, source only existed in
+         the discarded Docker image). **Skipped, not recovered:** `select_bugs.py` excludes unfetchable
+         hosts by default (`UNFETCHABLE_HOST_MARKERS=("heptapod",)`; `--include-unfetchable` overrides).
+    **Fix for causes 1+2:** hardened `run_prediction.py` `INSTANCE_TEMPLATE` — the agent's VERY FIRST
+    tool call must write a *concrete* prediction (real file+function, nonzero line; "unknown"/0
+    forbidden). Prompt-only. An A/B re-run of the 4 prompt-fixable bugs **converted all 4/4 to valid**,
+    so **effective valid-rate = 29/30**, the sole miss being graphicsmagick's Heptapod fetch (a data
+    issue, not a pipeline defect). **GATE VERDICT: PASS** — healthy completion, understood+fixed
+    failure modes, predictable cost. NOTE: accuracy vs. ground truth is NOT scored yet — that's Phase 5;
+    4f gates *pipeline health* only.
+    **Phase-5 note:** reward wiring must treat a missing/invalid prediction as a **legitimate bad RL
+    outcome, not a pipeline error** — scored `-1` per exec-rl's `INVALID_PREDICTION_REWARD` (valid-but-
+    wrong = 0). See Phase 5 for the full policy.
+    **Both post-4f loose ends RESOLVED:** (1) Heptapod — skip filter above. (2) Vertex empty-candidates
+    `IndexError` — now *handled* (not just contained): `SafeLitellmModel(LitellmModel)` in
+    `run_prediction.py` retries an empty (zero-candidate) response a few times, then raises
+    `FormatError` instead of `IndexError`, so `DefaultAgent` nudges and the run *continues* (retries
+    don't burn step budget; `n_calls` is per-step). The old SAFETY_SETTINGS + try/except stays as a
+    last-resort backstop.
   - [x] **4g. (Optional) modest parallelism — SKIPPED 2026-07-29.** Serial throughput (~$0.33 and a
     couple min/bug) is fine and 4f passed on it; Docker + Vertex quotas get riskier concurrent, so not
     worth the added risk. Revisit only if the Phase-5 k-sample difficulty sweep over the full set
     proves too slow serially.
-- [ ] **Phase 5 — Reward wiring** (reuse `exec-rl/reward.py`; remap crash taxonomy to sanitizer types;
-  canonicalize frame filenames — see Known issues).
+- [ ] **Phase 5 — Reward wiring.** Mirror exec-rl's reward-side pipeline
+  (`exec-rl/exec_rl/{reward.py, ground_truth_process.py, rl/rewards.py, prediction_process.py,
+  reward_v2/}`). exec-rl's scoring convention we adopt: **invalid/missing prediction → `-1`**
+  (`INVALID_PREDICTION_REWARD`), **valid-but-wrong → `0`**, otherwise the score in `[0, 1]`. The
+  same scoring fn must serve both Phase-6 training and Phase-7 eval so the two can't diverge
+  (exec-rl's `score_context_output`/`compute_score` share one path). Substeps:
+  - [x] **5a. Port the core reward — DONE 2026-07-29.** `reward.py` (repo root, stdlib-only, no
+    pydantic). `score_crash_prediction(frames, function=, filename=, line=)` / `score_crash_frame` —
+    exec-rl's math verbatim: `frameScore = 0.50·file + 0.30·func + 0.20·line`, function gated on
+    `fileScore==1.0`, line `exp(-|Δ|/4)` gated on function, depth-decayed by `decay_base**depth` and
+    normalized by Σ weights; crash *type* not scored. **Two forced ARVO deviations:** (1) `_normalize_path`
+    is light/idempotent (resolve `.`/`..`, strip slashes) — the heavy `/src/<project>/` build-root strip
+    lives in 5b, NOT here, so a clean `src/codec/x.cpp` doesn't collapse to `x.cpp` (that would erase
+    directory discrimination = a reward-hacking hole); (2) `_normalize_function` drops the C++ arg
+    signature `(...)` since ARVO symbols carry it but the agent predicts the bare name. Verified:
+    single-frame exact = **1.0**, line-off-by-4 = 0.874, wrong file = 0.0, monotonic ordering. NOTE:
+    for a *multi-frame* GT a perfect top-frame hit ceilings ~0.67–0.69 (single site is a depth-weighted
+    average over all frames) — exec-rl's exact behavior, matters for reading 5e numbers.
+  - [x] **5b. Ground-truth frame cleaning — DONE 2026-07-29.** `frame_clean.py` (repo root). Does
+    deterministically (regex) what exec-rl's `ground_truth_process.py` does via an LLM: prune the
+    leading sanitizer/reporting frames (`__asan_*`/`__interceptor_*`/... funcs, or files under
+    `compiler-rt/`/`sanitizer_common`), re-index `depth` from 0, and canonicalize `filename` to
+    repo-relative via `canonical_repo_path` (resolve `..`, drop the ARVO `/src/<project>/` build root:
+    `skia/out/Fuzz/../../src/codec/SkSwizzler.cpp` → `src/codec/SkSwizzler.cpp`). **Non-destructive:**
+    keeps original `frames`+`raw_file`, ADDS `frames_clean` + `excluded_frames` (mirrors exec-rl's
+    `frames`/`excludedFrames` split). Ran over all data/: **153/728 (21%) had leading infra frames
+    pruned**. All-infra stacks keep original frames (flagged) rather than emptying the GT. Re-runnable
+    as harvest grows (idempotent). End-to-end verified: ffmpeg 42470347 `__asan_memcpy` top frame
+    pruned → clean top = `decode_move libavcodec/rasc.c:299`, a correct repo-relative prediction scores
+    0.687 vs 0.0 for wrong file. **Re-run `python3 frame_clean.py` once the Phase-2 harvest finishes**
+    so late-arriving bugs get cleaned too.
+  - [x] **5c. Prediction parse + validity policy — DONE 2026-07-29** (in `score.py` with 5d).
+    Refactored `answer_schema.py` to split out `validate_prediction_data(dict)` (the field gate:
+    required fields, `line` a positive int — bool rejected, non-empty filename/function) so the
+    on-disk `prediction.json` path (`validate_prediction`) and the stored-dict path share ONE gate
+    and can't drift. `score.parse_prediction(pred)` accepts the result.json dict / a JSON string /
+    None → returns the validated dict or `None`. Policy verified: missing/empty/non-JSON/missing-
+    fields/`line=0`/`line=True` all → **−1**; valid-but-wrong → **0**; valid+right → (0,1].
+  - [x] **5d. Single scoring entrypoint — DONE 2026-07-29.** `score.py` (repo root), our analog of
+    `rl/rewards.py`. `score_prediction(frames, prediction, reward_name) -> float` behind a
+    `REWARD_REGISTRY` (`crash_site` now; room for `crash_stack` v2 = 5f): −1 invalid, 0 on a scoring
+    error inside a valid pred, else reward in [0,1]. `score_result(bug_dir)` reads a bug's
+    `ground_truth.json` (prefers 5b `frames_clean`, falls back to raw `frames`) + `result.json`
+    prediction. `compute_score(...)` is the VeRL-shaped Phase-6 shim reading the prediction from
+    `extra_info` — routes through the *same* `score_prediction`, so training and eval can't diverge
+    (exec-rl's key property). CLI scores one bug / `--data DIR` / `--manifest FILE` (for 5e) and
+    prints the −1/0/positive distribution. Smoke-tested on the 29 `data/*/result.json`: machinery
+    works end-to-end (mean reward 0.240; proper analysis is 5e).
+  - [x] **5e. Score the 4f shakeout offline — DONE 2026-07-29. First real quality numbers.**
+    `python3 score.py --manifest runs/shakeout/manifest.jsonl`. Two readings:
+      * **As-run (frozen pre-prompt-fix manifest, n=30):** mean reward **0.042** — dragged down by
+        5×−1 (the exact no-prediction bugs from 4f). 17% invalid / 20% zero / 63% positive.
+      * **Honest post-fix baseline (n=29, graphicsmagick excluded as unfetchable; the 4 fixable bugs'
+        hardened-prompt predictions swapped in):** mean reward **0.240**, **0% invalid**, 28% zero,
+        72% positive (positive mean **0.331**, max **0.624**). By sanitizer: asan +0.255 (n=25),
+        msan +0.144 (n=4, too small to conclude). **This 0.240 is the baseline RL must move.**
+    **Reward validated, not just measured:** audited the valid-but-0 bugs — every one is a *genuine*
+    wrong-file miss (imagemagick predicted `MagickCore/profile.c`, crash is in LibRaw
+    `read_utils.cpp`; libxslt predicted `transform.c`, crash is `xpath.c`), NOT a
+    canonicalization/reward artifact. So the 0s are real, the signal is trustworthy.
+    **Baseline health:** spread across all three buckets, positive mean ~half the ~0.67 multi-frame
+    ceiling → headroom to improve, not saturated, not floored. Good RL starting point. **Caveat:**
+    this is k=1 (one sample/bug) — it can't distinguish a *learnable* bug (sometimes hits) from a
+    uniformly hard/easy one. Within-bug variance is what drives the gradient; measuring it is 5g.
+  - [ ] **5f. (Optional) full-stack reward v2** — only if 5e shows single-site reward is too flat/sparse
+    to give RL a gradient. Mirror `reward_v2/` (predict the call chain, alignment + IDF + segment
+    bonus). Defer by default; single-site is the exec-rl v1 default.
+  - [~] **5g. Difficulty banding (pass@k) — INFRA BUILT 2026-07-29, sweep PENDING user go-ahead.**
+    Mirrors exec-rl's `prediction_process.py` (pass@k: run each bug `n_runs` times, `n_runs=32` there).
+    Purpose: 5e's k=1 number can't tell a *learnable* bug from a uniformly hard/easy one. RL (GRPO-style)
+    gets its gradient from **reward variance across the k rollouts of the same bug** — a bug whose k
+    samples all score the same gives zero advantage and teaches nothing. So we measure per-bug reward
+    **mean AND std** over k samples and keep the band that has a gradient.
+    - **Build — DONE:** `batch_predict.py --k N` writes k manifest rows per bug, each tagged with a
+      `sample` index; resume is now **sample-level** (counts existing manifest rows per bug_id, runs
+      only the remaining k−done; `src` cleanup waits for a bug's last sample). k=1 keeps the old
+      result.json skip for backward compat. New `difficulty.py` reads the manifest, scores every row
+      via `score.score_prediction` (5d — same path as train/eval), and emits per-bug
+      `{mean, std, min, max, n, n_valid}` (`difficulty.json`) + a bug-level train/test split
+      (`split.json`). Smoke-tested: on the k=1 shakeout manifest all 30 bugs correctly drop (std=0,
+      19 saturated / 11 dead), and band+split verified on synthetic variance.
+    - **Band rule (GRPO-correct):** keep bugs with **reward std > --min-std** (default 0 → there IS a
+      within-group gradient); drop *saturated* (no variance, some reward) and *dead* (no variance,
+      zero/neg) bugs. The user's earlier "~30–40% pass rate" intuition = the same idea; std>0 is the
+      precise version and doesn't need an arbitrary pass threshold.
+    - **Train/test split:** `--test-frac` (default 0.2), split BUGS (not samples) with a fixed `--seed`,
+      held out *before* training — guards against regression-to-mean / p-hacking in Phase-7 numbers.
+    - **DECISION 1 — k = 8** (confirmed 2026-07-29): enough to estimate std, ~$2.6/bug; revisit if noisy.
+    - **DECISION 2 — scope = ~100 bugs** (confirmed 2026-07-29): first sweep ~100 × k=8 ≈ 800 runs ≈
+      ~$265, shuffled/seeded, to size the band before committing to the full set.
+    - **LAUNCHED 2026-07-29 10:37** in tmux session `sweep1` (PID was 368826):
+      `python batch_predict.py --k 8 --limit 100 --shuffle --seed 0 --cleanup-src --max-cost 300 --name sweep1 2>&1 | tee runs/sweep1.log`
+      Per-run wall time ~128s (shakeout), so 800 runs ≈ **~28h serial**. Resumable (sample-level): if it
+      dies, re-run the SAME command and it continues. `--max-cost 300` aborts before overspend (~$264 expected).
+    - **WHEN THE SWEEP FINISHES → this is the last step of Phase 5:**
+      `python difficulty.py runs/sweep1/manifest.jsonl` → writes `runs/sweep1/difficulty.json` +
+      `runs/sweep1/split.json` (the banded train/test split Phase 6 consumes). Then eyeball the band
+      size: if <~30 bugs have std>0, widen the sweep (more bugs or higher k) before Phase 6. Peek
+      anytime mid-run with `--dry-run` (read-only, no files written).
+    - Bridges into Phase 6 (produces its train set); lives in Phase 5 because it's reward-driven
+      measurement.
 - [ ] **Phase 6 — RL training** (verl trainer; the heavy GPU/infra part).
 - [ ] **Phase 7 — Eval** (held-out test set; pre/post-training comparison).
 

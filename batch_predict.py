@@ -10,10 +10,15 @@ Phase 5 will score.
 Design points (match the harvester's operational contract):
   * One bug's failure never kills the batch -- run() is wrapped, and a setup
     error (fetch/docker) is recorded as a failed manifest row, then we move on.
-  * Resumable -- by default skips bugs that already have a result.json (4b), so
-    re-running continues where it left off. --redo disables that.
+  * Resumable -- for k=1, skips bugs that already have a result.json (4b). For
+    k>1 (pass@k sweeps, 5g) resume is sample-level: we count existing manifest
+    rows per bug_id and run only the remaining k-done samples. --redo disables
+    both.
+  * pass@k -- --k N runs each bug N times (5g difficulty banding needs reward
+    VARIANCE across rollouts of the SAME bug). Each manifest row carries a
+    `sample` index; src cleanup waits for a bug's last sample.
   * Batch manifest at runs/<name>/manifest.jsonl (append + flush, like
-    harvest.py) -- one JSON line per bug, live-tailable with `wc -l`.
+    harvest.py) -- one JSON line per (bug, sample), live-tailable with `wc -l`.
   * Running cost total with --max-cost: abort cleanly before starting a bug that
     would push the batch over budget (Vertex calls are billed).
 
@@ -52,6 +57,7 @@ def main():
     ap.add_argument("--shuffle", action="store_true", help="shuffle before --limit (diverse sample)")
     ap.add_argument("--seed", type=int, default=0, help="shuffle seed (default 0, reproducible)")
     ap.add_argument("--redo", action="store_true", help="re-run bugs that already have result.json (default: skip them)")
+    ap.add_argument("--k", type=int, default=1, help="samples per bug for pass@k / difficulty banding (default 1)")
     # --- per-bug agent knobs (forwarded to run_prediction.run) ---
     ap.add_argument("--model", default="vertex_ai/gemini-3.5-flash", help="litellm model id (Phase-4 standard)")
     ap.add_argument("--step-limit", type=int, default=45)
@@ -64,8 +70,13 @@ def main():
 
     if not a.data.is_dir():
         raise SystemExit(f"{a.data}: not a directory")
+    if a.k < 1:
+        raise SystemExit(f"--k must be >= 1, got {a.k}")
 
-    bugs = runnable_bugs(a.data, sanitizer=a.sanitizer, project=a.project, skip_done=not a.redo)
+    # For k=1 keep the result.json skip; for k>1 resume is sample-level (below),
+    # so select ALL matching bugs and let done_counts decide how many to run.
+    skip_done = not a.redo and a.k == 1
+    bugs = runnable_bugs(a.data, sanitizer=a.sanitizer, project=a.project, skip_done=skip_done)
     if a.shuffle:
         import random
 
@@ -80,59 +91,87 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
     manifest = run_dir / "manifest.jsonl"
 
-    print(f"batch '{run_name}': {len(bugs)} bugs -> {manifest}")
+    # Sample-level resume: count existing manifest rows per bug_id so a resumed
+    # sweep runs only the remaining k-done samples. --redo ignores prior rows.
+    done_counts: dict[str, int] = {}
+    if manifest.exists() and not a.redo:
+        for line in manifest.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                bid = str(json.loads(line).get("bug_id"))
+            except json.JSONDecodeError:
+                continue
+            done_counts[bid] = done_counts.get(bid, 0) + 1
+
+    print(f"batch '{run_name}': {len(bugs)} bugs x k={a.k} -> {manifest}")
     print(f"model={a.model} step_limit={a.step_limit} cost_limit=${a.cost_limit} max_cost={a.max_cost}\n", flush=True)
 
     total_cost = 0.0
     counts = {"submitted": 0, "predicted": 0, "no_prediction": 0, "errored": 0}
     started = time.time()
+    stop = False
 
     with open(manifest, "a") as mf:  # append: keep history across resumed batches
         for i, bug in enumerate(bugs, 1):
-            if a.max_cost is not None and total_cost >= a.max_cost:
-                print(f"\nstopping: running cost ${total_cost:.2f} >= --max-cost ${a.max_cost:.2f} "
-                      f"({i - 1}/{len(bugs)} bugs done)", flush=True)
+            if stop:
                 break
+            already = 0 if a.redo else done_counts.get(str(bug["id"]), 0)
+            if already >= a.k:
+                print(f"[{i}/{len(bugs)}] {bug['id']} has {already}/{a.k} samples, skipping", flush=True)
+                continue
 
-            print(f"[{i}/{len(bugs)}] {bug['id']} ({bug['project']}, {bug['sanitizer']})", flush=True)
-            try:
-                result = run(bug["path"], model_name=a.model, step_limit=a.step_limit, cost_limit=a.cost_limit)
-            except Exception as e:
-                # setup-stage failure (source fetch, docker start) -- run()'s own
-                # mid-run guard only covers the agent loop. Record and continue.
-                result = {
-                    "bug_id": bug["id"],
-                    "project": bug["project"],
-                    "sanitizer": bug["sanitizer"],
-                    "model": a.model,
-                    "exit_status": f"batch-error: {type(e).__name__}: {e}",
-                    "cost": 0.0,
-                    "prediction": None,
-                    "invalid_reason": f"{type(e).__name__}: {e}",
-                }
-                print(f"    ERROR (recorded, batch continues): {type(e).__name__}: {e}", flush=True)
+            print(f"[{i}/{len(bugs)}] {bug['id']} ({bug['project']}, {bug['sanitizer']}) "
+                  f"samples {already}..{a.k - 1}", flush=True)
 
-            mf.write(json.dumps(result) + "\n")
-            mf.flush()  # so `wc -l manifest.jsonl` tracks live progress
+            for s in range(already, a.k):
+                if a.max_cost is not None and total_cost >= a.max_cost:
+                    print(f"\nstopping: running cost ${total_cost:.2f} >= --max-cost ${a.max_cost:.2f} "
+                          f"({i - 1}/{len(bugs)} bugs done)", flush=True)
+                    stop = True
+                    break
 
+                try:
+                    result = run(bug["path"], model_name=a.model, step_limit=a.step_limit, cost_limit=a.cost_limit)
+                except Exception as e:
+                    # setup-stage failure (source fetch, docker start) -- run()'s own
+                    # mid-run guard only covers the agent loop. Record and continue.
+                    result = {
+                        "bug_id": bug["id"],
+                        "project": bug["project"],
+                        "sanitizer": bug["sanitizer"],
+                        "model": a.model,
+                        "exit_status": f"batch-error: {type(e).__name__}: {e}",
+                        "cost": 0.0,
+                        "prediction": None,
+                        "invalid_reason": f"{type(e).__name__}: {e}",
+                    }
+                    print(f"    ERROR (recorded, batch continues): {type(e).__name__}: {e}", flush=True)
+
+                result["sample"] = s
+                mf.write(json.dumps(result) + "\n")
+                mf.flush()  # so `wc -l manifest.jsonl` tracks live progress
+
+                total_cost += result.get("cost") or 0.0
+                status = result.get("exit_status") or ""
+                if status.startswith("batch-error") or status.startswith("crashed"):
+                    counts["errored"] += 1
+                if status == "Submitted":
+                    counts["submitted"] += 1
+                if result.get("prediction") is not None:
+                    counts["predicted"] += 1
+                else:
+                    counts["no_prediction"] += 1
+
+                mins = (time.time() - started) / 60
+                print(f"    sample {s}: cost ${total_cost:.2f} | {counts} | elapsed {mins:.1f}m", flush=True)
+
+            # cleanup only after a bug's last sample (all k rollouts reuse one src tree)
             if a.cleanup_src and cleanup_source(bug["path"] / "src"):
                 print("    cleaned up src/", flush=True)
+            print(flush=True)
 
-            total_cost += result.get("cost") or 0.0
-            status = result.get("exit_status") or ""
-            if status.startswith("batch-error") or status.startswith("crashed"):
-                counts["errored"] += 1
-            if status == "Submitted":
-                counts["submitted"] += 1
-            if result.get("prediction") is not None:
-                counts["predicted"] += 1
-            else:
-                counts["no_prediction"] += 1
-
-            mins = (time.time() - started) / 60
-            print(f"    running cost ${total_cost:.2f} | {counts} | elapsed {mins:.1f}m\n", flush=True)
-
-    print(f"\nbatch '{run_name}' done. bugs run: {counts['predicted'] + counts['no_prediction']}")
+    print(f"\nbatch '{run_name}' done. samples run: {counts['predicted'] + counts['no_prediction']}")
     print(f"  valid predictions: {counts['predicted']}   no prediction: {counts['no_prediction']}   errored: {counts['errored']}")
     print(f"  clean Submitted: {counts['submitted']}")
     print(f"  total cost: ${total_cost:.2f}")
