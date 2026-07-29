@@ -3,3 +3,5 @@ __pycache__/
 data/
 data_*/
 .empty_mount/
+.venv/
+.claude/

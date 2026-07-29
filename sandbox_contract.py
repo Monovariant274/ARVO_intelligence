@@ -30,7 +30,21 @@ BASE_IMAGE = "arvo-sandbox:base"
 # commit in that history IS the fix, often with a message that gives the crash
 # away for free. Mounting an empty dir on top of .git hides all of it from the
 # agent regardless of whether the checkout was shallow or a full clone.
-_EMPTY_MASK_DIR = Path(__file__).parent / ".empty_mount"
+EMPTY_MASK_DIR = Path(__file__).parent / ".empty_mount"
+
+
+def lockdown_flags() -> list[str]:
+    """The security flags any docker invocation of BASE_IMAGE must carry, shared
+    between docker_run_args() (CLI/manual use) and other launchers (e.g. the
+    mini-swe-agent runner, which builds its own docker command)."""
+    return [
+        "--network", "none",              # can't apt-get a compiler, can't phone home
+        "--read-only",                    # container's own filesystem is immutable
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--user", f"{os.getuid()}:{os.getgid()}",  # write access to answer_dir must match the
+                                                     # host uid that owns it, not a fixed image uid
+    ]
 
 
 def docker_run_args(src_dir: Path, poc_file: Path, answer_dir: Path,
@@ -41,19 +55,14 @@ def docker_run_args(src_dir: Path, poc_file: Path, answer_dir: Path,
     """
     args = [
         "run", "--rm", "-it",
-        "--network", "none",              # can't apt-get a compiler, can't phone home
-        "--read-only",                    # container's own filesystem is immutable
-        "--cap-drop", "ALL",
-        "--security-opt", "no-new-privileges",
-        "--user", f"{os.getuid()}:{os.getgid()}",  # write access to answer_dir must match the
-                                                     # host uid that owns it, not a fixed image uid
+        *lockdown_flags(),
         "-v", f"{src_dir.resolve()}:{SRC_MOUNT}:ro",
         "-v", f"{poc_file.resolve()}:{POC_MOUNT}:ro",
         "-v", f"{answer_dir.resolve()}:{ANSWER_DIR}:rw",
     ]
     if (src_dir / ".git").exists():
-        _EMPTY_MASK_DIR.mkdir(exist_ok=True)
-        args += ["-v", f"{_EMPTY_MASK_DIR.resolve()}:{SRC_MOUNT}/.git:ro"]
+        EMPTY_MASK_DIR.mkdir(exist_ok=True)
+        args += ["-v", f"{EMPTY_MASK_DIR.resolve()}:{SRC_MOUNT}/.git:ro"]
     if container_name:
         args += ["--name", container_name]
     args.append(BASE_IMAGE)

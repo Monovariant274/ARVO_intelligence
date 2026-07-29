@@ -117,17 +117,24 @@ data/manifest.jsonl  # one line per bug: status, poc_bytes, frame count
   captured). Re-checked integrity on the full auto-harvested batch (not just the 5 manual
   examples): as of this writing 485 folders on disk, all structurally clean (poc + ground_truth.json
   + meta.json present, valid JSON) except 1 known `ok(no-poc)` case; harvest.log shows no real
-  errors. **Still running** in tmux session `harvest` → `./data` (asan-only, `--limit 2000`).
-  Rate-capped by Docker Hub's anonymous 100 pulls/hr (~30 bugs/hr serial) — 2000 will take days,
-  not one night; ~250-300/night was the original (too optimistic) estimate.
-  **Decision:** let this run finish untouched (no mid-run edits). Once it hits 2000, kick off a
-  **second pull with `--sanitizer` filter removed** (asan-only caps at ~4,253 usable; dropping the
-  filter is required to reach the full ~6,067 usable pool across asan+msan+ubsan). That second run
-  is also resumable/idempotent, so it can just be re-run with a bigger `--limit` later if needed.
-  **Not a blocker for Phase 3** — 485 harvested bugs is plenty to build and test the sandbox against;
-  growing to 2000/6067 keeps happening passively in the background.
-- [ ] **Phase 3 — Sandboxed prediction env** (Docker: source + PoC + python, but NO build/run of
-  target). **← Starting now.** Reuse note: exec-rl's Docker/agent-loop *plumbing* (via
+  errors. **Restarted 2026-07-29 as a single unified run** in tmux session `harvest` → `./data`:
+  `python3 harvest.py pull --limit 7000 --require-frames` (**`--sanitizer` filter dropped**), so one
+  run now covers the full ~6,067-usable pool across asan+msan+ubsan instead of capping at asan's
+  ~4,253. Resume verified at restart: 557 clean folders on disk, integrity check found 0 half-written
+  folders (no `ground_truth.json`-without-`meta.json` cases). `--limit 7000` > total 6,138 DB rows so
+  it's effectively uncapped; resume skips by `ground_truth.json` existence, so the 557 already-done
+  (asan) bugs are skipped and it harvests forward past them (confirmed manifest ticking up + docker
+  pulling the next `localId`s live). Rate-capped by Docker Hub's anonymous 100 pulls/hr (~30 bugs/hr
+  serial) — the remaining ~5,500 bugs are ~7–8 days of wall-clock; box must stay up.
+  **This supersedes the earlier two-run plan** (finish asan-only at 2000, then a second filter-removed
+  pull) — it's now one filter-free run. Also pulls msan/ubsan images now; fine for harvesting (we
+  parse *recorded* reports, not re-run) — the MSAN-flakiness caveat only bites if we regenerate crashes.
+  **Not a blocker for Phase 3** — the harvested bugs are plenty to build/test the sandbox against;
+  growing toward ~6,067 keeps happening passively in the background.
+- [x] **Phase 3 — Sandboxed prediction env** (Docker: source + PoC + python, but NO build/run of
+  target). **COMPLETE 2026-07-29** — all of 3a–3h done; end-to-end verified with a clean `Submitted`
+  run of a real model (`vertex_ai/gemini-3.5-flash`) producing a validated, on-stack prediction inside
+  the locked sandbox. Reuse note: exec-rl's Docker/agent-loop *plumbing* (via
   `mini-swe-agent`'s `get_environment(..., default_type="docker")` in `rl/agent.py`) is generic and
   reusable. The container *contents* are not — exec-rl's `kenv`/`kArena` image is kernel-specific
   (QEMU, kernel build tooling) and was never designed to hide build/run capability, since that
@@ -190,8 +197,96 @@ suspenders), and `verify_sandbox.py` still PASSes both checks after the change.
     answer. Tested both ways: accepts a well-formed prediction, rejects (with a specific error) a
     missing file and one missing required fields — confirmed against the incomplete file
     accidentally left over from 3d's test.
-  - [ ] 3h. Superseded by the mentor's plan: run task 3 (crash prediction) for real through
-    mini-swe-agent with an actual model instead of a hand-simulated dry run.
+  - [x] 3h. **RAN END-TO-END 2026-07-29 against a real model — blocker cleared.** Run task 3 (crash
+    prediction) for real through mini-swe-agent instead of a hand-simulated dry run.
+    `msagent_runner/` (new folder): dedicated venv (`.venv`, `mini-swe-agent` installed editable
+    from the vendored `sysintel-msagent` copy) + `run_prediction.py`. That script: fetches source
+    (3b), starts mini-swe-agent's `DockerEnvironment` pointed at `arvo-sandbox:base` (3c) using the
+    *same* `sandbox_contract.lockdown_flags()` + `.git`-mask mounts as the manual launcher (3a/3d) —
+    mini-swe-agent always starts its own container rather than attaching to one we launch, so this
+    reuses the contract's flags rather than re-declaring them (refactored `sandbox_contract.py` to
+    expose `lockdown_flags()` + public `EMPTY_MASK_DIR` for this). Prompt built from 3g's
+    `answer_schema.prompt_instructions()`, plus only `project`/`sanitizer` from `meta.json` (never
+    `crash_type`/`fix_commit` — those stay host-side, same leak class as the `.git` mask fixes).
+    After the agent finishes, `run_prediction.py` reads back `answer/prediction.json` and validates it
+    (3g). The LLM call happens on the *host* (litellm → provider); the container never needs network,
+    so `--network none` holds.
+
+    **First real run (2026-07-29), skia bug 40096184 via `vertex_ai/gemini-2.5-flash`:** sandbox
+    enforced exactly as designed (`--network none --read-only --cap-drop ALL --user <hostuid>`, `.git`
+    masked), agent wrote a **valid, validated** `prediction.json`. Accuracy vs. the hidden ground
+    truth was genuinely good: predicted `filename` = `src/codec/SkSwizzler.cpp` and `function` =
+    `SkSwizzler::swizzle` both land on the real crash stack (gt depth-1 frame); `line` (335 vs 237/
+    1233) and `crash_type` (heap-buffer-underflow vs -overflow) were off — note `reward.py` scores
+    only file/function/line, not crash type, so the type miss won't hurt the numeric reward.
+
+    **Bug found + fixed during that run — `RepeatedFormatError`.** `LitellmModel` uses native
+    tool-calls; `parse_toolcall_actions` raises `FormatError` when a response contains **no** bash
+    tool call, and `DefaultAgent` aborts after `max_consecutive_format_errors` (default **3**) in a
+    row. Gemini, once it thought it was done, kept replying with a plain-text "final answer" instead
+    of calling the bash tool to run the finish sentinel → 3 format errors → `RepeatedFormatError`
+    (n_calls=22). The prediction survived only because the file-writing tool calls had already run;
+    the clean `Submitted` exit (env checks first stdout line == `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
+    with rc 0, see `environments/docker.py:_check_finished`) was never reached. Fix in
+    `run_prediction.py`: (a) hardened `SYSTEM_TEMPLATE` + `INSTANCE_TEMPLATE` — every response MUST be
+    a bash tool call, and the finish sentinel must be issued *as* a bash tool call, never as prose;
+    (b) raised `max_consecutive_format_errors=8` so a stray prose turn gets nudged back instead of
+    aborting (step_limit/cost_limit still bound runaway).
+
+    **Second bug found + fixed — stale answer read-back.** `run()` did `answer_dir.mkdir(exist_ok=True)`
+    but never cleared a prior run's `prediction.json`, so a run that wrote *no* answer would read back
+    and print the **previous** run's file as if it were its own (silently poisoning any Phase-4 data).
+    Caught it when a `gemini-3.5-flash` run that hit `LimitsExceeded` printed a prediction byte-identical
+    to an earlier `2.5-flash` run. Fix: `prediction_path.unlink(missing_ok=True)` at the start of
+    `run()`, so a no-write run now honestly reports `no valid prediction: ... agent never wrote an answer`.
+
+    **Third fix — convergence for weaker models (budget nudge).** `gemini-3.5-flash` explores more and
+    burned its whole 30- then 45-step budget without ever writing an answer. Fixed without touching the
+    sandbox: (a) instance prompt now tells the agent to write an initial best-effort prediction within
+    its first few steps and keep overwriting it; (b) a custom `OBSERVATION_TEMPLATE` appends a live
+    `<budget>used {{n_model_calls}} of {{step_limit}} steps</budget>` line to every observation so the
+    model self-paces. (`step_limit`/`n_model_calls` come from `DefaultAgent.get_template_vars()`.)
+
+    **VERIFIED CLEAN (2026-07-29), skia bug 40096184 via `vertex_ai/gemini-3.5-flash`, step-limit 45:**
+    `exit_status='Submitted'` (clean sentinel finish, not `RepeatedFormatError`/`LimitsExceeded`),
+    n_calls=45, cost **$0.3426**. Prediction was **freshly written this run** (4 write-to-answer commands
+    — the early-write nudge worked) and validated. Accuracy vs. hidden ground truth: `filename` =
+    `third_party/gif/SkGifImageReader.cpp` ✓ and `function` = `SkGIFLZWContext::doLZW` ✓ both match the
+    real depth-4 crash frame, `crash_type` = heap-buffer-overflow ✓ (correct this time), `line` 213 vs
+    299 ✗. **3h is functionally complete** — locked sandbox + real model + clean submit + on-stack
+    prediction, all verified.
+
+    **Cost note (not a bug, but a Phase-6 scaling flag):** $0.34/run is expected for 45 flash steps, but
+    per-call cost grew ~2.7× across the run ($0.0028 → $0.0075) because mini-swe-agent resends the whole
+    growing conversation every step, and **no prompt caching is configured** (`set_cache_control=None`).
+    The 3.5 run also submitted on the *very last* allowed step (45/45) — a bigger source tree might not
+    finish at 45. At RL scale (~$0.34 × thousands of bugs × many rollouts) this balloons. Levers before
+    Phase 6: (1) enable `set_cache_control` on `LitellmModel`; (2) reconsider `2.5-flash`, which reached
+    a comparable on-stack answer in ~22 steps for ~$0.08 (~4× cheaper) — worth a head-to-head re-run
+    *with these fixes* before committing a model; (3) tune step-limit/rollout count. **Model decision
+    (2026-07-29): standardizing on `vertex_ai/gemini-3.5-flash` for Phase 4+** (user call). It gave the
+    correct crash type and a clean `Submitted` finish; the ~4× cost gap vs 2.5-flash is deferred to the
+    Phase-6 caching/step-limit tuning above rather than resolved by model downgrade.
+
+**Model-access blocker: RESOLVED via Vertex AI (2026-07-29).** The mentor's "no plain key" path
+worked: calling `vertex_ai/gemini-2.5-flash` through litellm with `VERTEXAI_LOCATION=global` succeeded
+end-to-end (real billed run, cost ~$0.08). This supersedes the earlier open question about which auth
+route to use — Vertex is the chosen path. (Historical context, now moot: the VM's built-in service
+account ADC lacked the `cloud-platform` scope Vertex needs; whatever credential the user exported for
+this run — personal ADC login or a service-account key — carries the right scope. The exact
+credential/project used wasn't passed through chat.) **3h now fully closed** — the clean `Submitted`
+run above confirms it.
+
+**How to re-run the 3h smoke test (from the user's shell, with Vertex creds already exported):**
+```bash
+cd ~/ARVO_intelligence && source .venv/bin/activate
+export VERTEXAI_LOCATION="global"
+python msagent_runner/run_prediction.py \
+  --model "vertex_ai/gemini-3.5-flash" --step-limit 45 --cost-limit 3 \
+  data_smoke/40096184
+# success = exit_status='Submitted' + a validated prediction printed
+# (2.5-flash also works and is cheaper; see the open model decision above)
+```
 - [ ] **Phase 4 — Agent loop** (reuse mini-swe-agent `KernelAgent`; new prompt + mount contract).
 - [ ] **Phase 5 — Reward wiring** (reuse `exec-rl/reward.py`; remap crash taxonomy to sanitizer types;
   canonicalize frame filenames — see Known issues).
