@@ -15,7 +15,8 @@ _FRAME_RE = re.compile(
 )
 
 # OSS-Fuzz / sanitizer crash classes, matched as substrings of ARVO's crash_type.
-_COARSE_TYPES = [
+# Public (not _-prefixed): also used by answer_schema.py to tell the agent the vocabulary.
+COARSE_TYPES = [
     "heap-buffer-overflow",
     "stack-buffer-overflow",
     "global-buffer-overflow",
@@ -49,7 +50,7 @@ class Frame:
 
 def coarse_type(crash_type: str) -> str:
     c = (crash_type or "").lower()
-    for k in _COARSE_TYPES:
+    for k in COARSE_TYPES:
         if k in c:
             return k
     return "other"

@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+data/
+data_*/
+.empty_mount/
