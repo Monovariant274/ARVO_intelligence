@@ -65,11 +65,32 @@ it. Do NOT summarize your findings in prose instead of calling the tool -- a res
 tool call is rejected and wastes a step."""
 
 
-# Default litellm observation template + a live step-budget line so the model self-paces and
-# writes its answer before running out of steps.
+# Gemini/Vertex will occasionally return zero candidates (empty `choices`) when its safety or
+# recitation filters trip on the C/C++ source we feed it -- and mini-swe-agent then hits
+# `response.choices[0]` and dies with IndexError, taking the whole run down. Relaxing every harm
+# category to BLOCK_NONE removes the most common cause; the try/except around agent.run() below is
+# the backstop for the residual cases (recitation blocks ignore safety_settings entirely).
+SAFETY_SETTINGS = [
+    {"category": c, "threshold": "BLOCK_NONE"}
+    for c in (
+        "HARM_CATEGORY_HARASSMENT",
+        "HARM_CATEGORY_HATE_SPEECH",
+        "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        "HARM_CATEGORY_DANGEROUS_CONTENT",
+    )
+]
+
+
+# Default litellm observation template, plus (1) hard output truncation so one `cat` of a large
+# file can't balloon context/cost -- the full output lives in msg extra, which is stripped before
+# resend, so truncating here caps what actually goes back to the model -- and (2) a live step-budget
+# line so the model self-paces and writes its answer before running out of steps.
 OBSERVATION_TEMPLATE = (
     "{% if output.exception_info %}<exception>{{output.exception_info}}</exception>\n{% endif %}"
-    "<returncode>{{output.returncode}}</returncode>\n<output>\n{{output.output}}</output>\n"
+    "<returncode>{{output.returncode}}</returncode>\n<output>\n"
+    "{{ output.output | truncate(8000, True, ' ...[TRUNCATED: output too long. Do NOT cat whole "
+    "files; use grep/sed/head for targeted reads.]') }}"
+    "\n</output>\n"
     "<budget>You have used {{n_model_calls}} of {{step_limit}} steps. If only a few remain, write "
     "your current best-effort prediction to the answer file NOW.</budget>"
 )
@@ -110,7 +131,11 @@ def run(bug_dir: Path, *, model_name: str, step_limit: int = 15, cost_limit: flo
         container_timeout="30m",
     )
     agent = DefaultAgent(
-        LitellmModel(model_name=model_name, observation_template=OBSERVATION_TEMPLATE),
+        LitellmModel(
+            model_name=model_name,
+            observation_template=OBSERVATION_TEMPLATE,
+            model_kwargs={"safety_settings": SAFETY_SETTINGS},
+        ),
         env,
         system_template=SYSTEM_TEMPLATE,
         instance_template=INSTANCE_TEMPLATE,
@@ -119,8 +144,15 @@ def run(bug_dir: Path, *, model_name: str, step_limit: int = 15, cost_limit: flo
         max_consecutive_format_errors=8,
         output_path=bug_dir / "trajectory.json",
     )
-    result = agent.run(project=meta["project"], sanitizer=meta["sanitizer"])
-    print(f"exit_status={result.get('exit_status')!r} n_calls={agent.n_calls} cost=${agent.cost:.4f}")
+    # A single bug crashing mid-run (e.g. IndexError when Vertex returns empty `choices`) must not
+    # abort a whole batch or discard the partial answer already written to disk -- fall through to
+    # the validate_prediction read-back either way.
+    try:
+        result = agent.run(project=meta["project"], sanitizer=meta["sanitizer"])
+        print(f"exit_status={result.get('exit_status')!r} n_calls={agent.n_calls} cost=${agent.cost:.4f}")
+    except Exception as e:
+        result = {"exit_status": f"crashed: {type(e).__name__}: {e}"}
+        print(f"run crashed after {agent.n_calls} calls (cost=${agent.cost:.4f}): {type(e).__name__}: {e}")
 
     try:
         prediction = validate_prediction(prediction_path)

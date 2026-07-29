@@ -268,6 +268,42 @@ suspenders), and `verify_sandbox.py` still PASSes both checks after the change.
     correct crash type and a clean `Submitted` finish; the ~4× cost gap vs 2.5-flash is deferred to the
     Phase-6 caching/step-limit tuning above rather than resolved by model downgrade.
 
+    **Robustness check across diverse bugs (2026-07-29) — two more fixes landed in
+    `run_prediction.py`:**
+    - **Output truncation (fix):** harfbuzz (42470093) blew up to **$3.41** because the agent `cat`'d a
+      492 KB source file; with no truncation that single 492 K-char observation was ~85% of the resent
+      context and got re-sent every step, so cost exploded and it never refined past its placeholder
+      guess. Added `truncate(8000, True, …)` to `OBSERVATION_TEMPLATE` (verified: 500 KB input → ~8.2 K
+      chars rendered; small outputs untouched) plus a nudge to use grep/sed/head instead of whole-file
+      `cat`.
+    - **Empty-choices crash (fix):** imagemagick (42470067) died with `IndexError: list index out of
+      range` at `response.choices[0]` (litellm_model.py:129) — Vertex/Gemini returned **zero candidates**
+      (safety/recitation filter). litellm's retry wraps `_query`, not `_parse_actions`, so it doesn't
+      catch this; it crashed the whole run. Two-part fix, both in our code (vendored mini-swe-agent is
+      read-only): (1) `SAFETY_SETTINGS` = all Gemini harm categories → `BLOCK_NONE`, passed via
+      `model_kwargs={"safety_settings": …}` on `LitellmModel` (kills the common safety-block cause;
+      recitation blocks ignore it); (2) `agent.run()` wrapped in try/except → a mid-run crash records
+      `exit_status="crashed: …"`, prints a clean line, and still falls through to `validate_prediction()`
+      so any partial answer on disk survives and one bad bug can't abort a batch.
+    - **Results by bug (all four now validated post-fix):** ffmpeg (40096184) **PASS** — near-exact
+      (`decode_move` rsac.c:299, all fields match). gdal (42470702) **PASS** — clean `Submitted`, 44
+      calls, **$2.23**, real heap-buffer-overflow prediction (`ogrgmldatasource.cpp`
+      `FindAndParseTopElements` line 2781). imagemagick (42470067) **PASS post-fix** — ran 3× with **no
+      traceback** (IndexError fix holds); Submitted once at $0.95, `LimitsExceeded` twice at
+      $0.31/$0.44, each with a valid `use-of-uninitialized-value` prediction. harfbuzz (42470093)
+      **PASS post-fix** — the headline truncation win: **$0.40** vs the old **$3.41** (~8.5× cheaper),
+      real heap-buffer-overflow prediction (`hb-ot-layout-gsub-table.hh` `LigatureSet::sanitize` line
+      761) instead of the old placeholder.
+    - **On `LimitsExceeded` vs `Submitted`:** several re-runs ended `LimitsExceeded` at n_calls=45 —
+      this is **not** a failure. They hit the 45-*step* cap (costs $0.31–$0.44, nowhere near the cost
+      limit), and the early-write instruction guarantees a validated prediction was already on disk.
+      That graceful "out of steps but answer exists" path is by design; a clean `Submitted` is nicer but
+      not required to pass. Model non-determinism drives whether a given run wraps up early or runs to 45.
+    - **Cost flag reinforced:** gdal's **$2.23 / 44 steps** (vs the 40096184 baseline of $0.34) confirms
+      cost scales hard with source size + step count and with no prompt caching. The Phase-6 levers
+      (enable `set_cache_control`, tune step-limit, revisit 2.5-flash) matter more than the single-run
+      numbers suggested.
+
 **Model-access blocker: RESOLVED via Vertex AI (2026-07-29).** The mentor's "no plain key" path
 worked: calling `vertex_ai/gemini-2.5-flash` through litellm with `VERTEXAI_LOCATION=global` succeeded
 end-to-end (real billed run, cost ~$0.08). This supersedes the earlier open question about which auth
