@@ -104,8 +104,18 @@ def score_prediction(
 
 
 def ground_truth_frames(gt: dict) -> list[dict]:
-    """Prefer 5b's cleaned frames; fall back to raw frames if a bug wasn't cleaned yet."""
-    return gt.get("frames_clean") or gt.get("frames") or []
+    """Prefer 5b's cleaned frames; fall back to raw frames if a bug wasn't cleaned yet.
+
+    Returns a plain list of plain dicts even when `gt` arrives from a parquet
+    round-trip (the Phase-6/verl path), where the frame list deserializes as a
+    numpy array. Explicit None/len checks avoid numpy's ambiguous-truth error
+    that `... or []` (and reward.py's `if not frames`) would otherwise hit.
+    """
+    for key in ("frames_clean", "frames"):
+        frames = gt.get(key)
+        if frames is not None and len(frames) > 0:
+            return [dict(f) for f in frames]
+    return []
 
 
 def score_result(bug_dir: Path, reward_name: str = DEFAULT_REWARD) -> dict:
@@ -141,8 +151,15 @@ def compute_score(
 ) -> dict:
     """Phase-6 (VeRL) `custom_reward_function` shim, mirroring exec-rl's compute_score.
     The prediction is an environment artifact, so scoring reads it from extra_info,
-    not solution_str -- and routes through the SAME score_prediction as eval."""
-    prediction = (extra_info or {}).get("prediction")
+    not solution_str -- and routes through the SAME score_prediction as eval.
+
+    Reads `extra_info["prediction"]` (our agent loop stores the validated dict),
+    falling back to `extra_info["context_output"]` (exec-rl's raw-text convention);
+    parse_prediction accepts a dict, a JSON string, or None either way."""
+    ei = extra_info or {}
+    prediction = ei.get("prediction")
+    if prediction is None:
+        prediction = ei.get("context_output")
     frames = ground_truth_frames(ground_truth) if isinstance(ground_truth, dict) else (ground_truth or [])
     score = score_prediction(frames, prediction, reward_name)
     return {"score": score, "acc": score, "reward_name": reward_name}

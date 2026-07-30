@@ -4,18 +4,59 @@ Handoff doc. Read this to resume without re-deriving context.
 
 ---
 
-## LIVE STATUS (as of 2026-07-29 10:43) — two long jobs running, safe to leave
+## LIVE STATUS (as of 2026-07-30) — RESWEEPING clean on gemini-3-flash-preview (no data mixing)
 
-- **sweep1 (Phase 5g pass@k)** — tmux session `sweep1`, launched 10:37. 100 bugs × k=8 = 800 runs,
-  ~128s each → **~28h ETA**, ~$264 (cap $300). First rows landing. Resumable; survives disconnect.
-  - Check:   `wc -l runs/sweep1/manifest.jsonl`  (target 800)  ·  `tail -f runs/sweep1.log`
-  - **When it finishes → LAST STEP OF PHASE 5:** `python difficulty.py runs/sweep1/manifest.jsonl`
-    (writes `runs/sweep1/split.json`). If it died, re-run the same `batch_predict.py` cmd (see 5g).
-  - **Early-stop OK (~50 fully-done bugs) for a PILOT Phase 6:** stop the sweep (`pkill -f 'batch_predict.*sweep1'`,
-    safe to kill mid-bug), then band only complete bugs: `python difficulty.py runs/sweep1/manifest.jsonl --min-samples 8`.
-    Resumable later to grow the set before a serious run. NOTE: early runs are slower/pricier than the
-    128s shakeout est (~200s, ~$0.40/run on bug 42470348), so the $300 cap may bind before 800 runs.
-- **harvest (Phase 2)** — tmux session `harvest`. At ~[478/6138], ~73 candidates/hr → **~3 days ETA**.
+- **sweep3fp (Phase 5g pass@k) — CURRENT RUN** — tmux session `sweep3fp`, launched 2026-07-30 ~06:27.
+  `gemini/gemini-3-flash-preview` on a paid Gemini Developer API key (`GEMINI_API_KEY`), **concurrency 4**,
+  100 bugs × k=8 = 800 rollouts, same `--shuffle --seed 0 --limit 100` bug set as sweep1. Fresh
+  `--name sweep3fp` manifest → **zero mixing** with the 3.5 data. Expected spend ~$160 (~$0.198/sample);
+  guarded by `--max-cost 250`. Healthy at launch: first 3 samples all valid, 429s mild (~8/min) and fully
+  absorbed by litellm backoff (0 errored rows).
+  - Launch cmd (in tmux): `.venv/bin/python batch_predict.py --model gemini/gemini-3-flash-preview --k 8
+    --limit 100 --shuffle --seed 0 --cleanup-src --max-cost 250 --concurrency 4 --name sweep3fp`
+  - Check: `wc -l runs/sweep3fp/manifest.jsonl` (target 800) · `tmux attach -t sweep3fp` ·
+    `grep -c RateLimitError runs/sweep3fp.console.log`. Sample-level resumable: to retune concurrency,
+    `tmux kill-session -t sweep3fp`, `docker ps --filter name=minisweagent- -q | xargs -r docker rm -f`,
+    then relaunch the SAME name at a different `-c` — resumes from finished samples, no lost work.
+    **If 429s balloon (hundreds fast) or `no_prediction`/errored rows appear, drop to c=3.**
+  - **When it finishes → LAST STEP OF PHASE 5:** `python difficulty.py runs/sweep3fp/manifest.jsonl`
+    (writes `difficulty.json` + `split.json`). This 3-flash-preview sweep is the split feeder for Phase-6.
+
+- **Why preview + c=4 (decided 2026-07-30):** the serial `vertex_ai/gemini-3.5-flash` sweep (sweep1)
+  was slow (serial + ~43 calls/rollout + Vertex RPM ceiling). Migrated to a paid Gemini Developer key
+  for concurrency. Smoke tests then showed the paid key **429s (RESOURCE_EXHAUSTED) at just c=2 on
+  3.5-flash** — the throttle is **tokens-per-minute**, not RPM (a tiny-request burst probe passed 24/24
+  on every flash model; the big source-reading prompts blow the TPM cap; over-ceiling concurrency gives
+  NO throughput gain — extra workers just pile into bounded backoff — and risks degraded data if retries
+  exhaust). Model comparison at c=2 (2 real rollouts each):
+    - `gemini-3.5-flash` → hit 429 · `gemini-3.6-flash` → clean but ~1.1M tok/rollout, ~$0.62 ·
+      `gemini-3-flash-preview` → clean, ~40% fewer tokens, ~$0.18 · `gemini-3-pro-preview` → 404 (not enabled).
+  First relaunched on **3.6-flash @ c=6** → **drowned (60 × 429 in 2 min, 0 completions)** — TPM ceiling
+  sits between c=2 and c=6 for 3.6. User then chose **3-flash-preview**: its lower token/rollout sustains
+  higher usable concurrency (c=4 completes with only mild throttling), cheaper too — accepting the
+  preview-model stability risk for speed/cost. **No data mixing** — all 100 bugs reswept fresh on this
+  one model. NOTE: Gemini stays SWEEP/EVAL only — the Phase-6 RL policy is open-weights (see
+  [[arvo-phase6-training-model]]).
+  Done along the way: **[DONE] killed auto-resume watcher AND deleted `resume_sweep1.sh`** (dead Vertex
+  re-launcher — removed 2026-07-30 so it can't resurrect the old 3.5 sweep); **[DONE] killed the idle
+  `sweep1` tmux session**; **[DONE] added `--concurrency N` to `batch_predict.py`** (ThreadPoolExecutor
+  over BUGS not samples — a worker owns a whole bug's dirs `data/<id>/{src,answer}`; `BatchState` lock
+  guards manifest append + cost/count; `--max-cost` soft ceiling); **[DONE] stopped sweep1** (pid 368826)
+  + cleaned orphaned containers.
+
+- **Consistency audit (2026-07-30):** full anti-cheating + correctness pass — sandbox lockdown, answer
+  validation, prompt leak guard, single scoring path (all intact); concurrency + resume logic correct;
+  agent-loop name aligned; `py_compile` + prompt-parity green. Fixed stale refs: `batch_predict.py`
+  `--model` default → `gemini/gemini-3-flash-preview`; `README`/`build_dataset.py` docstrings → sweep3fp
+  workflow; annotated the old sweep1 launch block below as SUPERSEDED.
+
+- **sweep1 (3.5 baseline — KEEP, do NOT feed to Phase-6 split)** — `runs/sweep1/manifest.jsonl`,
+  **412 samples / 52 distinct bugs (51 with all 8), 409 valid**, all `vertex_ai/gemini-3.5-flash`.
+  Serial Vertex run only reached 52/100 bugs in ~19h before we stopped it. Preserved as a 3.5-flash
+  capability baseline; NOT mixed into the gemini-3-flash-preview difficulty split (sweep3fp).
+  - **Band quality (dry-run on 34 scored 3.5 bugs) looked healthy:** 28 keep (std>0) / 5 saturated /
+    1 dead; kept reward mean 0.313, std mean 0.102 / max 0.472 — on track for plenty of keepable bugs.
+- **harvest (Phase 2)** — tmux session `harvest`. At ~[2086/6138] (~34%) as of 2026-07-30 06:30, pulling normally.
   Independent of sweep1 (sweep locked its 100 bugs at launch). Re-run `python3 frame_clean.py` after.
   - Check:   `wc -l data/manifest.jsonl`  ·  `tail -f harvest.log`  ·  `tmux ls`
 
@@ -430,10 +471,21 @@ python msagent_runner/run_prediction.py \
     - **DECISION 1 — k = 8** (confirmed 2026-07-29): enough to estimate std, ~$2.6/bug; revisit if noisy.
     - **DECISION 2 — scope = ~100 bugs** (confirmed 2026-07-29): first sweep ~100 × k=8 ≈ 800 runs ≈
       ~$265, shuffled/seeded, to size the band before committing to the full set.
+    - **⚠️ SUPERSEDED 2026-07-30 — this whole sub-block describes the ORIGINAL serial Vertex sweep1
+      (3.5-flash), which we STOPPED at 52/100 bugs and REPLACED with the concurrent gemini-3-flash-preview
+      resweep (`sweep3fp`). See LIVE STATUS at the top. Do NOT re-run the sweep1 command or `difficulty.py
+      runs/sweep1/...` for the Phase-6 split — use `runs/sweep3fp/...`. Kept here as dated history only.**
     - **LAUNCHED 2026-07-29 10:37** in tmux session `sweep1` (PID was 368826):
       `python batch_predict.py --k 8 --limit 100 --shuffle --seed 0 --cleanup-src --max-cost 300 --name sweep1 2>&1 | tee runs/sweep1.log`
-      Per-run wall time ~128s (shakeout), so 800 runs ≈ **~28h serial**. Resumable (sample-level): if it
-      dies, re-run the SAME command and it continues. `--max-cost 300` aborts before overspend (~$264 expected).
+      Real per-run wall time ~178s (429 backoff, not the 128s shakeout est), so 800 runs ≈ **~40h**, ~$356.
+      Resumable (sample-level): if it dies, re-run the SAME command and it continues.
+    - **AUTO-RESUME ARMED 2026-07-29 (hands-off, user decision — want all 100, cost not a concern):**
+      the `--max-cost 300` on the launched run trips at ~84 bugs; detached watcher `resume_sweep1.sh`
+      relaunches the same command (fresh $300 cap, resets `total_cost`, covers the remaining ~$56) into
+      the `sweep1` pane so all 100 bugs finish unattended. Don't type in the `sweep1` pane while armed.
+    - **Mid-run band health (34 bugs, `difficulty.py --dry-run`):** 28 keep (std>0) / 5 saturated / 1
+      dead; kept reward mean 0.313 (≈ half the ~0.67 multi-frame ceiling — competent, not saturated),
+      std mean 0.102 / max 0.472. Good gradient. Projects to ~80 keepable bugs at n=100.
     - **WHEN THE SWEEP FINISHES → this is the last step of Phase 5:**
       `python difficulty.py runs/sweep1/manifest.jsonl` → writes `runs/sweep1/difficulty.json` +
       `runs/sweep1/split.json` (the banded train/test split Phase 6 consumes). Then eyeball the band
@@ -441,7 +493,96 @@ python msagent_runner/run_prediction.py \
       anytime mid-run with `--dry-run` (read-only, no files written).
     - Bridges into Phase 6 (produces its train set); lives in Phase 5 because it's reward-driven
       measurement.
-- [ ] **Phase 6 — RL training** (verl trainer; the heavy GPU/infra part).
+- [~] **Phase 6 — RL training** (verl GRPO trainer; the heavy GPU/infra part). **All Phase-6 code lives
+  in a dedicated `phase6/` folder** (user decision — keep the training port self-contained). Broken into
+  small substeps mirroring the exec-rl training-side files. **No GPU on this box and verl isn't
+  installed**, so the loop + training can be *written* now but only *run* on a GPU box later (6g).
+  Port surface (exec-rl → ARVO): `data.py`→6a, `rl/rewards.py`→6b, agent prompt yaml→6c, agent-loop
+  config→6d, `rl/agent.py` `kAgentLoop`→6e, `run_qwen3_5_9b_crash_grpo.sh`→6f.
+  - [x] **6a. Dataset builder → verl parquet — DONE 2026-07-30.** `phase6/build_dataset.py` (analog of
+    exec-rl `data.py`). Reads `runs/sweep1/split.json` (5g's std>0 train/test bug lists) + each
+    `data/<id>/` (poc, ground_truth, meta) → `train.parquet`/`val.parquet` + `manifest.json` in verl's
+    row shape: `prompt` (frozen [system,user], exposes ONLY project+sanitizer), `reward_model.ground_truth`
+    (cleaned frames), `extra_info.reproducer_b64` (PoC bytes b64 — ARVO PoCs are binary, not text),
+    `extra_info.environment` (repo_addr/vuln_commit/mounts/base image — our per-bug substitute for
+    exec-rl's prebuilt kernel image, since 6e builds the locked sandbox at rollout time), `agent_name=
+    "arvo_crash"`. The prompt is NOT inlined here — it's rendered from the shared 6c yaml
+    (`phase6/prompts/crash-predictor.yaml`) with jinja2 `StrictUndefined` directly (no mini-swe-agent
+    import, so dataset gen stays dep-free — exec-rl's choice), and a copy of the yaml is written into
+    `<dataset>/prompts/` so each dataset is frozen with the exact prompt it was built from. Enforces two
+    invariants at the source: (1) `_assert_no_leak` fails the build if a scored frame (function/file) or
+    fix_commit appears in the **per-bug interpolated values** (project+sanitizer) — scoped to the injected
+    vars, NOT the whole rendered prompt, because the rest is FIXED template prose identical across every
+    bug, so a common-word crash function like `main`/`execute` matching "remain"/"not to execute" is a
+    coincidence, not a leak (the old whole-prompt substring check dropped ~40% of bugs on exactly this);
+    crash *type* is deliberately unguarded (prompt must list the type vocabulary; reward.py doesn't score
+    type); (2) same prompt+gt shape feeds train and eval so they can't diverge. Verified on all 49 real
+    swept bugs (47 train / 2 val, ZERO skipped after the leak-guard fix): parquet round-trips, PoC decodes
+    to meta's exact byte count, env block complete, yaml copied into the dataset, stored gt scores 0.50
+    perfect-top / 0.0 wrong-file / -1.0 no-answer through the real reward. **Testable now against swept
+    bugs; the final real build waits on `split.json` (sweep + `difficulty.py`).**
+  - [x] **6b. Reward-shim parity — DONE 2026-07-30.** verl points `custom_reward_function.path` at
+    `phase6/rewards.py` (named plural to NOT shadow repo-root `reward.py` on sys.path — the collision
+    that first broke `score.py`'s `from reward import`; same trick as exec-rl's `rl/rewards.py`). It's a
+    thin re-export of the SAME `score.compute_score` Phase-5 eval uses, so train/eval can't diverge (5d).
+    Two hardenings in `score.py`: (1) `ground_truth_frames` now does explicit None/len checks and returns
+    a plain `list[dict]` — fixes the **6a finding** (parquet round-trip deserializes frames as a numpy
+    array; the old `... or []` AND `reward.py`'s `if not frames` both threw numpy's ambiguous-truth
+    error); (2) `compute_score` reads the prediction from `extra_info["prediction"]` (our agent loop's
+    validated dict) falling back to `extra_info["context_output"]` (exec-rl's raw-text convention).
+    Verified: numpy-array gt straight from parquet scores 0.50 perfect-top / 0.0 wrong / -1.0 missing;
+    context_output path scores good→0.50, garbage→-1.0; returns `{score,acc,reward_name}`; Phase-5
+    on-disk `score_result` unchanged (regression held).
+  - [x] **6c. Agent prompt yaml — DONE 2026-07-30.** `phase6/prompts/crash-predictor.yaml` is the SINGLE
+    prompt source: it seeds the training rows (6a renders it) AND is what the eval agent feeds the model
+    (`msagent_runner/run_prediction.py` via mini-swe-agent) — exec-rl's signature "one frozen prompt, no
+    train/eval drift" property. GENERATED from run_prediction.py's live `SYSTEM_TEMPLATE`/`INSTANCE_TEMPLATE`
+    (not hand-copied), preserving the `{{project}}`/`{{sanitizer}}` jinja placeholders and the hardened
+    first-write / step-budget / finish instructions; `environment:` carries step_limit + format-error cap.
+    Parity is structural: mini-swe-agent's `render_template` IS `Template(t, StrictUndefined).render(**v)`,
+    identical to 6a's `render_prompt`, so parity reduces to "yaml templates == run_prediction templates".
+    `phase6/test_prompt_parity.py` PINS exactly that: it renders both sides across 5 project/sanitizer
+    cases (incl. quotes/punctuation) and asserts byte-equality — a regression guard that fails loudly if
+    run_prediction.py's templates are edited without regenerating the yaml. Deliberately did NOT edit
+    run_prediction.py (the live sweep imports it; auto-resume is armed) — the yaml was generated FROM it.
+  - [x] **6d. verl agent-loop config — DONE 2026-07-30.** `phase6/config/verl_arvo_agent_loop.yaml`
+    (analog of exec-rl `verl_crash_agent_loop.yaml`). A one-entry `{name, _target_}` list verl loads via
+    `actor_rollout_ref.rollout.agent.agent_loop_config_path` (set in 6f). `name: arvo_crash` MUST equal
+    the `agent_name` 6a stamps on every parquet row (asserted against `build_dataset.AGENT_LOOP_NAME`), or
+    verl can't match a loop to our rows. `_target_: phase6.agent_loop.ArvoCrashAgentLoop` is the Hydra
+    import path to the 6e class — resolves as a namespace package off repo-root PYTHONPATH (no `__init__.py`
+    needed). This file is the CONTRACT 6e must satisfy: it names the class 6e has to provide.
+  - [x] **6e. verl agent loop — DONE 2026-07-30 (write-only; cannot run here).** `phase6/agent_loop.py`,
+    analog of exec-rl `kAgentLoop`. `ArvoCrashAgentLoop` subclasses exec-rl's generic `MiniSweAgentLoop`
+    (the tested verl<->mini-swe-agent adapter — VerlServerModel gen + token bookkeeping + AgentLoopOutput
+    all stay upstream) and overrides ONLY the two ARVO-delta methods, exactly the shape of kAgentLoop:
+    (1) `_make_env` builds the locked sandbox PER ROLLOUT from the row's `extra_info.environment` (6a) —
+    `materialize_source(repo_addr, vuln_commit)` into a per-rollout host scratch dir, decode the base64
+    PoC to bytes, mount src+poc read-only / answer dir writable / empty-dir mask over `.git`, run under
+    `sandbox_contract.lockdown_flags()` on `arvo-sandbox:base`. Same mount set + lockdown as eval's
+    `run_prediction.build_mounts`, so a trajectory sees the identical box in train and eval. Builds the
+    `DockerEnvironment` directly via `get_environment` (NOT `super()._make_env`, which would add exec-rl's
+    `/skills` mount we don't use). Scratch dir is wiped by wrapping `env.cleanup`. (2) `compute_reward`
+    reads `ANSWER_FILE` back out of the live container and stashes the raw JSON text on
+    `extra_info["context_output"]`; returns None so 6b's `custom_reward_function` scores it (missing file
+    -> "" -> -1, the correct no-answer score). Registered `arvo_crash` (== 6a `AGENT_LOOP_NAME` == 6d
+    yaml `name`). **Also fixed a 6c yaml bug found here:** `step_limit`/`max_consecutive_format_errors`
+    were under `environment:` but the verl loop reads them from `agent:` (and merges `environment:` into
+    the Docker config, which rejects unknown keys) — moved under `agent:`, `environment:` block dropped
+    (the loop builds Docker config per-bug). Verified: 6e py-compiles; parity still byte-exact; a real
+    swept row carries repo_addr/vuln_commit/image + PoC that decodes to the exact disk bytes and mount
+    targets that match `sandbox_contract`. **Runs only on the 6g host (needs verl + exec_rl + vLLM + GPU).**
+  - [ ] **6f. GRPO launch script** — port `run_qwen3_5_9b_crash_grpo.sh` with ARVO paths (our dataset,
+    `phase6/rewards.py` reward, `phase6/config/verl_arvo_agent_loop.yaml`, `MSWEA_VERL_CONFIG_PATH` ->
+    the 6c yaml). **Model is a `MODEL` arg/env var, NOT hardcoded** (user decision 2026-07-30): the
+    trained policy MUST be open-weights — Gemini 3.5 Flash is the Phase-5 sweep + Phase-7 eval model and
+    CANNOT be RL-trained (closed API: no weights/vLLM/logprobs). Default to Qwen3 (exec-rl's proven config,
+    least porting), concrete model picked at 6g/6h once the GPU box is known. See
+    [[arvo-phase6-training-model]].
+  - [ ] **6g. Infra bring-up (not code)** — GPU box + verl + vLLM + vendored mini-swe-agent + base model +
+    `docker build arvo-sandbox:base` + Ray. Hard blocker for actually training.
+  - [ ] **6h. Smoke train + first curve** — 1-2 steps, val_before_train reproduces 5e's ~0.240 baseline,
+    confirm non-zero advantage on std>0 bugs, then the real run. Needs 6g.
 - [ ] **Phase 7 — Eval** (held-out test set; pre/post-training comparison).
 
 ## 7b. Operational notes (throughput / how to run overnight)

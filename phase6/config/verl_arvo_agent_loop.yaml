@@ -1,0 +1,19 @@
+# Phase 6d: verl agent-loop registry (analog of exec-rl's verl_crash_agent_loop.yaml).
+#
+# verl reads this file via the launch flag (6f):
+#     actor_rollout_ref.rollout.agent.agent_loop_config_path=phase6/config/verl_arvo_agent_loop.yaml
+#
+# It is a list of {name, _target_} entries. verl matches each rollout to a loop
+# by the `name` here == the parquet row's `agent_name` field. Our 6a builder
+# stamps every row with agent_name="arvo_crash" (AGENT_LOOP_NAME in
+# build_dataset.py), so that string MUST equal the `name` below, or verl won't
+# find a loop for our rows and the rollout errors out.
+#
+# `_target_` is the Hydra/importlib dotted path verl instantiates for each such
+# row -- our 6e loop class. It resolves against PYTHONPATH, which the 6f launch
+# script points at the repo root, so `phase6.agent_loop` imports as a namespace
+# package (no __init__.py needed). The class does not exist until 6e; this config
+# is the contract 6e must satisfy (exec-rl targets `exec_rl.rl.agent.kAgentLoop`;
+# ours is the ARVO analog that builds the locked sandbox at rollout time).
+- name: arvo_crash
+  _target_: phase6.agent_loop.ArvoCrashAgentLoop
