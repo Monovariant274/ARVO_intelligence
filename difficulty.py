@@ -3,14 +3,21 @@
 
 Mirrors what exec-rl does with its pass@k prediction runs: the RL gradient (GRPO)
 comes from reward VARIANCE across the k rollouts of the SAME bug. A bug whose k
-samples all score the same (std == 0) gives zero advantage -- it is either
-saturated (always solved) or dead (never solved) and teaches the policy nothing.
-So we:
+samples all score the same gives zero advantage -- it is either saturated (always
+solved) or dead (never solved) and teaches the policy nothing. So we:
 
   1. score every manifest row through the SAME score.score_prediction the reward
      wiring uses (train/eval can't diverge -- 5d's whole point),
-  2. group rows by bug_id and compute per-bug reward {mean, std, min, max, n},
-  3. BAND: keep only bugs with reward std > --min-std (drop saturated/dead),
+  2. group rows by bug_id and compute per-bug reward stats over the VALID samples
+     (mean/std/min/max), plus raw stats for reference,
+  3. BAND on VALID-SAMPLE std > --min-std. We deliberately measure variance over
+     valid predictions only (dropping the -1 INVALID_PREDICTION_REWARD rows first),
+     because the -1 for a no-prediction/timeout is 1.2+ reward-points below any
+     valid-but-wrong (0.0) answer, so a single stray timeout injects large FAKE
+     variance. A bug whose valid predictions are flat is saturated regardless of
+     how many times the agent timed out -- training on it teaches "emit any
+     answer," not "predict a better location." Banding on valid-sample variance
+     keeps only genuinely learnable bugs.
   4. SPLIT the kept bugs into train/test BY BUG (never by sample), held out with
      a fixed seed BEFORE any training, so eval isn't just regression-to-mean on
      bugs the policy already saw.
@@ -86,27 +93,34 @@ def summarize(bugs: dict[str, dict], *, min_samples: int = 1) -> list[dict]:
         scores = b["scores"]
         if len(scores) < min_samples:
             continue
-        n_valid = sum(1 for s in scores if s != INVALID_PREDICTION_REWARD)
+        valid = [s for s in scores if s != INVALID_PREDICTION_REWARD]
+        # Variance that drives GRPO is measured over VALID predictions only, so a
+        # stray -1 timeout can't fake it (see module docstring). <2 valid samples
+        # => no measurable valid variance => std_valid 0.0 (banded out).
+        std_valid = statistics.pstdev(valid) if len(valid) >= 2 else 0.0
         out.append({
             "bug_id": b["bug_id"],
             "project": b["project"],
             "sanitizer": b["sanitizer"],
             "n_frames": b["n_frames"],
             "n": len(scores),
-            "n_valid": n_valid,
-            "mean": statistics.fmean(scores),
-            "std": statistics.pstdev(scores),
+            "n_valid": len(valid),
+            "mean_valid": statistics.fmean(valid) if valid else 0.0,
+            "std_valid": std_valid,
+            "max_valid": max(valid) if valid else 0.0,
+            "mean": statistics.fmean(scores),   # raw (incl -1), for reference
+            "std": statistics.pstdev(scores),   # raw (incl -1), for reference
             "min": min(scores),
             "max": max(scores),
         })
-    out.sort(key=lambda r: r["std"], reverse=True)
+    out.sort(key=lambda r: r["std_valid"], reverse=True)
     return out
 
 
 def band_and_split(summary: list[dict], *, min_std: float, test_frac: float, seed: int) -> dict:
-    """Keep bugs with std > min_std, then split BY BUG into train/test."""
-    kept = [r for r in summary if r["std"] > min_std]
-    dropped = [r for r in summary if r["std"] <= min_std]
+    """Keep bugs with VALID-sample std > min_std, then split BY BUG into train/test."""
+    kept = [r for r in summary if r["std_valid"] > min_std]
+    dropped = [r for r in summary if r["std_valid"] <= min_std]
 
     ids = [r["bug_id"] for r in kept]
     random.Random(seed).shuffle(ids)
@@ -127,17 +141,17 @@ def band_and_split(summary: list[dict], *, min_std: float, test_frac: float, see
 def _print_report(summary: list[dict], result: dict) -> None:
     n = len(summary)
     kept, dropped = result["kept"], result["dropped"]
-    saturated = [r for r in dropped if r["max"] > 0.0]  # always-ish solved
-    dead = [r for r in dropped if r["max"] <= 0.0]      # never solved / all invalid
+    saturated = [r for r in dropped if r["max_valid"] > 0.0]  # flat valid, solvable
+    dead = [r for r in dropped if r["max_valid"] <= 0.0]      # never solved / all invalid
     print(f"scored {n} bugs from manifest")
-    print(f"  keep (std > {result['params']['min_std']}): {len(kept)}")
-    print(f"  drop saturated (no variance, some reward): {len(saturated)}")
-    print(f"  drop dead (no variance, zero/neg reward):  {len(dead)}")
+    print(f"  keep (valid-sample std > {result['params']['min_std']}): {len(kept)}")
+    print(f"  drop saturated (flat valid preds, some reward): {len(saturated)}")
+    print(f"  drop dead (flat valid preds, zero reward / all invalid): {len(dead)}")
     if kept:
-        stds = [r["std"] for r in kept]
-        means = [r["mean"] for r in kept]
-        print(f"  kept reward std:  mean {statistics.fmean(stds):.3f} / max {max(stds):.3f}")
-        print(f"  kept reward mean: mean {statistics.fmean(means):.3f}")
+        stds = [r["std_valid"] for r in kept]
+        means = [r["mean_valid"] for r in kept]
+        print(f"  kept valid-reward std:  mean {statistics.fmean(stds):.3f} / max {max(stds):.3f}")
+        print(f"  kept valid-reward mean: mean {statistics.fmean(means):.3f}")
     print(f"  split: {len(result['train'])} train / {len(result['test'])} test bugs")
 
 

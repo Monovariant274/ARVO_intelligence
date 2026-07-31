@@ -4,23 +4,51 @@ Handoff doc. Read this to resume without re-deriving context.
 
 ---
 
-## LIVE STATUS (as of 2026-07-30) — RESWEEPING clean on gemini-3-flash-preview (no data mixing)
+## LIVE STATUS (as of 2026-07-31) — PHASE 5 COMPLETE. split.json built. Next = Phase 6 (verl GRPO training)
 
-- **sweep3fp (Phase 5g pass@k) — CURRENT RUN** — tmux session `sweep3fp`, launched 2026-07-30 ~06:27.
-  `gemini/gemini-3-flash-preview` on a paid Gemini Developer API key (`GEMINI_API_KEY`), **concurrency 4**,
-  100 bugs × k=8 = 800 rollouts, same `--shuffle --seed 0 --limit 100` bug set as sweep1. Fresh
-  `--name sweep3fp` manifest → **zero mixing** with the 3.5 data. Expected spend ~$160 (~$0.198/sample);
-  guarded by `--max-cost 250`. Healthy at launch: first 3 samples all valid, 429s mild (~8/min) and fully
-  absorbed by litellm backoff (0 errored rows).
-  - Launch cmd (in tmux): `.venv/bin/python batch_predict.py --model gemini/gemini-3-flash-preview --k 8
+- **sweep3fp (Phase 5g pass@k) — ✅ DONE 2026-07-31** — `runs/sweep3fp/manifest.jsonl`, **800/800 samples,
+  100/100 bugs × k=8**, `gemini/gemini-3-flash-preview` on a paid Gemini Developer key at concurrency 4.
+  **$163.02 total, 0 errored.** Fresh `--name sweep3fp` → zero mixing with the 3.5 (sweep1) data.
+  - Launch cmd used: `.venv/bin/python batch_predict.py --model gemini/gemini-3-flash-preview --k 8
     --limit 100 --shuffle --seed 0 --cleanup-src --max-cost 250 --concurrency 4 --name sweep3fp`
-  - Check: `wc -l runs/sweep3fp/manifest.jsonl` (target 800) · `tmux attach -t sweep3fp` ·
-    `grep -c RateLimitError runs/sweep3fp.console.log`. Sample-level resumable: to retune concurrency,
-    `tmux kill-session -t sweep3fp`, `docker ps --filter name=minisweagent- -q | xargs -r docker rm -f`,
-    then relaunch the SAME name at a different `-c` — resumes from finished samples, no lost work.
-    **If 429s balloon (hundreds fast) or `no_prediction`/errored rows appear, drop to c=3.**
-  - **When it finishes → LAST STEP OF PHASE 5:** `python difficulty.py runs/sweep3fp/manifest.jsonl`
-    (writes `difficulty.json` + `split.json`). This 3-flash-preview sweep is the split feeder for Phase-6.
+  - Sample-level resumable if ever re-run (relaunch SAME `--name`; done samples skipped).
+
+- **FINAL REPORT (all 800 samples, scored via `score.py` = exec-rl `[0,1]` formula, −1 = invalid):**
+  - **Coverage/reliability:** 726/800 valid (91%); 74 no-prediction (9%), every one a `LimitsExceeded`
+    (agent hit the 45-step limit before writing an answer → scored −1). 489 clean `Submitted`, 311
+    `LimitsExceeded` (3-flash-preview is verbose, burns steps). 0 pipeline errors.
+  - **Valid-reward distribution (0..1):** mean **0.235**, median 0.240, max **0.748**, std 0.191;
+    10% valid-but-zero (right format, wrong location). Bulk in 0.1–0.5 → model usually gets file, often
+    function, misses exact line; nothing >0.75 (multi-frame depth-decay ceiling).
+  - **Per-bug (valid-only, apples-to-apples w/ 3.5):** pass@8>0 = **95/100**; per-bug valid mean **0.231**
+    (range 0.00–0.748), valid-sample std **0.077**. vs 3.5 baseline: mean ~0.30, std ~0.11 — same scale/shape,
+    3-flash-preview a bit weaker AND more deterministic (thinner per-bug spread).
+  - **Trainability (GRPO signal = variance among VALID samples):**
+    **54 REAL-gradient (54%)** / 25 invalid-only "variance" (25%, spread is only −1 timeouts) /
+    13 saturated flat-positive (13%) / 8 dead ~0 (8%). Among REAL bugs valid-std mean 0.077 / max 0.246.
+  - **VERDICT:** trainable, but plan on **~54 genuinely-learnable bugs (not 87)** and weaker than 3.5.
+
+- **✅ PHASE 5 CLOSED (2026-07-31) — both pre-split fixes resolved, split.json written:**
+  1. **[DONE] Temperature check — non-issue.** Traced the full chain: `run_prediction.py:195` sets
+     `model_kwargs={"safety_settings": ...}` only; `LitellmModel._query` passes no temperature;
+     `agents/default.py:147` calls `model.query(messages)` with no kwargs. So **no temperature is set at
+     any layer → Gemini API default = 1.0 (high).** The low valid-sample std (0.077) is therefore
+     INTRINSIC to 3-flash-preview on this constrained task, NOT a temp artifact — the model converges to
+     nearly the same crash-site answer across rollouts even at temp 1.0. No cheap variance lever exists;
+     raising temp >1.0 would just add invalids. So ~54 real-gradient bugs is the genuine ceiling; NO
+     re-sweep justified.
+  2. **[DONE] Banded on valid-sample variance, not raw std.** Rewrote `difficulty.py`: `summarize()` now
+     computes `std_valid`/`mean_valid`/`max_valid` over the non-(-1) samples and `band_and_split` keeps
+     `std_valid > --min-std`. This drops the 33 timeout-inflated false keeps (raw-std banding kept 87;
+     valid-std banding keeps 54 at min-std 0.02). saturated/dead now classified by `max_valid`.
+  - **Split built:** `python difficulty.py runs/sweep3fp/manifest.jsonl --min-samples 8 --min-std 0.02`
+    → `runs/sweep3fp/{difficulty.json, split.json}`. **54 kept (std_valid>0.02) → 43 train / 11 test**
+    (test_frac 0.2, seed 0), 46 dropped (41 saturated / 5 dead). Kept valid-reward: mean 0.269, std mean
+    0.077 / max 0.246. Kept set spans **30 projects** (ffmpeg 7, skia 7, imagemagick 4, ... — well diversified,
+    no single project dominates). Alt threshold `--min-std 0.0` keeps 75 (60/15) if more (near-saturated)
+    bugs are wanted later; 0.02 chosen as the clean real-gradient set.
+  - **This split.json is the Phase-6 feeder.** `phase6/build_dataset.py --split runs/sweep3fp/split.json`
+    consumes it. Comparable in absolute count to the 3.5 baseline's 46/51 keep, so a healthy train set.
 
 - **Why preview + c=4 (decided 2026-07-30):** the serial `vertex_ai/gemini-3.5-flash` sweep (sweep1)
   was slow (serial + ~43 calls/rollout + Vertex RPM ceiling). Migrated to a paid Gemini Developer key
