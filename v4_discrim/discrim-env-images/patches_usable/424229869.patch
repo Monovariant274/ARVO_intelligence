@@ -1,0 +1,13 @@
+diff --git a/parser.c b/parser.c
+index 9ca0945..f47f6b8 100644
+--- a/parser.c
++++ b/parser.c
+@@ -4446,7 +4446,7 @@ xmlParsePubidLiteral(xmlParserCtxt *ctxt) {
+                 xmlFree(buf);
+                 return(NULL);
+             }
+-	    tmp = xmlRealloc(buf, size);
++	    tmp = xmlRealloc(buf, newSize);
+ 	    if (tmp == NULL) {
+ 		xmlErrMemory(ctxt);
+ 		xmlFree(buf);

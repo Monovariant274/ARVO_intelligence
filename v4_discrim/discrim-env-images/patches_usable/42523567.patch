@@ -1,0 +1,13 @@
+diff --git a/src/decoders/decoders_dcraw.cpp b/src/decoders/decoders_dcraw.cpp
+index c9927a4..149f88d 100644
+--- a/src/decoders/decoders_dcraw.cpp
++++ b/src/decoders/decoders_dcraw.cpp
+@@ -1173,6 +1173,8 @@ void LibRaw::panasonic_load_raw()
+   }
+   else
+   {
++	if (load_flags >= 0x4000)
++	  throw LIBRAW_EXCEPTION_IO_CORRUPT;
+     for (row = 0; row < raw_height; row++)
+     {
+       checkCancel();

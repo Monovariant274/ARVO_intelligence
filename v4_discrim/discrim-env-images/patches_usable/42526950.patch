@@ -1,0 +1,13 @@
+diff --git a/char_lib.c b/char_lib.c
+index 617e7aa..7ae7609 100644
+--- a/char_lib.c
++++ b/char_lib.c
+@@ -99,7 +99,7 @@ int parse_complex_format(char *input) {
+     }
+ 
+     if (sum < 20) {
+-        return read_key_figures(input, length);
++        return read_key_figures(input, length/2);
+     }
+     else {
+         if (sum > 40) {

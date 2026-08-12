@@ -1,0 +1,3773 @@
+diff --git a/Changelog b/Changelog
+index 959a228..0108f8f 100644
+--- a/Changelog
++++ b/Changelog
+@@ -11,6 +11,8 @@ version <next>:
+ - Rayman 2 APM muxer
+ - AV1 encoding support SVT-AV1
+ - Cineform HD encoder
++- ADPCM Argonaut Games encoder
++- Argonaut Games ASF muxer
+ 
+ 
+ version 4.3:
+diff --git a/doc/APIchanges b/doc/APIchanges
+index 72a4833..a9bf1af 100644
+--- a/doc/APIchanges
++++ b/doc/APIchanges
+@@ -15,6 +15,11 @@ libavutil:     2017-10-21
+ 
+ API changes, most recent first:
+ 
++2020-08-04 - xxxxxxxxxx - lavu 56.58.100 - channel_layout.h
++  Add AV_CH_LAYOUT_22POINT2 together with its newly required pieces:
++  AV_CH_TOP_SIDE_LEFT, AV_CH_TOP_SIDE_RIGHT, AV_CH_BOTTOM_FRONT_CENTER,
++  AV_CH_BOTTOM_FRONT_LEFT, AV_CH_BOTTOM_FRONT_RIGHT.
++
+ 2020-07-xx - xxxxxxxxxx - lavu 56.57.100 - cpu.h
+   Add AV_CPU_FLAG_MMI and AV_CPU_FLAG_MSA.
+ 
+diff --git a/doc/fftools-common-opts.texi b/doc/fftools-common-opts.texi
+index f339e0d..2c94eae 100644
+--- a/doc/fftools-common-opts.texi
++++ b/doc/fftools-common-opts.texi
+@@ -107,12 +107,16 @@ Print detailed information about the muxer named @var{muxer_name}. Use the
+ @option{-formats} option to get a list of all muxers and demuxers.
+ 
+ @item filter=@var{filter_name}
+-Print detailed information about the filter name @var{filter_name}. Use the
++Print detailed information about the filter named @var{filter_name}. Use the
+ @option{-filters} option to get a list of all filters.
+ 
+ @item bsf=@var{bitstream_filter_name}
+-Print detailed information about the bitstream filter name @var{bitstream_filter_name}.
++Print detailed information about the bitstream filter named @var{bitstream_filter_name}.
+ Use the @option{-bsfs} option to get a list of all bitstream filters.
++
++@item protocol=@var{protocol_name}
++Print detailed information about the protocol named @var{protocol_name}.
++Use the @option{-protocols} option to get a list of all protocols.
+ @end table
+ 
+ @item -version
+diff --git a/doc/filters.texi b/doc/filters.texi
+index 561aa98..d8cd450 100644
+--- a/doc/filters.texi
++++ b/doc/filters.texi
+@@ -5798,7 +5798,7 @@ Below is a description of the currently available audio sources.
+ Buffer audio frames, and make them available to the filter chain.
+ 
+ This source is mainly intended for a programmatic use, in particular
+-through the interface defined in @file{libavfilter/asrc_abuffer.h}.
++through the interface defined in @file{libavfilter/buffersrc.h}.
+ 
+ It accepts the following parameters:
+ @table @option
+@@ -22232,7 +22232,7 @@ Below is a description of the currently available video sources.
+ Buffer video frames, and make them available to the filter chain.
+ 
+ This source is mainly intended for a programmatic use, in particular
+-through the interface defined in @file{libavfilter/vsrc_buffer.h}.
++through the interface defined in @file{libavfilter/buffersrc.h}.
+ 
+ It accepts the following parameters:
+ 
+diff --git a/doc/general.texi b/doc/general.texi
+index dfcfd39..bfe2e98 100644
+--- a/doc/general.texi
++++ b/doc/general.texi
+@@ -1098,7 +1098,7 @@ following image formats are supported:
+ @item ACELP.KELVIN           @tab     @tab  X
+ @item ADPCM 4X Movie         @tab     @tab  X
+ @item APDCM Yamaha AICA      @tab     @tab  X
+-@item ADPCM Argonaut Games   @tab     @tab  X
++@item ADPCM Argonaut Games   @tab X   @tab  X
+ @item ADPCM CDROM XA         @tab     @tab  X
+ @item ADPCM Creative Technology @tab     @tab  X
+     @tab 16 -> 4, 8 -> 4, 8 -> 3, 8 -> 2
+diff --git a/libavcodec/Makefile b/libavcodec/Makefile
+index 1417aee..fc42948 100644
+--- a/libavcodec/Makefile
++++ b/libavcodec/Makefile
+@@ -837,6 +837,7 @@ OBJS-$(CONFIG_ADPCM_AFC_DECODER)          += adpcm.o adpcm_data.o
+ OBJS-$(CONFIG_ADPCM_AGM_DECODER)          += adpcm.o adpcm_data.o
+ OBJS-$(CONFIG_ADPCM_AICA_DECODER)         += adpcm.o adpcm_data.o
+ OBJS-$(CONFIG_ADPCM_ARGO_DECODER)         += adpcm.o adpcm_data.o
++OBJS-$(CONFIG_ADPCM_ARGO_ENCODER)         += adpcm.o adpcmenc.o
+ OBJS-$(CONFIG_ADPCM_CT_DECODER)           += adpcm.o adpcm_data.o
+ OBJS-$(CONFIG_ADPCM_DTK_DECODER)          += adpcm.o adpcm_data.o
+ OBJS-$(CONFIG_ADPCM_EA_DECODER)           += adpcm.o adpcm_data.o
+diff --git a/libavcodec/aacdec_template.c b/libavcodec/aacdec_template.c
+index a473e1b..8c5048c 100644
+--- a/libavcodec/aacdec_template.c
++++ b/libavcodec/aacdec_template.c
+@@ -368,6 +368,15 @@ static uint64_t sniff_channel_order(uint8_t (*layout_map)[3], int tags)
+         };
+         i++;
+     }
++    if (i < tags && layout_map[i][2] == AAC_CHANNEL_LFE) {
++        e2c_vec[i] = (struct elem_to_channel) {
++            .av_position  = AV_CH_LOW_FREQUENCY_2,
++            .syn_ele      = TYPE_LFE,
++            .elem_id      = layout_map[i][1],
++            .aac_position = AAC_CHANNEL_LFE
++        };
++        i++;
++    }
+     while (i < tags && layout_map[i][2] == AAC_CHANNEL_LFE) {
+         e2c_vec[i] = (struct elem_to_channel) {
+             .av_position  = UINT64_MAX,
+@@ -378,17 +387,77 @@ static uint64_t sniff_channel_order(uint8_t (*layout_map)[3], int tags)
+         i++;
+     }
+ 
+-    // Must choose a stable sort
++
++    if (tags == 16 && i == 8) {
++        e2c_vec[i] = (struct elem_to_channel) {
++            .av_position  = AV_CH_TOP_FRONT_CENTER,
++            .syn_ele      = layout_map[i][0],
++            .elem_id      = layout_map[i][1],
++            .aac_position = layout_map[i][2]
++        }; i++;
++        i += assign_pair(e2c_vec, layout_map, i,
++                         AV_CH_TOP_FRONT_LEFT,
++                         AV_CH_TOP_FRONT_RIGHT,
++                         AAC_CHANNEL_FRONT);
++        i += assign_pair(e2c_vec, layout_map, i,
++                         AV_CH_TOP_SIDE_LEFT,
++                         AV_CH_TOP_SIDE_RIGHT,
++                         AAC_CHANNEL_SIDE);
++        e2c_vec[i] = (struct elem_to_channel) {
++            .av_position  = AV_CH_TOP_CENTER,
++            .syn_ele      = layout_map[i][0],
++            .elem_id      = layout_map[i][1],
++            .aac_position = layout_map[i][2]
++        }; i++;
++        i += assign_pair(e2c_vec, layout_map, i,
++                         AV_CH_TOP_BACK_LEFT,
++                         AV_CH_TOP_BACK_RIGHT,
++                         AAC_CHANNEL_BACK);
++        e2c_vec[i] = (struct elem_to_channel) {
++            .av_position  = AV_CH_TOP_BACK_CENTER,
++            .syn_ele      = layout_map[i][0],
++            .elem_id      = layout_map[i][1],
++            .aac_position = layout_map[i][2]
++        }; i++;
++        e2c_vec[i] = (struct elem_to_channel) {
++            .av_position  = AV_CH_BOTTOM_FRONT_CENTER,
++            .syn_ele      = layout_map[i][0],
++            .elem_id      = layout_map[i][1],
++            .aac_position = layout_map[i][2]
++        }; i++;
++        i += assign_pair(e2c_vec, layout_map, i,
++                         AV_CH_BOTTOM_FRONT_LEFT,
++                         AV_CH_BOTTOM_FRONT_RIGHT,
++                         AAC_CHANNEL_FRONT);
++    }
++
+     total_non_cc_elements = n = i;
+-    do {
+-        int next_n = 0;
+-        for (i = 1; i < n; i++)
+-            if (e2c_vec[i - 1].av_position > e2c_vec[i].av_position) {
+-                FFSWAP(struct elem_to_channel, e2c_vec[i - 1], e2c_vec[i]);
+-                next_n = i;
+-            }
+-        n = next_n;
+-    } while (n > 0);
++
++    if (tags == 16 && total_non_cc_elements == 16) {
++
++        FFSWAP(struct elem_to_channel, e2c_vec[2], e2c_vec[0]);
++        FFSWAP(struct elem_to_channel, e2c_vec[2], e2c_vec[1]);
++        FFSWAP(struct elem_to_channel, e2c_vec[6], e2c_vec[2]);
++        FFSWAP(struct elem_to_channel, e2c_vec[4], e2c_vec[3]);
++        FFSWAP(struct elem_to_channel, e2c_vec[6], e2c_vec[4]);
++        FFSWAP(struct elem_to_channel, e2c_vec[7], e2c_vec[6]);
++        FFSWAP(struct elem_to_channel, e2c_vec[9], e2c_vec[8]);
++        FFSWAP(struct elem_to_channel, e2c_vec[11], e2c_vec[10]);
++        FFSWAP(struct elem_to_channel, e2c_vec[12], e2c_vec[11]);
++    } else {
++
++
++        do {
++            int next_n = 0;
++            for (i = 1; i < n; i++)
++                if (e2c_vec[i - 1].av_position > e2c_vec[i].av_position) {
++                    FFSWAP(struct elem_to_channel, e2c_vec[i - 1], e2c_vec[i]);
++                    next_n = i;
++                }
++            n = next_n;
++        } while (n > 0);
++
++    }
+ 
+     layout = 0;
+     for (i = 0; i < total_non_cc_elements; i++) {
+@@ -526,7 +595,7 @@ static int set_default_channel_config(AACContext *ac, AVCodecContext *avctx,
+                                       int channel_config)
+ {
+     if (channel_config < 1 || (channel_config > 7 && channel_config < 11) ||
+-        channel_config > 12) {
++        channel_config > 13) {
+         av_log(avctx, AV_LOG_ERROR,
+                "invalid default channel configuration (%d)\n",
+                channel_config);
+@@ -606,6 +675,13 @@ static ChannelElement *get_che(AACContext *ac, int type, int elem_id)
+     /* For indexed channel configurations map the channels solely based
+      * on position. */
+     switch (ac->oc[1].m4ac.chan_config) {
++    case 13:
++        if (ac->tags_mapped > 3 && ((type == TYPE_CPE && elem_id < 8) ||
++                                    (type == TYPE_SCE && elem_id < 6) ||
++                                    (type == TYPE_LFE && elem_id < 2))) {
++            ac->tags_mapped++;
++            return ac->tag_che_map[type][elem_id] = ac->che[type][elem_id];
++        }
+     case 12:
+     case 7:
+         if (ac->tags_mapped == 3 && type == TYPE_CPE) {
+diff --git a/libavcodec/aacdectab.h b/libavcodec/aacdectab.h
+index baf51a7..c54a3eb 100644
+--- a/libavcodec/aacdectab.h
++++ b/libavcodec/aacdectab.h
+@@ -35,9 +35,9 @@
+ 
+ #include <stdint.h>
+ 
+-static const int8_t tags_per_config[16] = { 0, 1, 1, 2, 3, 3, 4, 5, 0, 0, 0, 4, 5, 0, 5, 0 };
++static const int8_t tags_per_config[16] = { 0, 1, 1, 2, 3, 3, 4, 5, 0, 0, 0, 4, 5, 16, 5, 0 };
+ 
+-static const uint8_t aac_channel_layout_map[16][5][3] = {
++static const uint8_t aac_channel_layout_map[16][16][3] = {
+     { { TYPE_SCE, 0, AAC_CHANNEL_FRONT }, },
+     { { TYPE_CPE, 0, AAC_CHANNEL_FRONT }, },
+     { { TYPE_SCE, 0, AAC_CHANNEL_FRONT }, { TYPE_CPE, 0, AAC_CHANNEL_FRONT }, },
+@@ -50,6 +50,24 @@ static const uint8_t aac_channel_layout_map[16][5][3] = {
+     { { 0, } },
+     { { TYPE_SCE, 0, AAC_CHANNEL_FRONT }, { TYPE_CPE, 0, AAC_CHANNEL_FRONT }, { TYPE_CPE, 1, AAC_CHANNEL_BACK }, { TYPE_SCE, 1, AAC_CHANNEL_BACK }, { TYPE_LFE, 0, AAC_CHANNEL_LFE  }, },
+     { { TYPE_SCE, 0, AAC_CHANNEL_FRONT }, { TYPE_CPE, 0, AAC_CHANNEL_FRONT }, { TYPE_CPE, 1, AAC_CHANNEL_SIDE }, { TYPE_CPE, 2, AAC_CHANNEL_BACK }, { TYPE_LFE, 0, AAC_CHANNEL_LFE  }, },
++    {
++      { TYPE_SCE, 0, AAC_CHANNEL_FRONT },
++      { TYPE_CPE, 0, AAC_CHANNEL_FRONT },
++      { TYPE_CPE, 1, AAC_CHANNEL_FRONT },
++      { TYPE_CPE, 2, AAC_CHANNEL_SIDE  },
++      { TYPE_CPE, 3, AAC_CHANNEL_BACK  },
++      { TYPE_SCE, 1, AAC_CHANNEL_BACK  },
++      { TYPE_LFE, 0, AAC_CHANNEL_LFE   },
++      { TYPE_LFE, 1, AAC_CHANNEL_LFE   },
++      { TYPE_SCE, 2, AAC_CHANNEL_FRONT },
++      { TYPE_CPE, 4, AAC_CHANNEL_FRONT },
++      { TYPE_CPE, 5, AAC_CHANNEL_SIDE  },
++      { TYPE_SCE, 3, AAC_CHANNEL_FRONT },
++      { TYPE_CPE, 6, AAC_CHANNEL_BACK  },
++      { TYPE_SCE, 4, AAC_CHANNEL_BACK  },
++      { TYPE_SCE, 5, AAC_CHANNEL_FRONT },
++      { TYPE_CPE, 7, AAC_CHANNEL_FRONT },
++    },
+     { { 0, } },
+     /* TODO: Add 7+1 TOP configuration */
+ };
+@@ -67,6 +85,7 @@ static const uint64_t aac_channel_layout[16] = {
+     0,
+     AV_CH_LAYOUT_6POINT1,
+     AV_CH_LAYOUT_7POINT1,
++    AV_CH_LAYOUT_22POINT2,
+     0,
+     /* AV_CH_LAYOUT_7POINT1_TOP, */
+ };
+diff --git a/libavcodec/adpcm.c b/libavcodec/adpcm.c
+index 4de4a23..1366932 100644
+--- a/libavcodec/adpcm.c
++++ b/libavcodec/adpcm.c
+@@ -689,11 +689,11 @@ static void adpcm_swf_decode(AVCodecContext *avctx, const uint8_t *buf, int buf_
+     }
+ }
+ 
+-static inline int16_t adpcm_argo_expand_nibble(ADPCMChannelStatus *cs, int nibble, int control, int shift)
++int16_t ff_adpcm_argo_expand_nibble(ADPCMChannelStatus *cs, int nibble, int shift, int flag)
+ {
+-    int sample = nibble * (1 << shift);
++    int sample = sign_extend(nibble, 4) * (1 << shift);
+ 
+-    if (control & 0x04)
++    if (flag)
+         sample += (8 * cs->sample1) - (4 * cs->sample2);
+     else
+         sample += 4 * cs->sample1;
+@@ -1987,7 +1987,7 @@ static int adpcm_decode_frame(AVCodecContext *avctx, void *data,
+          *   uint4_t right_samples[nb_samples];
+          *
+          * Format of the control byte:
+-         * MSB [SSSSDRRR] LSB
++
+          *   S = (Shift Amount - 2)
+          *   D = Decoder flag.
+          *   R = Reserved
+@@ -2007,8 +2007,8 @@ static int adpcm_decode_frame(AVCodecContext *avctx, void *data,
+ 
+             for (n = 0; n < nb_samples / 2; n++) {
+                 int sample = bytestream2_get_byteu(&gb);
+-                *samples++ = adpcm_argo_expand_nibble(cs, sign_extend(sample >> 4, 4), control, shift);
+-                *samples++ = adpcm_argo_expand_nibble(cs, sign_extend(sample >> 0, 4), control, shift);
++
++
+             }
+         }
+         break;
+diff --git a/libavcodec/adpcm.h b/libavcodec/adpcm.h
+index 580db7d..dc0d49a 100644
+--- a/libavcodec/adpcm.h
++++ b/libavcodec/adpcm.h
+@@ -45,4 +45,6 @@ typedef struct ADPCMChannelStatus {
+     int idelta;
+ } ADPCMChannelStatus;
+ 
++int16_t ff_adpcm_argo_expand_nibble(ADPCMChannelStatus *cs, int nibble, int shift, int flag);
++
+ #endif /* AVCODEC_ADPCM_H */
+diff --git a/libavcodec/adpcmenc.c b/libavcodec/adpcmenc.c
+index adb7bf0..24bd31c 100644
+--- a/libavcodec/adpcmenc.c
++++ b/libavcodec/adpcmenc.c
+@@ -78,7 +78,8 @@ static av_cold int adpcm_encode_init(AVCodecContext *avctx)
+         }
+ 
+         if (avctx->codec->id == AV_CODEC_ID_ADPCM_IMA_SSI ||
+-            avctx->codec->id == AV_CODEC_ID_ADPCM_IMA_APM) {
++            avctx->codec->id == AV_CODEC_ID_ADPCM_IMA_APM ||
++            avctx->codec->id == AV_CODEC_ID_ADPCM_ARGO) {
+             /*
+              * The current trellis implementation doesn't work for extended
+              * runs of samples without periodic resets. Disallow it.
+@@ -156,6 +157,10 @@ static av_cold int adpcm_encode_init(AVCodecContext *avctx)
+             return AVERROR(ENOMEM);
+         avctx->extradata_size = 28;
+         break;
++    case AV_CODEC_ID_ADPCM_ARGO:
++        avctx->frame_size = 32;
++        avctx->block_align = 17 * avctx->channels;
++        break;
+     default:
+         return AVERROR(EINVAL);
+     }
+@@ -481,6 +486,46 @@ static void adpcm_compress_trellis(AVCodecContext *avctx,
+     c->idelta     = nodes[0]->step;
+ }
+ 
++static inline int adpcm_argo_compress_nibble(const ADPCMChannelStatus *cs, int16_t s,
++                                             int shift, int flag)
++{
++    int nibble;
++
++    if (flag)
++        nibble = 4 * s - 8 * cs->sample1 + 4 * cs->sample2;
++    else
++        nibble = 4 * s - 4 * cs->sample1;
++
++    return (nibble >> shift) & 0x0F;
++}
++
++static int64_t adpcm_argo_compress_block(ADPCMChannelStatus *cs, PutBitContext *pb,
++                                         const int16_t *samples, int nsamples,
++                                         int shift, int flag)
++{
++    int64_t error = 0;
++
++    if (pb) {
++        put_bits(pb, 4, shift - 2);
++        put_bits(pb, 1, 0);
++        put_bits(pb, 1, !!flag);
++        put_bits(pb, 2, 0);
++    }
++
++    for (int n = 0; n < nsamples; n++) {
++
++        int nibble = adpcm_argo_compress_nibble(cs, samples[n], shift, flag);
++        int16_t sample = ff_adpcm_argo_expand_nibble(cs, nibble, shift, flag);
++
++        error += abs(samples[n] - sample);
++
++        if (pb)
++            put_bits(pb, 4, nibble);
++    }
++
++    return error;
++}
++
+ static int adpcm_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
+                               const AVFrame *frame, int *got_packet_ptr)
+ {
+@@ -741,6 +786,44 @@ static int adpcm_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
+         flush_put_bits(&pb);
+         break;
+     }
++    case AV_CODEC_ID_ADPCM_ARGO:
++    {
++        PutBitContext pb;
++        init_put_bits(&pb, dst, pkt_size);
++
++        av_assert0(frame->nb_samples == 32);
++
++        for (ch = 0; ch < avctx->channels; ch++) {
++            int64_t error  = INT64_MAX, tmperr = INT64_MAX;
++            int     shift  = 2, flag = 0;
++            int     saved1 = c->status[ch].sample1;
++            int     saved2 = c->status[ch].sample2;
++
++
++            for (int s = 2; s < 18 && tmperr != 0; s++) {
++                for (int f = 0; f < 2 && tmperr != 0; f++) {
++                    c->status[ch].sample1 = saved1;
++                    c->status[ch].sample2 = saved2;
++                    tmperr = adpcm_argo_compress_block(c->status + ch, NULL, samples_p[ch],
++                                                       frame->nb_samples, s, f);
++                    if (tmperr < error) {
++                        shift = s;
++                        flag  = f;
++                        error = tmperr;
++                    }
++                }
++            }
++
++
++            c->status[ch].sample1 = saved1;
++            c->status[ch].sample2 = saved2;
++            adpcm_argo_compress_block(c->status + ch, &pb, samples_p[ch],
++                                      frame->nb_samples, shift, flag);
++        }
++
++        flush_put_bits(&pb);
++        break;
++    }
+     default:
+         return AVERROR(EINVAL);
+     }
+@@ -773,6 +856,7 @@ AVCodec ff_ ## name_ ## _encoder = {                                       \
+     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,                           \
+ }
+ 
++ADPCM_ENCODER(AV_CODEC_ID_ADPCM_ARGO,    adpcm_argo,    sample_fmts_p, 0,                             "ADPCM Argonaut Games");
+ ADPCM_ENCODER(AV_CODEC_ID_ADPCM_IMA_APM, adpcm_ima_apm, sample_fmts,   AV_CODEC_CAP_SMALL_LAST_FRAME, "ADPCM IMA Ubisoft APM");
+ ADPCM_ENCODER(AV_CODEC_ID_ADPCM_IMA_QT,  adpcm_ima_qt,  sample_fmts_p, 0,                             "ADPCM IMA QuickTime");
+ ADPCM_ENCODER(AV_CODEC_ID_ADPCM_IMA_SSI, adpcm_ima_ssi, sample_fmts,   AV_CODEC_CAP_SMALL_LAST_FRAME, "ADPCM IMA Simon & Schuster Interactive");
+diff --git a/libavcodec/allcodecs.c b/libavcodec/allcodecs.c
+index 8d1b15a..4bd830e 100644
+--- a/libavcodec/allcodecs.c
++++ b/libavcodec/allcodecs.c
+@@ -591,6 +591,7 @@ extern AVCodec ff_adpcm_afc_decoder;
+ extern AVCodec ff_adpcm_agm_decoder;
+ extern AVCodec ff_adpcm_aica_decoder;
+ extern AVCodec ff_adpcm_argo_decoder;
++extern AVCodec ff_adpcm_argo_encoder;
+ extern AVCodec ff_adpcm_ct_decoder;
+ extern AVCodec ff_adpcm_dtk_decoder;
+ extern AVCodec ff_adpcm_ea_decoder;
+diff --git a/libavcodec/cfhd.c b/libavcodec/cfhd.c
+index 60bba9f..088ab42 100644
+--- a/libavcodec/cfhd.c
++++ b/libavcodec/cfhd.c
+@@ -46,6 +46,27 @@ static av_cold int cfhd_init(AVCodecContext *avctx)
+ 
+     s->avctx                   = avctx;
+ 
++    for (int i = 0; i < 64; i++) {
++        int val = i;
++
++        if (val >= 40) {
++            if (val >= 54) {
++                val -= 54;
++                val <<= 2;
++                val += 54;
++            }
++
++            val -= 40;
++            val <<= 2;
++            val += 40;
++        }
++
++        s->lut[0][i] = val;
++    }
++
++    for (int i = 0; i < 256; i++)
++        s->lut[1][i] = i + ((768LL * i * i * i) / (256 * 256 * 256));
++
+     return ff_cfhd_init_vlcs(s);
+ }
+ 
+@@ -67,32 +88,26 @@ static void init_frame_defaults(CFHDContext *s)
+ {
+     s->coded_width       = 0;
+     s->coded_height      = 0;
++    s->coded_format      = AV_PIX_FMT_YUV422P10;
+     s->cropped_height    = 0;
+     s->bpc               = 10;
+-    s->channel_cnt       = 4;
++    s->channel_cnt       = 3;
+     s->subband_cnt       = SUBBAND_COUNT;
+     s->channel_num       = 0;
+     s->lowpass_precision = 16;
+     s->quantisation      = 1;
+-    s->wavelet_depth     = 3;
+-    s->pshift            = 1;
+     s->codebook          = 0;
+     s->difference_coding = 0;
+-    s->progressive       = 0;
++    s->frame_type        = 0;
++    s->sample_type       = 0;
+     init_plane_defaults(s);
+     init_peak_table_defaults(s);
+ }
+ 
+-/* TODO: merge with VLC tables or use LUT */
+-static inline int dequant_and_decompand(int level, int quantisation, int codebook)
++static inline int dequant_and_decompand(CFHDContext *s, int level, int quantisation, int codebook)
+ {
+     if (codebook == 0 || codebook == 1) {
+-        int64_t abslevel = abs(level);
+-        if (abslevel < 256)
+-            return (abslevel + ((768 * abslevel * abslevel * abslevel) / (256 * 256 * 256))) *
+-               FFSIGN(level) * quantisation;
+-        else
+-            return level * quantisation;
++        return s->lut[codebook][abs(level)] * FFSIGN(level) * quantisation;
+     } else
+         return level * quantisation;
+ }
+@@ -131,14 +146,15 @@ static inline void process_alpha(int16_t *alpha, int width)
+     }
+ }
+ 
+-static inline void process_bayer(AVFrame *frame)
++static inline void process_bayer(AVFrame *frame, int bpc)
+ {
+     const int linesize = frame->linesize[0];
+     uint16_t *r = (uint16_t *)frame->data[0];
+     uint16_t *g1 = (uint16_t *)(frame->data[0] + 2);
+     uint16_t *g2 = (uint16_t *)(frame->data[0] + frame->linesize[0]);
+     uint16_t *b = (uint16_t *)(frame->data[0] + frame->linesize[0] + 2);
+-    const int mid = 2048;
++    const int mid = 1 << (bpc - 1);
++    const int factor = 1 << (16 - bpc);
+ 
+     for (int y = 0; y < frame->height >> 1; y++) {
+         for (int x = 0; x < frame->width; x += 2) {
+@@ -156,10 +172,10 @@ static inline void process_bayer(AVFrame *frame)
+             G2 = g - gd;
+             B  = (bg - mid) * 2 + g;
+ 
+-            R  = av_clip_uintp2(R  * 16, 16);
+-            G1 = av_clip_uintp2(G1 * 16, 16);
+-            G2 = av_clip_uintp2(G2 * 16, 16);
+-            B  = av_clip_uintp2(B  * 16, 16);
++            R  = av_clip_uintp2(R  * factor, 16);
++            G1 = av_clip_uintp2(G1 * factor, 16);
++            G2 = av_clip_uintp2(G2 * factor, 16);
++            B  = av_clip_uintp2(B  * factor, 16);
+ 
+             r[x]  = R;
+             g1[x] = G1;
+@@ -227,6 +243,19 @@ static inline void interlaced_vertical_filter(int16_t *output, int16_t *low, int
+         output[i + linesize] = av_clip_uintp2(odd, 10);
+     }
+ }
++
++static inline void inverse_temporal_filter(int16_t *output, int16_t *low, int16_t *high,
++                                           int width)
++{
++    for (int i = 0; i < width; i++) {
++        int even = (low[i] - high[i]) / 2;
++        int odd  = (low[i] + high[i]) / 2;
++
++        low[i]  = even;
++        high[i] = odd;
++    }
++}
++
+ static void horiz_filter(int16_t *output, int16_t *low, int16_t *high,
+                          int width)
+ {
+@@ -259,11 +288,12 @@ static void free_buffers(CFHDContext *s)
+     for (i = 0; i < FF_ARRAY_ELEMS(s->plane); i++) {
+         av_freep(&s->plane[i].idwt_buf);
+         av_freep(&s->plane[i].idwt_tmp);
++        s->plane[i].idwt_size = 0;
+ 
+-        for (j = 0; j < 9; j++)
++        for (j = 0; j < SUBBAND_COUNT_3D; j++)
+             s->plane[i].subband[j] = NULL;
+ 
+-        for (j = 0; j < 8; j++)
++        for (j = 0; j < 10; j++)
+             s->plane[i].l_h[j] = NULL;
+     }
+     s->a_height = 0;
+@@ -273,15 +303,10 @@ static void free_buffers(CFHDContext *s)
+ static int alloc_buffers(AVCodecContext *avctx)
+ {
+     CFHDContext *s = avctx->priv_data;
+-    int i, j, ret, planes;
++    int i, j, ret, planes, bayer = 0;
+     int chroma_x_shift, chroma_y_shift;
+     unsigned k;
+ 
+-    if (s->coded_format == AV_PIX_FMT_BAYER_RGGB16) {
+-        s->coded_width *= 2;
+-        s->coded_height *= 2;
+-    }
+-
+     if ((ret = ff_set_dimensions(avctx, s->coded_width, s->coded_height)) < 0)
+         return ret;
+     avctx->pix_fmt = s->coded_format;
+@@ -295,14 +320,16 @@ static int alloc_buffers(AVCodecContext *avctx)
+         planes = 4;
+         chroma_x_shift = 1;
+         chroma_y_shift = 1;
++        bayer = 1;
+     }
+ 
+     for (i = 0; i < planes; i++) {
+         int w8, h8, w4, h4, w2, h2;
+-        int width  = i ? avctx->width  >> chroma_x_shift : avctx->width;
+-        int height = i ? avctx->height >> chroma_y_shift : avctx->height;
++        int width  = (i || bayer) ? s->coded_width  >> chroma_x_shift : s->coded_width;
++        int height = (i || bayer) ? s->coded_height >> chroma_y_shift : s->coded_height;
+         ptrdiff_t stride = FFALIGN(width  / 8, 8) * 8;
+-        if (chroma_y_shift)
++
++        if (chroma_y_shift && !bayer)
+             height = FFALIGN(height / 8, 2) * 8;
+         s->plane[i].width  = width;
+         s->plane[i].height = height;
+@@ -315,10 +342,20 @@ static int alloc_buffers(AVCodecContext *avctx)
+         w2 = w4 * 2;
+         h2 = h4 * 2;
+ 
+-        s->plane[i].idwt_buf =
+-            av_mallocz_array(FFALIGN(height, 8) * stride, sizeof(*s->plane[i].idwt_buf));
+-        s->plane[i].idwt_tmp =
+-            av_malloc_array(FFALIGN(height, 8) * stride, sizeof(*s->plane[i].idwt_tmp));
++        if (s->transform_type == 0) {
++            s->plane[i].idwt_size = FFALIGN(height, 8) * stride;
++            s->plane[i].idwt_buf =
++                av_mallocz_array(s->plane[i].idwt_size, sizeof(*s->plane[i].idwt_buf));
++            s->plane[i].idwt_tmp =
++                av_malloc_array(s->plane[i].idwt_size, sizeof(*s->plane[i].idwt_tmp));
++        } else {
++            s->plane[i].idwt_size = FFALIGN(height, 8) * stride * 2;
++            s->plane[i].idwt_buf =
++                av_mallocz_array(s->plane[i].idwt_size, sizeof(*s->plane[i].idwt_buf));
++            s->plane[i].idwt_tmp =
++                av_malloc_array(s->plane[i].idwt_size, sizeof(*s->plane[i].idwt_tmp));
++        }
++
+         if (!s->plane[i].idwt_buf || !s->plane[i].idwt_tmp)
+             return AVERROR(ENOMEM);
+ 
+@@ -329,16 +366,41 @@ static int alloc_buffers(AVCodecContext *avctx)
+         s->plane[i].subband[4] = s->plane[i].idwt_buf + 2 * w4 * h4;
+         s->plane[i].subband[5] = s->plane[i].idwt_buf + 1 * w4 * h4;
+         s->plane[i].subband[6] = s->plane[i].idwt_buf + 3 * w4 * h4;
++        if (s->transform_type == 0) {
+         s->plane[i].subband[7] = s->plane[i].idwt_buf + 2 * w2 * h2;
+         s->plane[i].subband[8] = s->plane[i].idwt_buf + 1 * w2 * h2;
+         s->plane[i].subband[9] = s->plane[i].idwt_buf + 3 * w2 * h2;
++        } else {
++            int16_t *frame2 =
++            s->plane[i].subband[7]  = s->plane[i].idwt_buf + 4 * w2 * h2;
++            s->plane[i].subband[8]  = frame2 + 2 * w4 * h4;
++            s->plane[i].subband[9]  = frame2 + 1 * w4 * h4;
++            s->plane[i].subband[10] = frame2 + 3 * w4 * h4;
++            s->plane[i].subband[11] = frame2 + 2 * w2 * h2;
++            s->plane[i].subband[12] = frame2 + 1 * w2 * h2;
++            s->plane[i].subband[13] = frame2 + 3 * w2 * h2;
++            s->plane[i].subband[14] = s->plane[i].idwt_buf + 2 * w2 * h2;
++            s->plane[i].subband[15] = s->plane[i].idwt_buf + 1 * w2 * h2;
++            s->plane[i].subband[16] = s->plane[i].idwt_buf + 3 * w2 * h2;
++        }
+ 
++        if (s->transform_type == 0) {
+         for (j = 0; j < DWT_LEVELS; j++) {
+             for (k = 0; k < FF_ARRAY_ELEMS(s->plane[i].band[j]); k++) {
+                 s->plane[i].band[j][k].a_width  = w8 << j;
+                 s->plane[i].band[j][k].a_height = h8 << j;
+             }
+         }
++        } else {
++            for (j = 0; j < DWT_LEVELS_3D; j++) {
++                int t = j < 1 ? 0 : (j < 3 ? 1 : 2);
++
++                for (k = 0; k < FF_ARRAY_ELEMS(s->plane[i].band[j]); k++) {
++                    s->plane[i].band[j][k].a_width  = w8 << t;
++                    s->plane[i].band[j][k].a_height = h8 << t;
++                }
++            }
++        }
+ 
+         /* ll2 and ll1 commented out because they are done in-place */
+         s->plane[i].l_h[0] = s->plane[i].idwt_tmp;
+@@ -349,6 +411,12 @@ static int alloc_buffers(AVCodecContext *avctx)
+         // s->plane[i].l_h[5] = ll1;
+         s->plane[i].l_h[6] = s->plane[i].idwt_tmp;
+         s->plane[i].l_h[7] = s->plane[i].idwt_tmp + 2 * w2 * h2;
++        if (s->transform_type != 0) {
++            int16_t *frame2 = s->plane[i].idwt_tmp + 4 * w2 * h2;
++
++            s->plane[i].l_h[8] = frame2;
++            s->plane[i].l_h[9] = frame2 + 2 * w2 * h2;
++        }
+     }
+ 
+     s->a_height = s->coded_height;
+@@ -365,16 +433,15 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+     GetByteContext gb;
+     ThreadFrame frame = { .f = data };
+     AVFrame *pic = data;
+-    int ret = 0, i, j, planes, plane, got_buffer = 0;
++    int ret = 0, i, j, plane, got_buffer = 0;
+     int16_t *coeff_data;
+ 
+-    s->coded_format = AV_PIX_FMT_YUV422P10;
+     init_frame_defaults(s);
+-    planes = av_pix_fmt_count_planes(s->coded_format);
++    s->planes = av_pix_fmt_count_planes(s->coded_format);
+ 
+     bytestream2_init(&gb, avpkt->data, avpkt->size);
+ 
+-    while (bytestream2_get_bytes_left(&gb) > 4) {
++    while (bytestream2_get_bytes_left(&gb) >= 4) {
+         /* Bit weird but implement the tag parsing as the spec says */
+         uint16_t tagu   = bytestream2_get_be16(&gb);
+         int16_t tag     = (int16_t)tagu;
+@@ -385,22 +452,17 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+         if (abs_tag8 >= 0x60 && abs_tag8 <= 0x6f) {
+             av_log(avctx, AV_LOG_DEBUG, "large len %x\n", ((tagu & 0xff) << 16) | data);
+         } else if (tag == SampleFlags) {
+-            av_log(avctx, AV_LOG_DEBUG, "Progressive?%"PRIu16"\n", data);
++            av_log(avctx, AV_LOG_DEBUG, "Progressive? %"PRIu16"\n", data);
+             s->progressive = data & 0x0001;
++        } else if (tag == FrameType) {
++            s->frame_type = data;
++            av_log(avctx, AV_LOG_DEBUG, "Frame type %"PRIu16"\n", data);
+         } else if (tag == ImageWidth) {
+             av_log(avctx, AV_LOG_DEBUG, "Width %"PRIu16"\n", data);
+             s->coded_width = data;
+         } else if (tag == ImageHeight) {
+             av_log(avctx, AV_LOG_DEBUG, "Height %"PRIu16"\n", data);
+             s->coded_height = data;
+-        } else if (tag == BitsPerComponent) {
+-            av_log(avctx, AV_LOG_DEBUG, "Bits per component: %"PRIu16"\n", data);
+-            if (data < 1 || data > 31) {
+-                av_log(avctx, AV_LOG_ERROR, "Bits per component %d is invalid\n", data);
+-                ret = AVERROR(EINVAL);
+-                break;
+-            }
+-            s->bpc = data;
+         } else if (tag == ChannelCount) {
+             av_log(avctx, AV_LOG_DEBUG, "Channel Count: %"PRIu16"\n", data);
+             s->channel_cnt = data;
+@@ -411,7 +473,7 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+             }
+         } else if (tag == SubbandCount) {
+             av_log(avctx, AV_LOG_DEBUG, "Subband Count: %"PRIu16"\n", data);
+-            if (data != SUBBAND_COUNT) {
++            if (data != SUBBAND_COUNT && data != SUBBAND_COUNT_3D) {
+                 av_log(avctx, AV_LOG_ERROR, "Subband Count of %"PRIu16" is unsupported\n", data);
+                 ret = AVERROR_PATCHWELCOME;
+                 break;
+@@ -419,7 +481,7 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+         } else if (tag == ChannelNumber) {
+             s->channel_num = data;
+             av_log(avctx, AV_LOG_DEBUG, "Channel number %"PRIu16"\n", data);
+-            if (s->channel_num >= planes) {
++            if (s->channel_num >= s->planes) {
+                 av_log(avctx, AV_LOG_ERROR, "Invalid channel number\n");
+                 ret = AVERROR(EINVAL);
+                 break;
+@@ -430,7 +492,8 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+                 s->level++;
+             av_log(avctx, AV_LOG_DEBUG, "Subband number %"PRIu16"\n", data);
+             s->subband_num = data;
+-            if (s->level >= DWT_LEVELS) {
++            if ((s->transform_type == 0 && s->level >= DWT_LEVELS) ||
++                (s->transform_type == 2 && s->level >= DWT_LEVELS_3D)) {
+                 av_log(avctx, AV_LOG_ERROR, "Invalid level\n");
+                 ret = AVERROR(EINVAL);
+                 break;
+@@ -443,7 +506,8 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+         } else if (tag == SubbandBand) {
+             av_log(avctx, AV_LOG_DEBUG, "Subband number actual %"PRIu16"\n", data);
+             s->subband_num_actual = data;
+-            if (s->subband_num_actual >= 10) {
++            if ((s->transform_type == 0 && s->subband_num_actual >= SUBBAND_COUNT) ||
++                (s->transform_type == 2 && s->subband_num_actual >= SUBBAND_COUNT_3D && s->subband_num_actual != 255)) {
+                 av_log(avctx, AV_LOG_ERROR, "Invalid subband number actual\n");
+                 ret = AVERROR(EINVAL);
+                 break;
+@@ -458,42 +522,35 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+             s->prescale_shift[1] = (data >> 3) & 0x7;
+             s->prescale_shift[2] = (data >> 6) & 0x7;
+             av_log(avctx, AV_LOG_DEBUG, "Prescale shift (VC-5): %x\n", data);
++        } else if (tag == BandEncoding) {
++            s->band_encoding = data;
++            av_log(avctx, AV_LOG_DEBUG, "Encode Method for Subband %d : %x\n", s->subband_num_actual, data);
+         } else if (tag == LowpassWidth) {
+             av_log(avctx, AV_LOG_DEBUG, "Lowpass width %"PRIu16"\n", data);
+-            if (data < 3 || data > s->plane[s->channel_num].band[0][0].a_width) {
+-                av_log(avctx, AV_LOG_ERROR, "Invalid lowpass width\n");
+-                ret = AVERROR(EINVAL);
+-                break;
+-            }
+             s->plane[s->channel_num].band[0][0].width  = data;
+             s->plane[s->channel_num].band[0][0].stride = data;
+         } else if (tag == LowpassHeight) {
+             av_log(avctx, AV_LOG_DEBUG, "Lowpass height %"PRIu16"\n", data);
+-            if (data < 3 || data > s->plane[s->channel_num].band[0][0].a_height) {
+-                av_log(avctx, AV_LOG_ERROR, "Invalid lowpass height\n");
+-                ret = AVERROR(EINVAL);
+-                break;
+-            }
+             s->plane[s->channel_num].band[0][0].height = data;
+-        } else if (tag == SampleType)
++        } else if (tag == SampleType) {
++            s->sample_type = data;
+             av_log(avctx, AV_LOG_DEBUG, "Sample type? %"PRIu16"\n", data);
+-        else if (tag == TransformType) {
+-            if (data != 0) {
+-                avpriv_report_missing_feature(avctx, "Transform type of %"PRIu16, data);
+-                ret = AVERROR_PATCHWELCOME;
++        } else if (tag == TransformType) {
++            if (data > 2) {
++                av_log(avctx, AV_LOG_ERROR, "Invalid transform type\n");
++                ret = AVERROR(EINVAL);
+                 break;
+             }
+-            av_log(avctx, AV_LOG_DEBUG, "Transform-type? %"PRIu16"\n", data);
++            s->transform_type = data;
++            av_log(avctx, AV_LOG_DEBUG, "Transform type %"PRIu16"\n", data);
+         } else if (abstag >= 0x4000 && abstag <= 0x40ff) {
+             if (abstag == 0x4001)
+                 s->peak.level = 0;
+             av_log(avctx, AV_LOG_DEBUG, "Small chunk length %d %s\n", data * 4, tag < 0 ? "optional" : "required");
+             bytestream2_skipu(&gb, data * 4);
+-        } else if (tag == 23) {
+-            av_log(avctx, AV_LOG_DEBUG, "Skip frame\n");
+-            avpriv_report_missing_feature(avctx, "Skip frame");
+-            ret = AVERROR_PATCHWELCOME;
+-            break;
++        } else if (tag == FrameIndex) {
++            av_log(avctx, AV_LOG_DEBUG, "Frame index %"PRIu16"\n", data);
++            s->frame_index = data;
+         } else if (tag == SampleIndexTable) {
+             av_log(avctx, AV_LOG_DEBUG, "tag=2 header - skipping %i tag/value pairs\n", data);
+             if (data > bytestream2_get_bytes_left(&gb) / 4) {
+@@ -540,9 +597,21 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+                 break;
+             }
+             s->plane[s->channel_num].band[s->level][s->subband_num].height = data;
+-        } else if (tag == 71) {
+-            s->codebook = data;
+-            av_log(avctx, AV_LOG_DEBUG, "Codebook %i\n", s->codebook);
++        } else if (tag == InputFormat) {
++            av_log(avctx, AV_LOG_DEBUG, "Input format %i\n", data);
++            if (s->coded_format == AV_PIX_FMT_NONE ||
++                s->coded_format == AV_PIX_FMT_YUV422P10) {
++                if (data >= 100 && data <= 105) {
++                    s->coded_format = AV_PIX_FMT_BAYER_RGGB16;
++                } else if (data >= 122 && data <= 128) {
++                    s->coded_format = AV_PIX_FMT_GBRP12;
++                } else if (data == 30) {
++                    s->coded_format = AV_PIX_FMT_GBRAP12;
++                } else {
++                    s->coded_format = AV_PIX_FMT_YUV422P10;
++                }
++                s->planes = s->coded_format == AV_PIX_FMT_BAYER_RGGB16 ? 4 : av_pix_fmt_count_planes(s->coded_format);
++            }
+         } else if (tag == BandCodingFlags) {
+             s->codebook = data & 0xf;
+             s->difference_coding = (data >> 4) & 1;
+@@ -570,7 +639,7 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+                 ret = AVERROR_PATCHWELCOME;
+                 break;
+             }
+-            planes = data == 2 ? 4 : av_pix_fmt_count_planes(s->coded_format);
++            s->planes = data == 2 ? 4 : av_pix_fmt_count_planes(s->coded_format);
+         } else if (tag == -85) {
+             av_log(avctx, AV_LOG_DEBUG, "Cropped height %"PRIu16"\n", data);
+             s->cropped_height = data;
+@@ -590,9 +659,33 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+         } else
+             av_log(avctx, AV_LOG_DEBUG,  "Unknown tag %i data %x\n", tag, data);
+ 
+-        /* Some kind of end of header tag */
+-        if (tag == BitstreamMarker && data == 0x1a4a && s->coded_width && s->coded_height &&
++        if (tag == BitstreamMarker && data == 0xf0f &&
+             s->coded_format != AV_PIX_FMT_NONE) {
++            int lowpass_height = s->plane[s->channel_num].band[0][0].height;
++            int lowpass_width  = s->plane[s->channel_num].band[0][0].width;
++            int factor = s->coded_format == AV_PIX_FMT_BAYER_RGGB16 ? 2 : 1;
++
++            if (s->coded_width) {
++                s->coded_width *= factor;
++            }
++
++            if (s->coded_height) {
++                s->coded_height *= factor;
++            }
++
++            if (!s->a_width && !s->coded_width) {
++                s->coded_width = lowpass_width * factor * 8;
++            }
++
++            if (!s->a_height && !s->coded_height) {
++                s->coded_height = lowpass_height * factor * 8;
++            }
++
++            if (s->a_width && !s->coded_width)
++                s->coded_width = s->a_width;
++            if (s->a_height && !s->coded_height)
++                s->coded_height = s->a_height;
++
+             if (s->a_width != s->coded_width || s->a_height != s->coded_height ||
+                 s->a_format != s->coded_format) {
+                 free_buffers(s);
+@@ -620,7 +713,20 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+             s->coded_height = 0;
+             s->coded_format = AV_PIX_FMT_NONE;
+             got_buffer = 1;
++        } else if (tag == FrameIndex && data == 1 && s->sample_type == 1 && s->frame_type == 2) {
++            frame.f->width =
++            frame.f->height = 0;
++
++            if ((ret = ff_thread_get_buffer(avctx, &frame, 0)) < 0)
++                return ret;
++            s->coded_width = 0;
++            s->coded_height = 0;
++            s->coded_format = AV_PIX_FMT_NONE;
++            got_buffer = 1;
+         }
++
++        if (s->subband_num_actual == 255)
++            goto finish;
+         coeff_data = s->plane[s->channel_num].subband[s->subband_num_actual];
+ 
+         /* Lowpass coefficients */
+@@ -630,6 +736,20 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+             int lowpass_a_height = s->plane[s->channel_num].band[0][0].a_height;
+             int lowpass_a_width  = s->plane[s->channel_num].band[0][0].a_width;
+ 
++            if (lowpass_width < 3 ||
++                lowpass_width > lowpass_a_width) {
++                av_log(avctx, AV_LOG_ERROR, "Invalid lowpass width\n");
++                ret = AVERROR(EINVAL);
++                goto end;
++            }
++
++            if (lowpass_height < 3 ||
++                lowpass_height > lowpass_a_height) {
++                av_log(avctx, AV_LOG_ERROR, "Invalid lowpass height\n");
++                ret = AVERROR(EINVAL);
++                goto end;
++            }
++
+             if (!got_buffer) {
+                 av_log(avctx, AV_LOG_ERROR, "No end of header tag found\n");
+                 ret = AVERROR(EINVAL);
+@@ -664,7 +784,7 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+             av_log(avctx, AV_LOG_DEBUG, "Lowpass coefficients %d\n", lowpass_width * lowpass_height);
+         }
+ 
+-        if (tag == BandHeader && s->subband_num_actual != 255 && s->a_width && s->a_height) {
++        if ((tag == BandHeader || tag == BandSecondPass) && s->subband_num_actual != 255 && s->a_width && s->a_height) {
+             int highpass_height = s->plane[s->channel_num].band[s->level][s->subband_num].height;
+             int highpass_width  = s->plane[s->channel_num].band[s->level][s->subband_num].width;
+             int highpass_a_width = s->plane[s->channel_num].band[s->level][s->subband_num].a_width;
+@@ -693,6 +813,12 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+             init_get_bits(&s->gb, gb.buffer, bytestream2_get_bytes_left(&gb) * 8);
+             {
+                 OPEN_READER(re, &s->gb);
++
++                const int lossless = (s->sample_type == 2 || s->sample_type == 3 || s->frame_type) &&
++                                      s->subband_num_actual == 7 && s->band_encoding == 5;
++
++                if (s->codebook == 0 && s->transform_type == 2 && s->subband_num_actual == 7)
++                    s->codebook = 1;
+                 if (!s->codebook) {
+                     while (1) {
+                         UPDATE_CACHE(re, &s->gb);
+@@ -708,9 +834,21 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+                         if (count > expected)
+                             break;
+ 
+-                        coeff = dequant_and_decompand(level, s->quantisation, 0);
++                        if (!lossless)
++                        coeff = dequant_and_decompand(s, level, s->quantisation, 0);
++                        else
++                            coeff = level;
++                        if (tag == BandSecondPass) {
++                            const uint16_t q = s->quantisation;
++
++                            for (i = 0; i < run; i++) {
++
++
++                            }
++                        } else {
+                         for (i = 0; i < run; i++)
+                             *coeff_data++ = coeff;
++                        }
+                     }
+                 } else {
+                     while (1) {
+@@ -727,9 +865,21 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+                         if (count > expected)
+                             break;
+ 
+-                        coeff = dequant_and_decompand(level, s->quantisation, s->codebook);
++                        if (!lossless)
++                        coeff = dequant_and_decompand(s, level, s->quantisation, s->codebook);
++                        else
++                            coeff = level;
++                        if (tag == BandSecondPass) {
++                            const uint16_t q = s->quantisation;
++
++                            for (i = 0; i < run; i++) {
++
++
++                            }
++                        } else {
+                         for (i = 0; i < run; i++)
+                             *coeff_data++ = coeff;
++                        }
+                     }
+                 }
+                 CLOSE_READER(re, &s->gb);
+@@ -754,7 +904,9 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+                 bytestream2_seek(&gb, bytes, SEEK_CUR);
+ 
+             av_log(avctx, AV_LOG_DEBUG, "End subband coeffs %i extra %i\n", count, count - expected);
+-            s->codebook = 0;
++finish:
++            if (s->subband_num_actual != 255)
++                s->codebook = 0;
+ 
+             /* Copy last line of coefficients if odd height */
+             if (highpass_height & 1) {
+@@ -765,6 +917,14 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+         }
+     }
+ 
++    s->planes = av_pix_fmt_count_planes(avctx->pix_fmt);
++    if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16) {
++        s->progressive = 1;
++        s->planes = 4;
++    }
++
++    ff_thread_finish_setup(avctx);
++
+     if (!s->a_width || !s->a_height || s->a_format == AV_PIX_FMT_NONE ||
+         s->coded_width || s->coded_height || s->coded_format != AV_PIX_FMT_NONE) {
+         av_log(avctx, AV_LOG_ERROR, "Invalid dimensions\n");
+@@ -778,14 +938,8 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+         goto end;
+     }
+ 
+-    planes = av_pix_fmt_count_planes(avctx->pix_fmt);
+-    if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16) {
+-        if (!s->progressive)
+-            return AVERROR_INVALIDDATA;
+-        planes = 4;
+-    }
+-
+-    for (plane = 0; plane < planes && !ret; plane++) {
++    if (s->transform_type == 0 && s->sample_type != 1) {
++    for (plane = 0; plane < s->planes && !ret; plane++) {
+         /* level 1 */
+         int lowpass_height  = s->plane[plane].band[0][0].height;
+         int lowpass_width   = s->plane[plane].band[0][0].width;
+@@ -1000,10 +1154,363 @@ static int cfhd_decode(AVCodecContext *avctx, void *data, int *got_frame,
+             }
+         }
+     }
++    } else if (s->transform_type == 2 && (avctx->internal->is_copy || s->frame_index == 1 || s->sample_type != 1)) {
++        for (plane = 0; plane < s->planes && !ret; plane++) {
++            int lowpass_height  = s->plane[plane].band[0][0].height;
++            int lowpass_width   = s->plane[plane].band[0][0].width;
++            int highpass_stride = s->plane[plane].band[0][1].stride;
++            int act_plane = plane == 1 ? 2 : plane == 2 ? 1 : plane;
++            int16_t *low, *high, *output, *dst;
++            ptrdiff_t dst_linesize;
++
++            if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16) {
++                act_plane = 0;
++                dst_linesize = pic->linesize[act_plane];
++            } else {
++                dst_linesize = pic->linesize[act_plane] / 2;
++            }
++
++            if (lowpass_height > s->plane[plane].band[0][0].a_height || lowpass_width > s->plane[plane].band[0][0].a_width ||
++                !highpass_stride || s->plane[plane].band[0][1].width > s->plane[plane].band[0][1].a_width) {
++                av_log(avctx, AV_LOG_ERROR, "Invalid plane dimensions\n");
++                ret = AVERROR(EINVAL);
++                goto end;
++            }
++
++            av_log(avctx, AV_LOG_DEBUG, "Decoding level 1 plane %i %i %i %i\n", plane, lowpass_height, lowpass_width, highpass_stride);
+ 
++            low    = s->plane[plane].subband[0];
++            high   = s->plane[plane].subband[2];
++            output = s->plane[plane].l_h[0];
++            for (i = 0; i < lowpass_width; i++) {
++                vert_filter(output, lowpass_width, low, lowpass_width, high, highpass_stride, lowpass_height);
++                low++;
++                high++;
++                output++;
++            }
++
++            low    = s->plane[plane].subband[1];
++            high   = s->plane[plane].subband[3];
++            output = s->plane[plane].l_h[1];
++            for (i = 0; i < lowpass_width; i++) {
++                vert_filter(output, lowpass_width, low, highpass_stride, high, highpass_stride, lowpass_height);
++                low++;
++                high++;
++                output++;
++            }
++
++            low    = s->plane[plane].l_h[0];
++            high   = s->plane[plane].l_h[1];
++            output = s->plane[plane].l_h[7];
++            for (i = 0; i < lowpass_height * 2; i++) {
++                horiz_filter(output, low, high, lowpass_width);
++                low    += lowpass_width;
++                high   += lowpass_width;
++                output += lowpass_width * 2;
++            }
++            if (s->bpc == 12) {
++                output = s->plane[plane].l_h[7];
++                for (i = 0; i < lowpass_height * 2; i++) {
++                    for (j = 0; j < lowpass_width * 2; j++)
++                        output[j] *= 4;
++
++                    output += lowpass_width * 2;
++                }
++            }
++
++            lowpass_height  = s->plane[plane].band[1][1].height;
++            lowpass_width   = s->plane[plane].band[1][1].width;
++            highpass_stride = s->plane[plane].band[1][1].stride;
++
++            if (lowpass_height > s->plane[plane].band[1][1].a_height || lowpass_width > s->plane[plane].band[1][1].a_width ||
++                !highpass_stride || s->plane[plane].band[1][1].width > s->plane[plane].band[1][1].a_width) {
++                av_log(avctx, AV_LOG_ERROR, "Invalid plane dimensions\n");
++                ret = AVERROR(EINVAL);
++                goto end;
++            }
++
++            av_log(avctx, AV_LOG_DEBUG, "Level 2 lowpass plane %i %i %i %i\n", plane, lowpass_height, lowpass_width, highpass_stride);
++
++            low    = s->plane[plane].l_h[7];
++            high   = s->plane[plane].subband[5];
++            output = s->plane[plane].l_h[3];
++            for (i = 0; i < lowpass_width; i++) {
++                vert_filter(output, lowpass_width, low, lowpass_width, high, highpass_stride, lowpass_height);
++                low++;
++                high++;
++                output++;
++            }
++
++            low    = s->plane[plane].subband[4];
++            high   = s->plane[plane].subband[6];
++            output = s->plane[plane].l_h[4];
++            for (i = 0; i < lowpass_width; i++) {
++                vert_filter(output, lowpass_width, low, highpass_stride, high, highpass_stride, lowpass_height);
++                low++;
++                high++;
++                output++;
++            }
++
++            low    = s->plane[plane].l_h[3];
++            high   = s->plane[plane].l_h[4];
++            output = s->plane[plane].l_h[7];
++            for (i = 0; i < lowpass_height * 2; i++) {
++                horiz_filter(output, low, high, lowpass_width);
++                low    += lowpass_width;
++                high   += lowpass_width;
++                output += lowpass_width * 2;
++            }
++
++            output = s->plane[plane].l_h[7];
++            for (i = 0; i < lowpass_height * 2; i++) {
++                for (j = 0; j < lowpass_width * 2; j++)
++                    output[j] *= 4;
++                output += lowpass_width * 2;
++            }
++
++            low    = s->plane[plane].subband[7];
++            high   = s->plane[plane].subband[9];
++            output = s->plane[plane].l_h[3];
++            for (i = 0; i < lowpass_width; i++) {
++                vert_filter(output, lowpass_width, low, lowpass_width, high, highpass_stride, lowpass_height);
++                low++;
++                high++;
++                output++;
++            }
++
++            low    = s->plane[plane].subband[8];
++            high   = s->plane[plane].subband[10];
++            output = s->plane[plane].l_h[4];
++            for (i = 0; i < lowpass_width; i++) {
++                vert_filter(output, lowpass_width, low, highpass_stride, high, highpass_stride, lowpass_height);
++                low++;
++                high++;
++                output++;
++            }
++
++            low    = s->plane[plane].l_h[3];
++            high   = s->plane[plane].l_h[4];
++            output = s->plane[plane].l_h[9];
++            for (i = 0; i < lowpass_height * 2; i++) {
++                horiz_filter(output, low, high, lowpass_width);
++                low    += lowpass_width;
++                high   += lowpass_width;
++                output += lowpass_width * 2;
++            }
++
++            lowpass_height  = s->plane[plane].band[4][1].height;
++            lowpass_width   = s->plane[plane].band[4][1].width;
++            highpass_stride = s->plane[plane].band[4][1].stride;
++            av_log(avctx, AV_LOG_DEBUG, "temporal level %i %i %i %i\n", plane, lowpass_height, lowpass_width, highpass_stride);
++
++            if (lowpass_height > s->plane[plane].band[4][1].a_height || lowpass_width > s->plane[plane].band[4][1].a_width ||
++                !highpass_stride || s->plane[plane].band[4][1].width > s->plane[plane].band[4][1].a_width) {
++                av_log(avctx, AV_LOG_ERROR, "Invalid plane dimensions\n");
++                ret = AVERROR(EINVAL);
++                goto end;
++            }
++
++            low    = s->plane[plane].l_h[7];
++            high   = s->plane[plane].l_h[9];
++            output = s->plane[plane].l_h[7];
++            for (i = 0; i < lowpass_height; i++) {
++                inverse_temporal_filter(output, low, high, lowpass_width);
++                low    += lowpass_width;
++                high   += lowpass_width;
++            }
++            if (s->progressive) {
++                low    = s->plane[plane].l_h[7];
++                high   = s->plane[plane].subband[15];
++                output = s->plane[plane].l_h[6];
++                for (i = 0; i < lowpass_width; i++) {
++                    vert_filter(output, lowpass_width, low, lowpass_width, high, highpass_stride, lowpass_height);
++                    low++;
++                    high++;
++                    output++;
++                }
++
++                low    = s->plane[plane].subband[14];
++                high   = s->plane[plane].subband[16];
++                output = s->plane[plane].l_h[7];
++                for (i = 0; i < lowpass_width; i++) {
++                    vert_filter(output, lowpass_width, low, highpass_stride, high, highpass_stride, lowpass_height);
++                    low++;
++                    high++;
++                    output++;
++                }
++
++                low    = s->plane[plane].l_h[9];
++                high   = s->plane[plane].subband[12];
++                output = s->plane[plane].l_h[8];
++                for (i = 0; i < lowpass_width; i++) {
++                    vert_filter(output, lowpass_width, low, lowpass_width, high, highpass_stride, lowpass_height);
++                    low++;
++                    high++;
++                    output++;
++                }
++
++                low    = s->plane[plane].subband[11];
++                high   = s->plane[plane].subband[13];
++                output = s->plane[plane].l_h[9];
++                for (i = 0; i < lowpass_width; i++) {
++                    vert_filter(output, lowpass_width, low, highpass_stride, high, highpass_stride, lowpass_height);
++                    low++;
++                    high++;
++                    output++;
++                }
++
++                if (s->sample_type == 1)
++                    continue;
++
++                dst = (int16_t *)pic->data[act_plane];
++                if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16) {
++                    if (plane & 1)
++                        dst++;
++                    if (plane > 1)
++                        dst += pic->linesize[act_plane] >> 1;
++                }
++
++                if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16 &&
++                    (lowpass_height * 2 > avctx->coded_height / 2 ||
++                     lowpass_width  * 2 > avctx->coded_width  / 2    )
++                    ) {
++                    ret = AVERROR_INVALIDDATA;
++                    goto end;
++                }
++
++                low  = s->plane[plane].l_h[6];
++                high = s->plane[plane].l_h[7];
++                for (i = 0; i < lowpass_height * 2; i++) {
++                    if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16)
++                        horiz_filter_clip_bayer(dst, low, high, lowpass_width, s->bpc);
++                    else
++                        horiz_filter_clip(dst, low, high, lowpass_width, s->bpc);
++                    low  += lowpass_width;
++                    high += lowpass_width;
++                    dst  += dst_linesize;
++                }
++            } else {
++                pic->interlaced_frame = 1;
++                low    = s->plane[plane].l_h[7];
++                high   = s->plane[plane].subband[14];
++                output = s->plane[plane].l_h[6];
++                for (i = 0; i < lowpass_height; i++) {
++                    horiz_filter(output, low, high, lowpass_width);
++                    low    += lowpass_width;
++                    high   += lowpass_width;
++                    output += lowpass_width * 2;
++                }
++
++                low    = s->plane[plane].subband[15];
++                high   = s->plane[plane].subband[16];
++                output = s->plane[plane].l_h[7];
++                for (i = 0; i < lowpass_height; i++) {
++                    horiz_filter(output, low, high, lowpass_width);
++                    low    += lowpass_width;
++                    high   += lowpass_width;
++                    output += lowpass_width * 2;
++                }
++
++                low    = s->plane[plane].l_h[9];
++                high   = s->plane[plane].subband[11];
++                output = s->plane[plane].l_h[8];
++                for (i = 0; i < lowpass_height; i++) {
++                    horiz_filter(output, low, high, lowpass_width);
++                    low    += lowpass_width;
++                    high   += lowpass_width;
++                    output += lowpass_width * 2;
++                }
++
++                low    = s->plane[plane].subband[12];
++                high   = s->plane[plane].subband[13];
++                output = s->plane[plane].l_h[9];
++                for (i = 0; i < lowpass_height; i++) {
++                    horiz_filter(output, low, high, lowpass_width);
++                    low    += lowpass_width;
++                    high   += lowpass_width;
++                    output += lowpass_width * 2;
++                }
++
++                if (s->sample_type == 1)
++                    continue;
++
++                dst  = (int16_t *)pic->data[act_plane];
++                low  = s->plane[plane].l_h[6];
++                high = s->plane[plane].l_h[7];
++                for (i = 0; i < lowpass_height; i++) {
++                    interlaced_vertical_filter(dst, low, high, lowpass_width * 2,  pic->linesize[act_plane]/2, act_plane);
++                    low  += lowpass_width * 2;
++                    high += lowpass_width * 2;
++                    dst  += pic->linesize[act_plane];
++                }
++            }
++        }
++    }
++
++    if (s->transform_type == 2 && s->sample_type == 1) {
++        int16_t *low, *high, *dst;
++        int lowpass_height, lowpass_width, highpass_stride;
++        ptrdiff_t dst_linesize;
++
++        for (plane = 0; plane < s->planes; plane++) {
++            int act_plane = plane == 1 ? 2 : plane == 2 ? 1 : plane;
++
++            if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16) {
++                act_plane = 0;
++                dst_linesize = pic->linesize[act_plane];
++            } else {
++                dst_linesize = pic->linesize[act_plane] / 2;
++            }
++
++            lowpass_height  = s->plane[plane].band[4][1].height;
++            lowpass_width   = s->plane[plane].band[4][1].width;
++            highpass_stride = s->plane[plane].band[4][1].stride;
++
++            if (s->progressive) {
++                dst = (int16_t *)pic->data[act_plane];
++                low  = s->plane[plane].l_h[8];
++                high = s->plane[plane].l_h[9];
++
++                if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16) {
++                    if (plane & 1)
++                        dst++;
++                    if (plane > 1)
++                        dst += pic->linesize[act_plane] >> 1;
++                }
++
++                if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16 &&
++                    (lowpass_height * 2 > avctx->coded_height / 2 ||
++                     lowpass_width  * 2 > avctx->coded_width  / 2    )
++                    ) {
++                    ret = AVERROR_INVALIDDATA;
++                    goto end;
++                }
++
++                for (i = 0; i < lowpass_height * 2; i++) {
++                    if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16)
++                        horiz_filter_clip_bayer(dst, low, high, lowpass_width, s->bpc);
++                    else
++                        horiz_filter_clip(dst, low, high, lowpass_width, s->bpc);
++                    low  += lowpass_width;
++                    high += lowpass_width;
++                    dst  += dst_linesize;
++                }
++            } else {
++                dst  = (int16_t *)pic->data[act_plane];
++                low  = s->plane[plane].l_h[8];
++                high = s->plane[plane].l_h[9];
++                for (i = 0; i < lowpass_height; i++) {
++                    interlaced_vertical_filter(dst, low, high, lowpass_width * 2,  pic->linesize[act_plane]/2, act_plane);
++                    low  += lowpass_width * 2;
++                    high += lowpass_width * 2;
++                    dst  += pic->linesize[act_plane];
++                }
++            }
++        }
++    }
+ 
+     if (avctx->pix_fmt == AV_PIX_FMT_BAYER_RGGB16)
+-        process_bayer(pic);
++        process_bayer(pic, s->bpc);
+ end:
+     if (ret < 0)
+         return ret;
+@@ -1024,6 +1531,42 @@ static av_cold int cfhd_close(AVCodecContext *avctx)
+     return 0;
+ }
+ 
++#if HAVE_THREADS
++static int update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
++{
++    CFHDContext *psrc = src->priv_data;
++    CFHDContext *pdst = dst->priv_data;
++    int ret;
++
++    if (dst == src || psrc->transform_type == 0)
++        return 0;
++
++    pdst->a_format = psrc->a_format;
++    pdst->a_width  = psrc->a_width;
++    pdst->a_height = psrc->a_height;
++    pdst->transform_type = psrc->transform_type;
++    pdst->progressive = psrc->progressive;
++    pdst->planes = psrc->planes;
++
++    if (!pdst->plane[0].idwt_buf) {
++        pdst->coded_width  = pdst->a_width;
++        pdst->coded_height = pdst->a_height;
++        pdst->coded_format = pdst->a_format;
++        ret = alloc_buffers(dst);
++        if (ret < 0)
++            return ret;
++    }
++
++    for (int plane = 0; plane < pdst->planes; plane++) {
++        memcpy(pdst->plane[plane].band, psrc->plane[plane].band, sizeof(pdst->plane[plane].band));
++        memcpy(pdst->plane[plane].idwt_buf, psrc->plane[plane].idwt_buf,
++               pdst->plane[plane].idwt_size * sizeof(int16_t));
++    }
++
++    return 0;
++}
++#endif
++
+ AVCodec ff_cfhd_decoder = {
+     .name             = "cfhd",
+     .long_name        = NULL_IF_CONFIG_SMALL("Cineform HD"),
+@@ -1033,6 +1576,7 @@ AVCodec ff_cfhd_decoder = {
+     .init             = cfhd_init,
+     .close            = cfhd_close,
+     .decode           = cfhd_decode,
++    .update_thread_context = ONLY_IF_THREADS_ENABLED(update_thread_context),
+     .capabilities     = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_FRAME_THREADS,
+     .caps_internal    = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
+ };
+diff --git a/libavcodec/cfhd.h b/libavcodec/cfhd.h
+index 0e3155b..09c570c 100644
+--- a/libavcodec/cfhd.h
++++ b/libavcodec/cfhd.h
+@@ -42,8 +42,10 @@ enum CFHDParam {
+     NumSpatial       =  15,
+     FirstWavelet     =  16,
+     GroupTrailer     =  18,
++    FrameType        =  19,
+     ImageWidth       =  20,
+     ImageHeight      =  21,
++    FrameIndex       =  23,
+     LowpassSubband   =  25,
+     NumLevels        =  26,
+     LowpassWidth     =  27,
+@@ -72,11 +74,13 @@ enum CFHDParam {
+     BandTrailer      =  56,
+     ChannelNumber    =  62,
+     SampleFlags      =  68,
++    FrameNumber      =  69,
+     Precision        =  70,
++    InputFormat      =  71,
+     BandCodingFlags  =  72,
++    BandSecondPass   =  82,
+     PrescaleTable    =  83,
+     EncodedFormat    =  84,
+-    BitsPerComponent = 101,
+     ChannelWidth     = 104,
+     ChannelHeight    = 105,
+     PrescaleShift    = 109,
+@@ -84,6 +88,7 @@ enum CFHDParam {
+ 
+ #define VLC_BITS       9
+ #define SUBBAND_COUNT 10
++#define SUBBAND_COUNT_3D 17
+ 
+ typedef struct CFHD_RL_VLC_ELEM {
+     int16_t level;
+@@ -92,18 +97,14 @@ typedef struct CFHD_RL_VLC_ELEM {
+ } CFHD_RL_VLC_ELEM;
+ 
+ #define DWT_LEVELS 3
++#define DWT_LEVELS_3D 6
+ 
+ typedef struct SubBand {
+-    int level;
+-    int orientation;
+     ptrdiff_t stride;
+     int a_width;
+     int width;
+     int a_height;
+     int height;
+-    int pshift;
+-    int quant;
+-    uint8_t *ibuf;
+ } SubBand;
+ 
+ typedef struct Plane {
+@@ -113,12 +114,13 @@ typedef struct Plane {
+ 
+     int16_t *idwt_buf;
+     int16_t *idwt_tmp;
++    int      idwt_size;
+ 
+     /* TODO: merge this into SubBand structure */
+-    int16_t *subband[SUBBAND_COUNT];
+-    int16_t *l_h[8];
++    int16_t *subband[SUBBAND_COUNT_3D];
++    int16_t *l_h[10];
+ 
+-    SubBand band[DWT_LEVELS][4];
++    SubBand band[DWT_LEVELS_3D][4];
+ } Plane;
+ 
+ typedef struct Peak {
+@@ -136,8 +138,15 @@ typedef struct CFHDContext {
+     CFHD_RL_VLC_ELEM table_18_rl_vlc[4572];
+     VLC vlc_18;
+ 
++    int lut[2][256];
++
+     GetBitContext gb;
+ 
++    int planes;
++    int frame_type;
++    int frame_index;
++    int sample_type;
++    int transform_type;
+     int coded_width;
+     int coded_height;
+     int cropped_height;
+@@ -151,11 +160,10 @@ typedef struct CFHDContext {
+     int bpc; // bits per channel/component
+     int channel_cnt;
+     int subband_cnt;
++    int band_encoding;
+     int channel_num;
+     uint8_t lowpass_precision;
+     uint16_t quantisation;
+-    int wavelet_depth;
+-    int pshift;
+ 
+     int codebook;
+     int difference_coding;
+diff --git a/libavcodec/cfhdenc.c b/libavcodec/cfhdenc.c
+index 22fc232..d53604a 100644
+--- a/libavcodec/cfhdenc.c
++++ b/libavcodec/cfhdenc.c
+@@ -103,17 +103,97 @@ static const uint16_t runbook[8][3] = {
+  * Derived by inspecting various quality encodes
+  * and adding some more from scratch.
+  */
+-static const uint16_t quantization_per_subband[10][9] = {
+-    { 12, 12,  6, 12, 12,  6,  12,  12,  18, },
+-    { 14, 14,  7, 14, 14,  7,  18,  18,  24, },
+-    { 16, 16,  8, 16, 16,  8,  24,  24,  36, },
+-    { 16, 16,  8, 16, 16,  8,  48,  48,  96, },
+-    { 24, 24, 16, 24, 24, 16,  64,  64, 128, },
+-    { 24, 24, 16, 24, 24, 16, 128, 128, 256, },
+-    { 64, 64, 48, 64, 64, 48, 256, 256, 512, },
+-    { 64, 64, 48, 64, 64, 48, 512, 512, 768, },
+-    { 64, 64, 48, 64, 64, 48,1024,1024,1536, },
+-    {160,160,168,172,172,180,2048,2048,3072, },
++static const uint16_t quantization_per_subband[2][3][13][9] = {
++    {{
++        { 16, 16,  8,  4,  4,  2,   3,   3,   4, },
++        { 16, 16,  8,  4,  4,  2,   3,   3,   4, },
++        { 16, 16,  8,  4,  4,  2,   4,   4,   6, },
++        { 16, 16,  8,  4,  4,  2,   4,   4,   6, },
++        { 16, 16,  8,  4,  4,  2,   8,   8,  12, },
++        { 24, 24, 12,  6,  6,  3,  12,  12,  18, },
++        { 24, 24, 12,  6,  6,  3,  12,  12,  18, },
++        { 32, 32, 24,  8,  8,  6,  16,  16,  24, },
++        { 32, 32, 24,  8,  8,  6,  16,  16,  24, },
++        { 48, 48, 32, 12, 12,  8,  32,  32,  48, },
++        { 48, 48, 32, 12, 12,  8,  32,  32,  48, },
++        { 64, 64, 48, 16, 16, 12,  48,  48,  64, },
++        { 64, 64, 48, 16, 16, 12,  64,  64,  96, },
++    },
++    {
++        { 16, 16,  8,  4,  4,  2,   3,   3,   4, },
++        { 16, 16,  8,  4,  4,  2,   3,   3,   6, },
++        { 16, 16,  8,  4,  4,  2,   4,   4,   6, },
++        { 16, 16,  8,  4,  4,  2,   4,   4,   8, },
++        { 16, 16,  8,  4,  4,  2,   8,   8,  16, },
++        { 24, 24, 12,  6,  6,  3,  12,  12,  18, },
++        { 24, 24, 12,  6,  6,  3,  12,  12,  24, },
++        { 32, 32, 24,  8,  8,  6,  16,  16,  24, },
++        { 48, 48, 32, 12, 12,  8,  16,  16,  32, },
++        { 48, 48, 32, 12, 12,  8,  32,  32,  48, },
++        { 48, 48, 32, 12, 12,  8,  32,  32,  64, },
++        { 64, 64, 48, 16, 16, 12,  48,  48,  64, },
++        { 64, 64, 48, 16, 16, 12,  64,  64,  96, },
++    },
++    {
++        { 16, 16,  8,  4,  4,  2,   3,   3,   4, },
++        { 16, 16,  8,  4,  4,  2,   3,   3,   6, },
++        { 16, 16,  8,  4,  4,  2,   4,   4,   6, },
++        { 16, 16,  8,  4,  4,  2,   4,   4,   8, },
++        { 16, 16,  8,  4,  4,  2,   8,   8,  16, },
++        { 24, 24, 12,  6,  6,  3,  12,  12,  18, },
++        { 24, 24, 12,  6,  6,  3,  12,  12,  24, },
++        { 32, 32, 24,  8,  8,  6,  16,  16,  24, },
++        { 48, 48, 32, 12, 12,  8,  16,  16,  32, },
++        { 48, 48, 32, 12, 12,  8,  32,  32,  48, },
++        { 48, 48, 32, 12, 12,  8,  32,  32,  64, },
++        { 64, 64, 48, 16, 16, 12,  48,  48,  64, },
++        { 64, 64, 48, 16, 16, 12,  64,  64,  96, },
++    }},
++    {{
++        { 16, 16,  8, 16, 16,  8,  24,  24,  36, },
++        { 16, 16,  8, 16, 16,  8,  32,  32,  48, },
++        { 16, 16,  8, 16, 16,  8,  48,  48,  72, },
++        { 16, 16,  8, 16, 16,  8,  64,  64,  96, },
++        { 16, 16,  8, 20, 20, 10,  80,  80, 128, },
++        { 24, 24, 12, 24, 24, 12,  96,  96, 144, },
++        { 24, 24, 12, 24, 24, 12, 128, 128, 192, },
++        { 32, 32, 24, 32, 32, 24, 192, 192, 288, },
++        { 32, 32, 24, 32, 32, 24, 256, 256, 384, },
++        { 48, 48, 32, 48, 48, 32, 256, 256, 384, },
++        { 48, 48, 32, 48, 48, 32, 512, 512, 768, },
++        { 56, 56, 40, 56, 56, 40, 512, 512, 768, },
++        { 64, 64, 48, 64, 64, 48, 512, 512, 768, },
++    },
++    {
++        { 16, 16,  8, 16, 16,  8,  24,  24,  36, },
++        { 16, 16,  8, 16, 16,  8,  32,  32,  48, },
++        { 16, 16,  8, 16, 16,  8,  48,  48,  72, },
++        { 16, 16,  8, 16, 16,  8,  64,  64,  96, },
++        { 16, 16,  8, 20, 20, 10,  80,  80, 128, },
++        { 24, 24, 12, 24, 24, 12,  96,  96, 144, },
++        { 24, 24, 12, 24, 24, 12, 128, 128, 192, },
++        { 32, 32, 24, 32, 32, 24, 192, 192, 288, },
++        { 32, 32, 24, 32, 32, 24, 256, 256, 384, },
++        { 48, 48, 32, 48, 48, 32, 256, 256, 384, },
++        { 48, 48, 32, 48, 48, 32, 512, 512, 768, },
++        { 56, 56, 40, 56, 56, 40, 512, 512, 768, },
++        { 64, 64, 48, 64, 64, 48, 512, 512, 768, },
++    },
++    {
++        { 16, 16,  8, 16, 16,  8,  24,  24,  36, },
++        { 16, 16,  8, 16, 16,  8,  32,  32,  48, },
++        { 16, 16,  8, 16, 16,  8,  48,  48,  72, },
++        { 16, 16,  8, 16, 16,  8,  64,  64,  96, },
++        { 16, 16, 10, 20, 20, 10,  80,  80, 128, },
++        { 24, 24, 12, 24, 24, 12,  96,  96, 144, },
++        { 24, 24, 12, 24, 24, 12, 128, 128, 192, },
++        { 32, 32, 24, 32, 32, 24, 192, 192, 288, },
++        { 32, 32, 24, 32, 32, 24, 256, 256, 384, },
++        { 48, 48, 32, 48, 48, 32, 256, 256, 384, },
++        { 48, 48, 32, 48, 48, 32, 512, 512, 768, },
++        { 56, 56, 40, 56, 56, 40, 512, 512, 768, },
++        { 64, 64, 48, 64, 64, 48, 512, 512, 768, },
++    }},
+ };
+ 
+ typedef struct Codebook {
+@@ -141,18 +221,21 @@ typedef struct PlaneEnc {
+ } PlaneEnc;
+ 
+ typedef struct CFHDEncContext {
++    const AVClass *class;
++
+     PutBitContext       pb;
+     PutByteContext      pby;
+ 
+-    unsigned quantization_div;
+-    int compression;
++    int quality;
+     int planes;
+     int chroma_h_shift;
+     int chroma_v_shift;
+     PlaneEnc plane[4];
+ 
++    uint16_t lut[1024];
+     Runbook  rb[321];
+     Codebook cb[513];
++    int16_t *alpha;
+ } CFHDEncContext;
+ 
+ static av_cold int cfhd_encode_init(AVCodecContext *avctx)
+@@ -161,9 +244,7 @@ static av_cold int cfhd_encode_init(AVCodecContext *avctx)
+     const int sign_mask = 256;
+     const int twos_complement = -sign_mask;
+     const int mag_mask = sign_mask - 1;
+-    int ret;
+-
+-    s->quantization_div = avctx->pix_fmt == AV_PIX_FMT_YUV422P10 ? 2 : 1;
++    int ret, last = 0;
+ 
+     ret = av_pix_fmt_get_chroma_sub_sample(avctx->pix_fmt,
+                                            &s->chroma_h_shift,
+@@ -178,10 +259,6 @@ static av_cold int cfhd_encode_init(AVCodecContext *avctx)
+ 
+     s->planes = av_pix_fmt_count_planes(avctx->pix_fmt);
+ 
+-    if (avctx->compression_level == FF_COMPRESSION_DEFAULT)
+-        s->compression = 2;
+-    s->compression = av_clip(avctx->compression_level, 0, 9);
+-
+     for (int i = 0; i < s->planes; i++) {
+         int w8, h8, w4, h4, w2, h2;
+         int width  = i ? avctx->width >> s->chroma_h_shift : avctx->width;
+@@ -267,6 +344,25 @@ static av_cold int cfhd_encode_init(AVCodecContext *avctx)
+     s->rb[320].size = runbook[7][0];
+     s->rb[320].run = 320;
+ 
++    for (int i = 0; i < 256; i++) {
++        int idx = i + ((768LL * i * i * i) / (256 * 256 * 256));
++
++        s->lut[idx] = i;
++    }
++    for (int i = 0; i < 1024; i++) {
++        if (s->lut[i])
++            last = s->lut[i];
++        else
++            s->lut[i] = last;
++    }
++
++    if (s->planes != 4)
++        return 0;
++
++    s->alpha = av_calloc(avctx->width * avctx->height, sizeof(*s->alpha));
++    if (!s->alpha)
++        return AVERROR(ENOMEM);
++
+     return 0;
+ }
+ 
+@@ -313,7 +409,7 @@ static void quantize_band(int16_t *input, int width, int a_width,
+ 
+     for (int i = 0; i < height; i++) {
+         for (int j = 0; j < width; j++)
+-            input[j] = av_clip_intp2((input[j] * factor) / 65536, 8);
++            input[j] = av_clip_intp2((input[j] * factor) / 65536, 10);
+         input += a_width;
+     }
+ }
+@@ -330,6 +426,27 @@ static int put_runcode(PutBitContext *pb, int count, const Runbook *const rb)
+     return 0;
+ }
+ 
++static void process_alpha(const int16_t *src, int width, int height, ptrdiff_t stride, int16_t *dst)
++{
++    for (int i = 0; i < height; i++) {
++        for (int j = 0; j < width; j++) {
++            int alpha = src[j];
++
++            if (alpha > 0 && alpha < 4080) {
++                alpha *= 223;
++                alpha += 128;
++                alpha >>= 8;
++                alpha += 256;
++            }
++
++            dst[j] = av_clip_uintp2(alpha, 12);
++        }
++
++        src += stride;
++        dst += width;
++    }
++}
++
+ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+                              const AVFrame *frame, int *got_packet)
+ {
+@@ -338,10 +455,11 @@ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+     PutBitContext *pb = &s->pb;
+     const Codebook *const cb = s->cb;
+     const Runbook *const rb = s->rb;
++    const uint16_t *lut = s->lut;
+     unsigned pos;
+-    int ret = 0;
++    int ret;
+ 
+-    for (int plane = 0; plane < s->planes && !ret; plane++) {
++    for (int plane = 0; plane < s->planes; plane++) {
+         int width = s->plane[plane].band[2][0].width;
+         int a_width = s->plane[plane].band[2][0].a_width;
+         int height = s->plane[plane].band[2][0].height;
+@@ -349,9 +467,16 @@ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+         int16_t *input = (int16_t *)frame->data[act_plane];
+         int16_t *low = s->plane[plane].l_h[6];
+         int16_t *high = s->plane[plane].l_h[7];
+-        const ptrdiff_t in_stride = frame->linesize[act_plane] / 2;
++        ptrdiff_t in_stride = frame->linesize[act_plane] / 2;
+         int low_stride, high_stride;
+ 
++        if (plane == 3) {
++            process_alpha(input, avctx->width, avctx->height,
++                          in_stride, s->alpha);
++            input = s->alpha;
++            in_stride = avctx->width;
++        }
++
+         for (int i = 0; i < height * 2; i++) {
+             horiz_filter(input, low, high, width * 2);
+             input += in_stride;
+@@ -476,7 +601,7 @@ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+         }
+     }
+ 
+-    ret = ff_alloc_packet2(avctx, pkt, 60LL + s->planes * (2LL * avctx->width * avctx->height + 1000LL), 0);
++    ret = ff_alloc_packet2(avctx, pkt, 64LL + s->planes * (2LL * avctx->width * avctx->height + 1000LL), 0);
+     if (ret < 0)
+         return ret;
+ 
+@@ -501,7 +626,7 @@ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+     bytestream2_put_be16(pby, s->planes);
+ 
+     bytestream2_put_be16(pby, EncodedFormat);
+-    bytestream2_put_be16(pby, avctx->pix_fmt == AV_PIX_FMT_YUV422P10 ? 1 : 3);
++    bytestream2_put_be16(pby, avctx->pix_fmt == AV_PIX_FMT_YUV422P10 ? 1 : 3 + (s->planes == 4));
+ 
+     bytestream2_put_be16(pby, WaveletCount);
+     bytestream2_put_be16(pby, 3);
+@@ -521,11 +646,14 @@ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+     bytestream2_put_be16(pby, ImageHeight);
+     bytestream2_put_be16(pby, avctx->height);
+ 
++    bytestream2_put_be16(pby, -FrameNumber);
++    bytestream2_put_be16(pby, avctx->frame_number);
++
+     bytestream2_put_be16(pby, Precision);
+     bytestream2_put_be16(pby, avctx->pix_fmt == AV_PIX_FMT_YUV422P10 ? 10 : 12);
+ 
+     bytestream2_put_be16(pby, PrescaleTable);
+-    bytestream2_put_be16(pby, 0x2800);
++    bytestream2_put_be16(pby, avctx->pix_fmt == AV_PIX_FMT_YUV422P10 ? 0x2000 : 0x2800);
+ 
+     bytestream2_put_be16(pby, SampleFlags);
+     bytestream2_put_be16(pby, 1);
+@@ -584,7 +712,7 @@ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+ 
+         for (int l = 0; l < 3; l++) {
+             for (int i = 0; i < 3; i++) {
+-                s->plane[p].quantization[1 + l * 3 + i] = quantization_per_subband[s->compression][l * 3 + i] / s->quantization_div;
++                s->plane[p].quantization[1 + l * 3 + i] = quantization_per_subband[avctx->pix_fmt != AV_PIX_FMT_YUV422P10][p >= 3 ? 0 : p][s->quality][l * 3 + i];
+             }
+         }
+ 
+@@ -638,7 +766,7 @@ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+                 bytestream2_put_be16(pby, i + 1);
+ 
+                 bytestream2_put_be16(pby, BandCodingFlags);
+-                bytestream2_put_be16(pby, 2);
++                bytestream2_put_be16(pby, 1);
+ 
+                 bytestream2_put_be16(pby, BandWidth);
+                 bytestream2_put_be16(pby, width);
+@@ -668,7 +796,7 @@ static int cfhd_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+ 
+                 for (int m = 0; m < height; m++) {
+                     for (int j = 0; j < stride; j++) {
+-                        int16_t index = data[j];
++                        int16_t index = FFSIGN(data[j]) * lut[FFABS(data[j])];
+ 
+                         if (index < 0)
+                             index += 512;
+@@ -739,15 +867,45 @@ static av_cold int cfhd_encode_close(AVCodecContext *avctx)
+             s->plane[i].l_h[j] = NULL;
+     }
+ 
++    av_freep(&s->alpha);
++
+     return 0;
+ }
+ 
++#define OFFSET(x) offsetof(CFHDEncContext, x)
++#define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
++static const AVOption options[] = {
++    { "quality", "set quality", OFFSET(quality), AV_OPT_TYPE_INT,   {.i64= 0}, 0, 12, VE, "q" },
++    { "film3+",   NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 0}, 0,  0, VE, "q" },
++    { "film3",    NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 1}, 0,  0, VE, "q" },
++    { "film2+",   NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 2}, 0,  0, VE, "q" },
++    { "film2",    NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 3}, 0,  0, VE, "q" },
++    { "film1.5",  NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 4}, 0,  0, VE, "q" },
++    { "film1+",   NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 5}, 0,  0, VE, "q" },
++    { "film1",    NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 6}, 0,  0, VE, "q" },
++    { "high+",    NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 7}, 0,  0, VE, "q" },
++    { "high",     NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 8}, 0,  0, VE, "q" },
++    { "medium+",  NULL,         0,               AV_OPT_TYPE_CONST, {.i64= 9}, 0,  0, VE, "q" },
++    { "medium",   NULL,         0,               AV_OPT_TYPE_CONST, {.i64=10}, 0,  0, VE, "q" },
++    { "low+",     NULL,         0,               AV_OPT_TYPE_CONST, {.i64=11}, 0,  0, VE, "q" },
++    { "low",      NULL,         0,               AV_OPT_TYPE_CONST, {.i64=12}, 0,  0, VE, "q" },
++    { NULL},
++};
++
++static const AVClass cfhd_class = {
++    .class_name = "cfhd",
++    .item_name  = av_default_item_name,
++    .option     = options,
++    .version    = LIBAVUTIL_VERSION_INT,
++};
++
+ AVCodec ff_cfhd_encoder = {
+     .name             = "cfhd",
+     .long_name        = NULL_IF_CONFIG_SMALL("Cineform HD"),
+     .type             = AVMEDIA_TYPE_VIDEO,
+     .id               = AV_CODEC_ID_CFHD,
+     .priv_data_size   = sizeof(CFHDEncContext),
++    .priv_class       = &cfhd_class,
+     .init             = cfhd_encode_init,
+     .close            = cfhd_encode_close,
+     .encode2          = cfhd_encode_frame,
+@@ -755,6 +913,7 @@ AVCodec ff_cfhd_encoder = {
+     .pix_fmts         = (const enum AVPixelFormat[]) {
+                           AV_PIX_FMT_YUV422P10,
+                           AV_PIX_FMT_GBRP12,
++                          AV_PIX_FMT_GBRAP12,
+                           AV_PIX_FMT_NONE
+                         },
+ };
+diff --git a/libavcodec/j2kenc.c b/libavcodec/j2kenc.c
+index 5ebc1f3..fad0135 100644
+--- a/libavcodec/j2kenc.c
++++ b/libavcodec/j2kenc.c
+@@ -129,6 +129,8 @@ typedef struct {
+ 
+     int format;
+     int pred;
++    int sop;
++    int eph;
+ } Jpeg2000EncoderContext;
+ 
+ 
+@@ -308,13 +310,18 @@ static int put_siz(Jpeg2000EncoderContext *s)
+ static int put_cod(Jpeg2000EncoderContext *s)
+ {
+     Jpeg2000CodingStyle *codsty = &s->codsty;
++    uint8_t scod = 0;
+ 
+     if (s->buf_end - s->buf < 14)
+         return -1;
+ 
+     bytestream_put_be16(&s->buf, JPEG2000_COD);
+     bytestream_put_be16(&s->buf, 12); // Lcod
+-    bytestream_put_byte(&s->buf, 0);  // Scod
++    if (s->sop)
++        scod |= JPEG2000_CSTY_SOP;
++    if (s->eph)
++        scod |= JPEG2000_CSTY_EPH;
++    bytestream_put_byte(&s->buf, scod);
+     // SGcod
+     bytestream_put_byte(&s->buf, 0); // progression level
+     bytestream_put_be16(&s->buf, 1); // num of layers
+@@ -719,14 +726,18 @@ static void putnumpasses(Jpeg2000EncoderContext *s, int n)
+ 
+ 
+ static int encode_packet(Jpeg2000EncoderContext *s, Jpeg2000ResLevel *rlevel, int precno,
+-                          uint8_t *expn, int numgbits)
++                          uint8_t *expn, int numgbits, int packetno)
+ {
+     int bandno, empty = 1;
+-
+     // init bitstream
+     *s->buf = 0;
+     s->bit_index = 0;
+ 
++    if (s->sop) {
++        bytestream_put_be16(&s->buf, JPEG2000_SOP);
++        bytestream_put_be16(&s->buf, 4);
++        bytestream_put_be16(&s->buf, packetno);
++    }
+     // header
+ 
+     // is the packet empty?
+@@ -794,6 +805,10 @@ static int encode_packet(Jpeg2000EncoderContext *s, Jpeg2000ResLevel *rlevel, in
+         }
+     }
+     j2k_flush(s);
++    if (s->eph) {
++        bytestream_put_be16(&s->buf, JPEG2000_EPH);
++    }
++
+     for (bandno = 0; bandno < rlevel->nbands; bandno++){
+         Jpeg2000Band *band = rlevel->band + bandno;
+         Jpeg2000Prec *prec = band->prec + precno;
+@@ -821,7 +836,7 @@ static int encode_packets(Jpeg2000EncoderContext *s, Jpeg2000Tile *tile, int til
+     int compno, reslevelno, ret;
+     Jpeg2000CodingStyle *codsty = &s->codsty;
+     Jpeg2000QuantStyle  *qntsty = &s->qntsty;
+-
++    int packetno = 0;
+     av_log(s->avctx, AV_LOG_DEBUG, "tier2\n");
+     // lay-rlevel-comp-pos progression
+     for (reslevelno = 0; reslevelno < codsty->nreslevels; reslevelno++){
+@@ -830,7 +845,7 @@ static int encode_packets(Jpeg2000EncoderContext *s, Jpeg2000Tile *tile, int til
+             Jpeg2000ResLevel *reslevel = s->tile[tileno].comp[compno].reslevel + reslevelno;
+             for (precno = 0; precno < reslevel->num_precincts_x * reslevel->num_precincts_y; precno++){
+                 if ((ret = encode_packet(s, reslevel, precno, qntsty->expn + (reslevelno ? 3*reslevelno-2 : 0),
+-                              qntsty->nguardbits)) < 0)
++                              qntsty->nguardbits, packetno++)) < 0)
+                     return ret;
+             }
+         }
+@@ -1244,7 +1259,8 @@ static const AVOption options[] = {
+     { "pred",          "DWT Type",          OFFSET(pred),          AV_OPT_TYPE_INT,   { .i64 = 0           }, 0,         1,           VE, "pred"        },
+     { "dwt97int",      NULL,                0,                     AV_OPT_TYPE_CONST, { .i64 = 0           }, INT_MIN, INT_MAX,       VE, "pred"        },
+     { "dwt53",         NULL,                0,                     AV_OPT_TYPE_CONST, { .i64 = 0           }, INT_MIN, INT_MAX,       VE, "pred"        },
+-
++    { "sop",           "SOP marker",        OFFSET(sop),           AV_OPT_TYPE_INT,   { .i64 = 0           }, 0,         1,           VE, },
++    { "eph",           "EPH marker",        OFFSET(eph),           AV_OPT_TYPE_INT,   { .i64 = 0           }, 0,         1,           VE, },
+     { NULL }
+ };
+ 
+diff --git a/libavcodec/jpeg2000.h b/libavcodec/jpeg2000.h
+index 27df437..5b0627c 100644
+--- a/libavcodec/jpeg2000.h
++++ b/libavcodec/jpeg2000.h
+@@ -220,9 +220,9 @@ static inline int ff_jpeg2000_ceildivpow2(int a, int b)
+     return -((-(int64_t)a) >> b);
+ }
+ 
+-static inline int ff_jpeg2000_ceildiv(int a, int b)
++static inline int ff_jpeg2000_ceildiv(int a, int64_t b)
+ {
+-    return (a + (int64_t)b - 1) / b;
++    return (a + b - 1) / b;
+ }
+ 
+ /* TIER-1 routines */
+diff --git a/libavcodec/jpeg2000dec.c b/libavcodec/jpeg2000dec.c
+index 06ad841..a4c20f4 100644
+--- a/libavcodec/jpeg2000dec.c
++++ b/libavcodec/jpeg2000dec.c
+@@ -1465,20 +1465,20 @@ static int jpeg2000_decode_packets_po_iteration(Jpeg2000DecoderContext *s, Jpeg2
+                         if (reslevelno >= codsty->nreslevels)
+                             continue;
+ 
+-                        trx0 = ff_jpeg2000_ceildiv(tile->coord[0][0], s->cdx[compno] << reducedresno);
+-                        try0 = ff_jpeg2000_ceildiv(tile->coord[1][0], s->cdy[compno] << reducedresno);
++                        trx0 = ff_jpeg2000_ceildiv(tile->coord[0][0], (int64_t)s->cdx[compno] << reducedresno);
++                        try0 = ff_jpeg2000_ceildiv(tile->coord[1][0], (int64_t)s->cdy[compno] << reducedresno);
+ 
+                         if (!(y % ((uint64_t)s->cdy[compno] << (rlevel->log2_prec_height + reducedresno)) == 0 ||
+-                             (y == tile->coord[1][0] && (try0 << reducedresno) % (1U << (reducedresno + rlevel->log2_prec_height)))))
++                             (y == tile->coord[1][0] && ((int64_t)try0 << reducedresno) % (1ULL << (reducedresno + rlevel->log2_prec_height)))))
+                             continue;
+ 
+                         if (!(x % ((uint64_t)s->cdx[compno] << (rlevel->log2_prec_width + reducedresno)) == 0 ||
+-                             (x == tile->coord[0][0] && (trx0 << reducedresno) % (1U << (reducedresno + rlevel->log2_prec_width)))))
++                             (x == tile->coord[0][0] && ((int64_t)trx0 << reducedresno) % (1ULL << (reducedresno + rlevel->log2_prec_width)))))
+                             continue;
+ 
+                         // check if a precinct exists
+-                        prcx   = ff_jpeg2000_ceildiv(x, s->cdx[compno] << reducedresno) >> rlevel->log2_prec_width;
+-                        prcy   = ff_jpeg2000_ceildiv(y, s->cdy[compno] << reducedresno) >> rlevel->log2_prec_height;
++                        prcx   = ff_jpeg2000_ceildiv(x, (int64_t)s->cdx[compno] << reducedresno) >> rlevel->log2_prec_width;
++                        prcy   = ff_jpeg2000_ceildiv(y, (int64_t)s->cdy[compno] << reducedresno) >> rlevel->log2_prec_height;
+                         prcx  -= ff_jpeg2000_ceildivpow2(comp->coord_o[0][0], reducedresno) >> rlevel->log2_prec_width;
+                         prcy  -= ff_jpeg2000_ceildivpow2(comp->coord_o[1][0], reducedresno) >> rlevel->log2_prec_height;
+ 
+@@ -1543,20 +1543,20 @@ static int jpeg2000_decode_packets_po_iteration(Jpeg2000DecoderContext *s, Jpeg2
+                         Jpeg2000ResLevel *rlevel = comp->reslevel + reslevelno;
+                         int trx0, try0;
+ 
+-                        trx0 = ff_jpeg2000_ceildiv(tile->coord[0][0], s->cdx[compno] << reducedresno);
+-                        try0 = ff_jpeg2000_ceildiv(tile->coord[1][0], s->cdy[compno] << reducedresno);
++                        trx0 = ff_jpeg2000_ceildiv(tile->coord[0][0], (int64_t)s->cdx[compno] << reducedresno);
++                        try0 = ff_jpeg2000_ceildiv(tile->coord[1][0], (int64_t)s->cdy[compno] << reducedresno);
+ 
+                         if (!(y % ((uint64_t)s->cdy[compno] << (rlevel->log2_prec_height + reducedresno)) == 0 ||
+-                             (y == tile->coord[1][0] && (try0 << reducedresno) % (1U << (reducedresno + rlevel->log2_prec_height)))))
++                             (y == tile->coord[1][0] && ((int64_t)try0 << reducedresno) % (1ULL << (reducedresno + rlevel->log2_prec_height)))))
+                              continue;
+ 
+                         if (!(x % ((uint64_t)s->cdx[compno] << (rlevel->log2_prec_width + reducedresno)) == 0 ||
+-                             (x == tile->coord[0][0] && (trx0 << reducedresno) % (1U << (reducedresno + rlevel->log2_prec_width)))))
++                             (x == tile->coord[0][0] && ((int64_t)trx0 << reducedresno) % (1ULL << (reducedresno + rlevel->log2_prec_width)))))
+                              continue;
+ 
+                         // check if a precinct exists
+-                        prcx   = ff_jpeg2000_ceildiv(x, s->cdx[compno] << reducedresno) >> rlevel->log2_prec_width;
+-                        prcy   = ff_jpeg2000_ceildiv(y, s->cdy[compno] << reducedresno) >> rlevel->log2_prec_height;
++                        prcx   = ff_jpeg2000_ceildiv(x, (int64_t)s->cdx[compno] << reducedresno) >> rlevel->log2_prec_width;
++                        prcy   = ff_jpeg2000_ceildiv(y, (int64_t)s->cdy[compno] << reducedresno) >> rlevel->log2_prec_height;
+                         prcx  -= ff_jpeg2000_ceildivpow2(comp->coord_o[0][0], reducedresno) >> rlevel->log2_prec_width;
+                         prcy  -= ff_jpeg2000_ceildivpow2(comp->coord_o[1][0], reducedresno) >> rlevel->log2_prec_height;
+ 
+diff --git a/libavcodec/libopenh264enc.c b/libavcodec/libopenh264enc.c
+index f63aa52..cf48566 100644
+--- a/libavcodec/libopenh264enc.c
++++ b/libavcodec/libopenh264enc.c
+@@ -156,7 +156,16 @@ static av_cold int svc_encode_init(AVCodecContext *avctx)
+ 
+     (*s->encoder)->GetDefaultParams(s->encoder, &param);
+ 
+-    param.fMaxFrameRate              = 1/av_q2d(avctx->time_base);
++    if (avctx->framerate.num > 0 && avctx->framerate.den > 0) {
++        param.fMaxFrameRate = av_q2d(avctx->framerate);
++    } else {
++        if (avctx->ticks_per_frame > INT_MAX / avctx->time_base.num) {
++            av_log(avctx, AV_LOG_ERROR,
++                   "Could not set framerate for libopenh264enc: integer overflow\n");
++            return AVERROR(EINVAL);
++        }
++        param.fMaxFrameRate = 1.0 / av_q2d(avctx->time_base) / FFMAX(avctx->ticks_per_frame, 1);
++    }
+     param.iPicWidth                  = avctx->width;
+     param.iPicHeight                 = avctx->height;
+     param.iTargetBitrate             = avctx->bit_rate > 0 ? avctx->bit_rate : TARGET_BITRATE_DEFAULT;
+diff --git a/libavcodec/libx264.c b/libavcodec/libx264.c
+index 7bbeab7..347d29d 100644
+--- a/libavcodec/libx264.c
++++ b/libavcodec/libx264.c
+@@ -681,11 +681,11 @@ static av_cold int X264_init(AVCodecContext *avctx)
+ 
+ #if FF_API_PRIVATE_OPT
+ FF_DISABLE_DEPRECATION_WARNINGS
+-    if (avctx->chromaoffset >= 0)
++    if (avctx->chromaoffset)
+         x4->chroma_offset = avctx->chromaoffset;
+ FF_ENABLE_DEPRECATION_WARNINGS
+ #endif
+-    if (x4->chroma_offset >= 0)
++    if (x4->chroma_offset)
+         x4->params.analyse.i_chroma_qp_offset = x4->chroma_offset;
+ 
+     if (avctx->gop_size >= 0)
+@@ -1140,7 +1140,7 @@ static const AVOption options[] = {
+     { "vlc",              NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 0 },  INT_MIN, INT_MAX, VE, "coder" },
+     { "ac",               NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 1 },  INT_MIN, INT_MAX, VE, "coder" },
+     { "b_strategy",   "Strategy to choose between I/P/B-frames",          OFFSET(b_frame_strategy), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 2, VE },
+-    { "chromaoffset", "QP difference between chroma and luma",            OFFSET(chroma_offset), AV_OPT_TYPE_INT, { .i64 = -1 }, INT_MIN, INT_MAX, VE },
++    { "chromaoffset", "QP difference between chroma and luma",            OFFSET(chroma_offset), AV_OPT_TYPE_INT, { .i64 = 0 }, INT_MIN, INT_MAX, VE },
+     { "sc_threshold", "Scene change threshold",                           OFFSET(scenechange_threshold), AV_OPT_TYPE_INT, { .i64 = -1 }, INT_MIN, INT_MAX, VE },
+     { "noise_reduction", "Noise reduction",                               OFFSET(noise_reduction), AV_OPT_TYPE_INT, { .i64 = -1 }, INT_MIN, INT_MAX, VE },
+ 
+diff --git a/libavcodec/mpeg4audio.c b/libavcodec/mpeg4audio.c
+index 0d83fb8..77cf2fb 100644
+--- a/libavcodec/mpeg4audio.c
++++ b/libavcodec/mpeg4audio.c
+@@ -64,8 +64,21 @@ const int avpriv_mpeg4audio_sample_rates[16] = {
+     24000, 22050, 16000, 12000, 11025, 8000, 7350
+ };
+ 
+-const uint8_t ff_mpeg4audio_channels[8] = {
+-    0, 1, 2, 3, 4, 5, 6, 8
++const uint8_t ff_mpeg4audio_channels[14] = {
++    0,
++    1,
++    2,
++    3,
++    4,
++    5,
++    6,
++    8,
++    0,
++    0,
++    0,
++    7,
++    8,
++    24
+ };
+ 
+ static inline int get_object_type(GetBitContext *gb)
+diff --git a/libavcodec/mpeg4audio.h b/libavcodec/mpeg4audio.h
+index 4b390e0..c4cdc15 100644
+--- a/libavcodec/mpeg4audio.h
++++ b/libavcodec/mpeg4audio.h
+@@ -46,7 +46,7 @@ typedef struct MPEG4AudioConfig {
+ } MPEG4AudioConfig;
+ 
+ extern av_export_avcodec const int avpriv_mpeg4audio_sample_rates[16];
+-extern const uint8_t ff_mpeg4audio_channels[8];
++extern const uint8_t ff_mpeg4audio_channels[14];
+ 
+ /**
+  * Parse MPEG-4 systems extradata from a potentially unaligned GetBitContext to retrieve audio configuration.
+diff --git a/libavcodec/mpegaudiodec_template.c b/libavcodec/mpegaudiodec_template.c
+index f03d7bc..de10f71 100644
+--- a/libavcodec/mpegaudiodec_template.c
++++ b/libavcodec/mpegaudiodec_template.c
+@@ -89,6 +89,7 @@ typedef struct MPADecodeContext {
+     MPADSPContext mpadsp;
+     AVFloatDSPContext *fdsp;
+     AVFrame *frame;
++    uint32_t crc;
+ } MPADecodeContext;
+ 
+ #define HEADER_SIZE 4
+@@ -117,9 +118,9 @@ static INTFLOAT is_table[2][16];
+ static INTFLOAT is_table_lsf[2][2][16];
+ static INTFLOAT csa_table[8][4];
+ 
+-static int16_t division_tab3[1<<6 ];
+-static int16_t division_tab5[1<<8 ];
+-static int16_t division_tab9[1<<11];
++static int16_t division_tab3[1 << 6 ];
++static int16_t division_tab5[1 << 8 ];
++static int16_t division_tab9[1 << 11];
+ 
+ static int16_t * const division_tabs[4] = {
+     division_tab3, division_tab5, NULL, division_tab9
+@@ -254,7 +255,7 @@ static inline int l3_unscale(int value, int exponent)
+ #endif
+     if (e > (SUINT)31)
+         return 0;
+-    m = (m + ((1U << e)>>1)) >> e;
++    m = (m + ((1U << e) >> 1)) >> e;
+ 
+     return m;
+ }
+@@ -303,8 +304,8 @@ static av_cold void decode_init_static(void)
+         j = 0;
+         for (x = 0; x < xsize; x++) {
+             for (y = 0; y < xsize; y++) {
+-                tmp_bits [(x << 5) | y | ((x&&y)<<4)]= h->bits [j  ];
+-                tmp_codes[(x << 5) | y | ((x&&y)<<4)]= h->codes[j++];
++                tmp_bits [(x << 5) | y | ((x && y) << 4)]= h->bits [j  ];
++                tmp_codes[(x << 5) | y | ((x && y) << 4)]= h->codes[j++];
+             }
+         }
+ 
+@@ -344,7 +345,7 @@ static av_cold void decode_init_static(void)
+ 
+     for (i = 0; i < 4; i++) {
+         if (ff_mpa_quant_bits[i] < 0) {
+-            for (j = 0; j < (1 << (-ff_mpa_quant_bits[i]+1)); j++) {
++            for (j = 0; j < (1 << (-ff_mpa_quant_bits[i] + 1)); j++) {
+                 int val1, val2, val3, steps;
+                 int val = j;
+                 steps   = ff_mpa_quant_steps[i];
+@@ -500,12 +501,43 @@ static void imdct12(INTFLOAT *out, SUINTFLOAT *in)
+     out[11] = in0 + in5;
+ }
+ 
++static int handle_crc(MPADecodeContext *s, int sec_len)
++{
++    if (s->error_protection && (s->err_recognition & AV_EF_CRCCHECK)) {
++        const uint8_t *buf = s->gb.buffer - HEADER_SIZE;
++        int sec_byte_len  = sec_len >> 3;
++        int sec_rem_bits  = sec_len & 7;
++        const AVCRC *crc_tab = av_crc_get_table(AV_CRC_16_ANSI);
++        uint8_t tmp_buf[4];
++        uint32_t crc_val = av_crc(crc_tab, UINT16_MAX, &buf[2], 2);
++        crc_val = av_crc(crc_tab, crc_val, &buf[6], sec_byte_len);
++
++        AV_WB32(tmp_buf,
++                ((buf[6 + sec_byte_len] & (0xFF00 >> sec_rem_bits)) << 24) +
++                ((s->crc << 16) >> sec_rem_bits));
++
++        crc_val = av_crc(crc_tab, crc_val, tmp_buf, 3);
++
++        if (crc_val) {
++            av_log(s->avctx, AV_LOG_ERROR, "CRC mismatch %X!\n", crc_val);
++            if (s->err_recognition & AV_EF_EXPLODE)
++                return AVERROR_INVALIDDATA;
++        }
++    }
++    return 0;
++}
++
+ /* return the number of decoded frames */
+ static int mp_decode_layer1(MPADecodeContext *s)
+ {
+     int bound, i, v, n, ch, j, mant;
+     uint8_t allocation[MPA_MAX_CHANNELS][SBLIMIT];
+     uint8_t scale_factors[MPA_MAX_CHANNELS][SBLIMIT];
++    int ret;
++
++    ret = handle_crc(s, (s->nb_channels == 1) ? 8*16  : 8*32);
++    if (ret < 0)
++        return ret;
+ 
+     if (s->mode == MPA_JSTEREO)
+         bound = (s->mode_ext + 1) * 4;
+@@ -575,6 +607,7 @@ static int mp_decode_layer2(MPADecodeContext *s)
+     unsigned char scale_code[MPA_MAX_CHANNELS][SBLIMIT];
+     unsigned char scale_factors[MPA_MAX_CHANNELS][SBLIMIT][3], *sf;
+     int scale, qindex, bits, steps, k, l, m, b;
++    int ret;
+ 
+     /* select decoding table */
+     table = ff_mpa_l2_select_table(s->bit_rate / 1000, s->nb_channels,
+@@ -617,6 +650,10 @@ static int mp_decode_layer2(MPADecodeContext *s)
+         }
+     }
+ 
++    ret = handle_crc(s, get_bits_count(&s->gb) - 16);
++    if (ret < 0)
++        return ret;
++
+     /* scale factors */
+     for (i = 0; i < sblimit; i++) {
+         for (ch = 0; ch < s->nb_channels; ch++) {
+@@ -698,7 +735,7 @@ static int mp_decode_layer2(MPADecodeContext *s)
+                     int mant, scale0, scale1;
+                     scale0 = scale_factors[0][i][k];
+                     scale1 = scale_factors[1][i][k];
+-                    qindex = alloc_table[j+b];
++                    qindex = alloc_table[j + b];
+                     bits = ff_mpa_quant_bits[qindex];
+                     if (bits < 0) {
+                         /* 3 values at the same time */
+@@ -892,8 +929,8 @@ static int huffman_decode(MPADecodeContext *s, GranuleDef *g,
+             y = get_vlc2(&s->gb, vlc->table, 7, 3);
+ 
+             if (!y) {
+-                g->sb_hybrid[s_index  ] =
+-                g->sb_hybrid[s_index+1] = 0;
++                g->sb_hybrid[s_index    ] =
++                g->sb_hybrid[s_index + 1] = 0;
+                 s_index += 2;
+                 continue;
+             }
+@@ -921,7 +958,7 @@ static int huffman_decode(MPADecodeContext *s, GranuleDef *g,
+                     v  = l3_unscale(y, exponent);
+                     if (get_bits1(&s->gb))
+                         v = -v;
+-                    g->sb_hybrid[s_index+1] = v;
++                    g->sb_hybrid[s_index + 1] = v;
+                 }
+             } else {
+                 x = y >> 5;
+@@ -967,10 +1004,10 @@ static int huffman_decode(MPADecodeContext *s, GranuleDef *g,
+ 
+         code = get_vlc2(&s->gb, vlc->table, vlc->bits, 1);
+         ff_dlog(s->avctx, "t=%d code=%d\n", g->count1table_select, code);
+-        g->sb_hybrid[s_index+0] =
+-        g->sb_hybrid[s_index+1] =
+-        g->sb_hybrid[s_index+2] =
+-        g->sb_hybrid[s_index+3] = 0;
++        g->sb_hybrid[s_index + 0] =
++        g->sb_hybrid[s_index + 1] =
++        g->sb_hybrid[s_index + 2] =
++        g->sb_hybrid[s_index + 3] = 0;
+         while (code) {
+             static const int idxtab[16] = { 3,3,2,2,1,1,1,1,0,0,0,0,0,0,0,0 };
+             int v;
+@@ -1310,13 +1347,16 @@ static int mp_decode_layer3(MPADecodeContext *s)
+     int gr, ch, blocksplit_flag, i, j, k, n, bits_pos;
+     GranuleDef *g;
+     int16_t exponents[576]; //FIXME try INTFLOAT
++    int ret;
+ 
+     /* read side info */
+     if (s->lsf) {
++        ret = handle_crc(s, ((s->nb_channels == 1) ? 8*9  : 8*17));
+         main_data_begin = get_bits(&s->gb, 8);
+         skip_bits(&s->gb, s->nb_channels);
+         nb_granules = 1;
+     } else {
++        ret = handle_crc(s, ((s->nb_channels == 1) ? 8*17 : 8*32));
+         main_data_begin = get_bits(&s->gb, 9);
+         if (s->nb_channels == 2)
+             skip_bits(&s->gb, 3);
+@@ -1328,6 +1368,8 @@ static int mp_decode_layer3(MPADecodeContext *s)
+             s->granules[ch][1].scfsi = get_bits(&s->gb, 4);
+         }
+     }
++    if (ret < 0)
++        return ret;
+ 
+     for (gr = 0; gr < nb_granules; gr++) {
+         for (ch = 0; ch < s->nb_channels; ch++) {
+@@ -1391,7 +1433,7 @@ static int mp_decode_layer3(MPADecodeContext *s)
+ 
+     if (!s->adu_mode) {
+         int skip;
+-        const uint8_t *ptr = s->gb.buffer + (get_bits_count(&s->gb)>>3);
++        const uint8_t *ptr = s->gb.buffer + (get_bits_count(&s->gb) >> 3);
+         s->extrasize = av_clip((get_bits_left(&s->gb) >> 3) - s->extrasize, 0,
+                                FFMAX(0, LAST_BUF_SIZE - s->last_buf_size));
+         av_assert1((get_bits_count(&s->gb) & 7) == 0);
+@@ -1565,23 +1607,8 @@ static int mp_decode_frame(MPADecodeContext *s, OUT_INT **samples,
+     OUT_INT *samples_ptr;
+ 
+     init_get_bits(&s->gb, buf + HEADER_SIZE, (buf_size - HEADER_SIZE) * 8);
+-
+-    if (s->error_protection && s->layer == 3) {
+-        uint16_t crc = get_bits(&s->gb, 16);
+-        if (s->err_recognition & AV_EF_CRCCHECK) {
+-            const int sec_len = s->lsf ? ((s->nb_channels == 1) ? 9  : 17) :
+-                                         ((s->nb_channels == 1) ? 17 : 32);
+-            const AVCRC *crc_tab = av_crc_get_table(AV_CRC_16_ANSI);
+-            uint32_t crc_cal = av_crc(crc_tab, UINT16_MAX, &buf[2], 2);
+-            crc_cal = av_crc(crc_tab, crc_cal, &buf[6], sec_len);
+-
+-            if (av_bswap16(crc) ^ crc_cal) {
+-                av_log(s->avctx, AV_LOG_ERROR, "CRC mismatch!\n");
+-                if (s->err_recognition & AV_EF_EXPLODE)
+-                    return AVERROR_INVALIDDATA;
+-            }
+-        }
+-    }
++    if (s->error_protection)
++        s->crc = get_bits(&s->gb, 16);
+ 
+     switch(s->layer) {
+     case 1:
+@@ -1602,7 +1629,7 @@ static int mp_decode_frame(MPADecodeContext *s, OUT_INT **samples,
+             align_get_bits(&s->gb);
+             i = (get_bits_left(&s->gb) >> 3) - s->extrasize;
+             if (i >= 0 && i <= BACKSTEP_SIZE) {
+-                memmove(s->last_buf, s->gb.buffer + (get_bits_count(&s->gb)>>3), i);
++                memmove(s->last_buf, s->gb.buffer + (get_bits_count(&s->gb) >> 3), i);
+                 s->last_buf_size=i;
+             } else
+                 av_log(s->avctx, AV_LOG_ERROR, "invalid old backstep %d\n", i);
+@@ -1679,7 +1706,7 @@ static int decode_frame(AVCodecContext * avctx, void *data, int *got_frame_ptr,
+         return AVERROR_INVALIDDATA;
+ 
+     header = AV_RB32(buf);
+-    if (header>>8 == AV_RB32("TAG")>>8) {
++    if (header >> 8 == AV_RB32("TAG") >> 8) {
+         av_log(avctx, AV_LOG_DEBUG, "discarding ID3 tag\n");
+         return buf_size + skipped;
+     }
+diff --git a/libavcodec/put_bits.h b/libavcodec/put_bits.h
+index ddd9790..3ba9549 100644
+--- a/libavcodec/put_bits.h
++++ b/libavcodec/put_bits.h
+@@ -364,13 +364,13 @@ static inline void skip_put_bytes(PutBitContext *s, int n)
+ /**
+  * Skip the given number of bits.
+  * Must only be used if the actual values in the bitstream do not matter.
+- * If n is 0 the behavior is undefined.
++
+  */
+ static inline void skip_put_bits(PutBitContext *s, int n)
+ {
+-    s->bit_left -= n;
+-    s->buf_ptr  -= sizeof(BitBuf) * ((unsigned)s->bit_left / BUF_BITS);
+-    s->bit_left &= (BUF_BITS - 1);
++    unsigned bits = BUF_BITS - s->bit_left + n;
++    s->buf_ptr += sizeof(BitBuf) * (bits / BUF_BITS);
++    s->bit_left = BUF_BITS - (bits & (BUF_BITS - 1));
+ }
+ 
+ /**
+diff --git a/libavcodec/snowdec.c b/libavcodec/snowdec.c
+index 88664dc..5e69f39 100644
+--- a/libavcodec/snowdec.c
++++ b/libavcodec/snowdec.c
+@@ -369,7 +369,10 @@ static int decode_header(SnowContext *s){
+                 htaps = htaps*2 + 2;
+                 p->htaps= htaps;
+                 for(i= htaps/2; i; i--){
+-                    p->hcoeff[i]= get_symbol(&s->c, s->header_state, 0) * (1-2*(i&1));
++                    unsigned hcoeff = get_symbol(&s->c, s->header_state, 0);
++                    if (hcoeff > 127)
++                        return AVERROR_INVALIDDATA;
++                    p->hcoeff[i]= hcoeff * (1-2*(i&1));
+                     sum += p->hcoeff[i];
+                 }
+                 p->hcoeff[0]= 32-sum;
+diff --git a/libavcodec/tiff.c b/libavcodec/tiff.c
+index 18b327e..08dbca9 100644
+--- a/libavcodec/tiff.c
++++ b/libavcodec/tiff.c
+@@ -1290,7 +1290,7 @@ static int tiff_decode_tag(TiffContext *s, AVFrame *frame)
+         s->height = value;
+         break;
+     case TIFF_BPP:
+-        if (count > 5U) {
++        if (count > 5 || count <= 0) {
+             av_log(s->avctx, AV_LOG_ERROR,
+                    "This format is not supported (bpp=%d, %d components)\n",
+                    value, count);
+@@ -1321,9 +1321,9 @@ static int tiff_decode_tag(TiffContext *s, AVFrame *frame)
+                    "Samples per pixel requires a single value, many provided\n");
+             return AVERROR_INVALIDDATA;
+         }
+-        if (value > 5U) {
++        if (value > 5 || value <= 0) {
+             av_log(s->avctx, AV_LOG_ERROR,
+-                   "Samples per pixel %d is too large\n", value);
++                   "Invalid samples per pixel %d\n", value);
+             return AVERROR_INVALIDDATA;
+         }
+         if (s->bppcount == 1)
+diff --git a/libavcodec/utils.c b/libavcodec/utils.c
+index a379d62..5a2a90b 100644
+--- a/libavcodec/utils.c
++++ b/libavcodec/utils.c
+@@ -1479,6 +1479,7 @@ int av_get_exact_bits_per_sample(enum AVCodecID codec_id)
+     switch (codec_id) {
+     case AV_CODEC_ID_8SVX_EXP:
+     case AV_CODEC_ID_8SVX_FIB:
++    case AV_CODEC_ID_ADPCM_ARGO:
+     case AV_CODEC_ID_ADPCM_CT:
+     case AV_CODEC_ID_ADPCM_IMA_APC:
+     case AV_CODEC_ID_ADPCM_IMA_APM:
+diff --git a/libavcodec/version.h b/libavcodec/version.h
+index f669196..a3f9f82 100644
+--- a/libavcodec/version.h
++++ b/libavcodec/version.h
+@@ -28,7 +28,7 @@
+ #include "libavutil/version.h"
+ 
+ #define LIBAVCODEC_VERSION_MAJOR  58
+-#define LIBAVCODEC_VERSION_MINOR  99
++#define LIBAVCODEC_VERSION_MINOR 100
+ #define LIBAVCODEC_VERSION_MICRO 100
+ 
+ #define LIBAVCODEC_VERSION_INT  AV_VERSION_INT(LIBAVCODEC_VERSION_MAJOR, \
+diff --git a/libavfilter/dnn/dnn_backend_native_layer_mathunary.c b/libavfilter/dnn/dnn_backend_native_layer_mathunary.c
+index c5f0f7a..f9f8898 100644
+--- a/libavfilter/dnn/dnn_backend_native_layer_mathunary.c
++++ b/libavfilter/dnn/dnn_backend_native_layer_mathunary.c
+@@ -130,6 +130,14 @@ int dnn_execute_layer_math_unary(DnnOperand *operands, const int32_t *input_oper
+         for (int i = 0; i < dims_count; ++i)
+             dst[i] = atanh(src[i]);
+         return 0;
++    case DMUO_CEIL:
++        for (int i = 0; i < dims_count; ++i)
++            dst[i] = ceil(src[i]);
++        return 0;
++    case DMUO_FLOOR:
++        for (int i = 0; i < dims_count; ++i)
++            dst[i] = floor(src[i]);
++        return 0;
+     default:
+         return -1;
+     }
+diff --git a/libavfilter/dnn/dnn_backend_native_layer_mathunary.h b/libavfilter/dnn/dnn_backend_native_layer_mathunary.h
+index 8076356..1b78fbe 100644
+--- a/libavfilter/dnn/dnn_backend_native_layer_mathunary.h
++++ b/libavfilter/dnn/dnn_backend_native_layer_mathunary.h
+@@ -43,6 +43,8 @@ typedef enum {
+     DMUO_ASINH = 10,
+     DMUO_ACOSH = 11,
+     DMUO_ATANH = 12,
++    DMUO_CEIL = 13,
++    DMUO_FLOOR = 14,
+     DMUO_COUNT
+ } DNNMathUnaryOperation;
+ 
+diff --git a/libavformat/3dostr.c b/libavformat/3dostr.c
+index 6c49f75..3ec3c43 100644
+--- a/libavformat/3dostr.c
++++ b/libavformat/3dostr.c
+@@ -110,15 +110,12 @@ static int threedostr_read_header(AVFormatContext *s)
+ 
+ static int threedostr_read_packet(AVFormatContext *s, AVPacket *pkt)
+ {
+-    unsigned chunk, size, found_ssmp = 0;
++    unsigned chunk, size;
+     AVStream *st = s->streams[0];
+     int64_t pos;
+     int ret = 0;
+ 
+-    while (!found_ssmp) {
+-        if (avio_feof(s->pb))
+-            return AVERROR_EOF;
+-
++    while (!avio_feof(s->pb)) {
+         pos   = avio_tell(s->pb);
+         chunk = avio_rl32(s->pb);
+         size  = avio_rb32(s->pb);
+@@ -143,9 +140,7 @@ static int threedostr_read_packet(AVFormatContext *s, AVPacket *pkt)
+             pkt->pos = pos;
+             pkt->stream_index = 0;
+             pkt->duration = size / st->codecpar->channels;
+-            size = 0;
+-            found_ssmp = 1;
+-            break;
++            return ret;
+         default:
+             av_log(s, AV_LOG_DEBUG, "skipping unknown chunk: %X\n", chunk);
+             break;
+@@ -154,7 +149,7 @@ static int threedostr_read_packet(AVFormatContext *s, AVPacket *pkt)
+         avio_skip(s->pb, size);
+     }
+ 
+-    return ret;
++    return AVERROR_EOF;
+ }
+ 
+ AVInputFormat ff_threedostr_demuxer = {
+diff --git a/libavformat/Makefile b/libavformat/Makefile
+index 62d8cbb..610d43c 100644
+--- a/libavformat/Makefile
++++ b/libavformat/Makefile
+@@ -103,6 +103,7 @@ OBJS-$(CONFIG_APTX_HD_DEMUXER)           += aptxdec.o rawdec.o
+ OBJS-$(CONFIG_APTX_HD_MUXER)             += rawenc.o
+ OBJS-$(CONFIG_AQTITLE_DEMUXER)           += aqtitledec.o subtitles.o
+ OBJS-$(CONFIG_ARGO_ASF_DEMUXER)          += argo_asf.o
++OBJS-$(CONFIG_ARGO_ASF_MUXER)            += argo_asf.o
+ OBJS-$(CONFIG_ASF_DEMUXER)               += asfdec_f.o asf.o asfcrypt.o \
+                                             avlanguage.o
+ OBJS-$(CONFIG_ASF_O_DEMUXER)             += asfdec_o.o asf.o asfcrypt.o \
+diff --git a/libavformat/allformats.c b/libavformat/allformats.c
+index fd9e46e..b7e59ae 100644
+--- a/libavformat/allformats.c
++++ b/libavformat/allformats.c
+@@ -64,6 +64,7 @@ extern AVInputFormat  ff_aptx_hd_demuxer;
+ extern AVOutputFormat ff_aptx_hd_muxer;
+ extern AVInputFormat  ff_aqtitle_demuxer;
+ extern AVInputFormat  ff_argo_asf_demuxer;
++extern AVOutputFormat ff_argo_asf_muxer;
+ extern AVInputFormat  ff_asf_demuxer;
+ extern AVOutputFormat ff_asf_muxer;
+ extern AVInputFormat  ff_asf_o_demuxer;
+diff --git a/libavformat/argo_asf.c b/libavformat/argo_asf.c
+index 3339425..671b748 100644
+--- a/libavformat/argo_asf.c
++++ b/libavformat/argo_asf.c
+@@ -1,5 +1,5 @@
+ /*
+- * Argonaut Games ASF demuxer
++
+  *
+  * Copyright (C) 2020 Zane van Iperen (zane@zanevaniperen.com)
+  *
+@@ -27,6 +27,7 @@
+ #define ASF_TAG                 MKTAG('A', 'S', 'F', '\0')
+ #define ASF_FILE_HEADER_SIZE    24
+ #define ASF_CHUNK_HEADER_SIZE   20
++#define ASF_SAMPLE_COUNT        32
+ 
+ typedef struct ArgoASFFileHeader {
+     uint32_t    magic;          /*< Magic Number, {'A', 'S', 'F', '\0'} */
+@@ -39,7 +40,7 @@ typedef struct ArgoASFFileHeader {
+ 
+ typedef struct ArgoASFChunkHeader {
+     uint32_t    num_blocks;     /*< No. blocks in the chunk. */
+-    uint32_t    num_samples;    /*< No. samples per channel in a block. */
++    uint32_t    num_samples;
+     uint32_t    unk1;           /*< Unknown */
+     uint16_t    sample_rate;    /*< Sample rate. */
+     uint16_t    unk2;           /*< Unknown. */
+@@ -62,6 +63,7 @@ typedef struct ArgoASFDemuxContext {
+     uint32_t            blocks_read;
+ } ArgoASFDemuxContext;
+ 
++#if CONFIG_ARGO_ASF_DEMUXER
+ static void argo_asf_parse_file_header(ArgoASFFileHeader *hdr, const uint8_t *buf)
+ {
+     hdr->magic          = AV_RL32(buf + 0);
+@@ -158,6 +160,12 @@ static int argo_asf_read_header(AVFormatContext *s)
+ 
+     argo_asf_parse_chunk_header(&asf->ckhdr, buf);
+ 
++    if (asf->ckhdr.num_samples != ASF_SAMPLE_COUNT) {
++        av_log(s, AV_LOG_ERROR, "Invalid sample count. Got %u, expected %d\n",
++               asf->ckhdr.num_samples, ASF_SAMPLE_COUNT);
++        return AVERROR_INVALIDDATA;
++    }
++
+     if ((asf->ckhdr.flags & ASF_CF_ALWAYS1) != ASF_CF_ALWAYS1 || (asf->ckhdr.flags & ASF_CF_ALWAYS0) != 0) {
+         avpriv_request_sample(s, "Nonstandard flags (0x%08X)", asf->ckhdr.flags);
+         return AVERROR_PATCHWELCOME;
+@@ -247,3 +255,127 @@ AVInputFormat ff_argo_asf_demuxer = {
+     .read_header    = argo_asf_read_header,
+     .read_packet    = argo_asf_read_packet
+ };
++#endif
++
++#if CONFIG_ARGO_ASF_MUXER
++static int argo_asf_write_init(AVFormatContext *s)
++{
++    const AVCodecParameters *par;
++
++    if (s->nb_streams != 1) {
++        av_log(s, AV_LOG_ERROR, "ASF files have exactly one stream\n");
++        return AVERROR(EINVAL);
++    }
++
++    par = s->streams[0]->codecpar;
++
++    if (par->codec_id != AV_CODEC_ID_ADPCM_ARGO) {
++        av_log(s, AV_LOG_ERROR, "%s codec not supported\n",
++               avcodec_get_name(par->codec_id));
++        return AVERROR(EINVAL);
++    }
++
++    if (par->channels > 2) {
++        av_log(s, AV_LOG_ERROR, "ASF files only support up to 2 channels\n");
++        return AVERROR(EINVAL);
++    }
++
++    if (par->sample_rate > UINT16_MAX) {
++        av_log(s, AV_LOG_ERROR, "Sample rate too large\n");
++        return AVERROR(EINVAL);
++    }
++
++    if (!(s->pb->seekable & AVIO_SEEKABLE_NORMAL)) {
++        av_log(s, AV_LOG_ERROR, "Stream not seekable, unable to write output file\n");
++        return AVERROR(EINVAL);
++    }
++
++    return 0;
++}
++
++static void argo_asf_write_file_header(const ArgoASFFileHeader *fhdr, AVIOContext *pb)
++{
++    avio_wl32( pb, fhdr->magic);
++    avio_wl16( pb, fhdr->version_major);
++    avio_wl16( pb, fhdr->version_minor);
++    avio_wl32( pb, fhdr->num_chunks);
++    avio_wl32( pb, fhdr->chunk_offset);
++    avio_write(pb, fhdr->name, sizeof(fhdr->name));
++}
++
++static void argo_asf_write_chunk_header(const ArgoASFChunkHeader *ckhdr, AVIOContext *pb)
++{
++    avio_wl32(pb, ckhdr->num_blocks);
++    avio_wl32(pb, ckhdr->num_samples);
++    avio_wl32(pb, ckhdr->unk1);
++    avio_wl16(pb, ckhdr->sample_rate);
++    avio_wl16(pb, ckhdr->unk2);
++    avio_wl32(pb, ckhdr->flags);
++}
++
++static int argo_asf_write_header(AVFormatContext *s)
++{
++    const AVCodecParameters  *par = s->streams[0]->codecpar;
++    ArgoASFFileHeader  fhdr;
++    ArgoASFChunkHeader chdr;
++
++    fhdr.magic         = ASF_TAG;
++    fhdr.version_major = 2;
++    fhdr.version_minor = 1;
++    fhdr.num_chunks    = 1;
++    fhdr.chunk_offset  = ASF_FILE_HEADER_SIZE;
++    strncpy(fhdr.name, av_basename(s->url), FF_ARRAY_ELEMS(fhdr.name));
++
++    chdr.num_blocks    = 0;
++    chdr.num_samples   = ASF_SAMPLE_COUNT;
++    chdr.unk1          = 0;
++    chdr.sample_rate   = par->sample_rate;
++    chdr.unk2          = ~0;
++    chdr.flags         = ASF_CF_BITS_PER_SAMPLE | ASF_CF_ALWAYS1;
++
++    if (par->channels == 2)
++        chdr.flags |= ASF_CF_STEREO;
++
++    argo_asf_write_file_header(&fhdr, s->pb);
++    argo_asf_write_chunk_header(&chdr, s->pb);
++    return 0;
++}
++
++static int argo_asf_write_packet(AVFormatContext *s, AVPacket *pkt)
++{
++    if (pkt->size != 17 * s->streams[0]->codecpar->channels)
++        return AVERROR_INVALIDDATA;
++
++    if (s->streams[0]->nb_frames >= UINT32_MAX)
++        return AVERROR_INVALIDDATA;
++
++    avio_write(s->pb, pkt->data, pkt->size);
++    return 0;
++}
++
++static int argo_asf_write_trailer(AVFormatContext *s)
++{
++    int64_t ret;
++
++    if ((ret = avio_seek(s->pb, ASF_FILE_HEADER_SIZE, SEEK_SET) < 0))
++        return ret;
++
++    avio_wl32(s->pb, (uint32_t)s->streams[0]->nb_frames);
++    return 0;
++}
++
++AVOutputFormat ff_argo_asf_muxer = {
++    .name           = "argo_asf",
++    .long_name      = NULL_IF_CONFIG_SMALL("Argonaut Games ASF"),
++
++
++
++
++    .audio_codec    = AV_CODEC_ID_ADPCM_ARGO,
++    .video_codec    = AV_CODEC_ID_NONE,
++    .init           = argo_asf_write_init,
++    .write_header   = argo_asf_write_header,
++    .write_packet   = argo_asf_write_packet,
++    .write_trailer  = argo_asf_write_trailer
++};
++#endif
+diff --git a/libavformat/dv.c b/libavformat/dv.c
+index e99422d..d25641d 100644
+--- a/libavformat/dv.c
++++ b/libavformat/dv.c
+@@ -321,6 +321,21 @@ static int dv_extract_timecode(DVDemuxContext* c, const uint8_t* frame, char *tc
+ 
+ /* The following 3 functions constitute our interface to the world */
+ 
++static int dv_init_demux(AVFormatContext *s, DVDemuxContext *c)
++{
++    c->vst = avformat_new_stream(s, NULL);
++    if (!c->vst)
++        return AVERROR(ENOMEM);
++
++    c->fctx                   = s;
++    c->vst->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
++    c->vst->codecpar->codec_id   = AV_CODEC_ID_DVVIDEO;
++    c->vst->codecpar->bit_rate   = 25000000;
++    c->vst->start_time        = 0;
++
++    return 0;
++}
++
+ DVDemuxContext *avpriv_dv_init_demux(AVFormatContext *s)
+ {
+     DVDemuxContext *c;
+@@ -329,18 +344,11 @@ DVDemuxContext *avpriv_dv_init_demux(AVFormatContext *s)
+     if (!c)
+         return NULL;
+ 
+-    c->vst = avformat_new_stream(s, NULL);
+-    if (!c->vst) {
++    if (dv_init_demux(s, c)) {
+         av_free(c);
+         return NULL;
+     }
+ 
+-    c->fctx                   = s;
+-    c->vst->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+-    c->vst->codecpar->codec_id   = AV_CODEC_ID_DVVIDEO;
+-    c->vst->codecpar->bit_rate   = 25000000;
+-    c->vst->start_time        = 0;
+-
+     return c;
+ }
+ 
+@@ -452,7 +460,7 @@ void ff_dv_offset_reset(DVDemuxContext *c, int64_t frame_offset)
+  ************************************************************/
+ 
+ typedef struct RawDVContext {
+-    DVDemuxContext *dv_demux;
++    DVDemuxContext  dv_demux;
+     uint8_t         buf[DV_MAX_FRAME_SIZE];
+ } RawDVContext;
+ 
+@@ -462,31 +470,26 @@ static int dv_read_timecode(AVFormatContext *s) {
+     int64_t pos = avio_tell(s->pb);
+ 
+     // Read 3 DIF blocks: Header block and 2 Subcode blocks.
+-    int partial_frame_size = 3 * 80;
+-    uint8_t *partial_frame = av_mallocz(sizeof(*partial_frame) *
+-                                        partial_frame_size);
+-
++#define PARTIAL_FRAME_SIZE (3 * 80)
++    uint8_t partial_frame[PARTIAL_FRAME_SIZE];
+     RawDVContext *c = s->priv_data;
+-    if (!partial_frame)
+-        return AVERROR(ENOMEM);
+ 
+-    ret = avio_read(s->pb, partial_frame, partial_frame_size);
++    ret = avio_read(s->pb, partial_frame, PARTIAL_FRAME_SIZE);
+     if (ret < 0)
+         goto finish;
+ 
+-    if (ret < partial_frame_size) {
++    if (ret < PARTIAL_FRAME_SIZE) {
+         ret = -1;
+         goto finish;
+     }
+ 
+-    ret = dv_extract_timecode(c->dv_demux, partial_frame, timecode);
++    ret = dv_extract_timecode(&c->dv_demux, partial_frame, timecode);
+     if (ret)
+         av_dict_set(&s->metadata, "timecode", timecode, 0);
+     else
+         av_log(s, AV_LOG_ERROR, "Detected timecode is invalid\n");
+ 
+ finish:
+-    av_free(partial_frame);
+     avio_seek(s->pb, pos, SEEK_SET);
+     return ret;
+ }
+@@ -497,16 +500,14 @@ static int dv_read_header(AVFormatContext *s)
+     RawDVContext *c = s->priv_data;
+     int ret;
+ 
+-    c->dv_demux = avpriv_dv_init_demux(s);
+-    if (!c->dv_demux)
+-        return AVERROR(ENOMEM);
++    if ((ret = dv_init_demux(s, &c->dv_demux)) < 0)
++        return ret;
+ 
+     state = avio_rb32(s->pb);
+     while ((state & 0xffffff7f) != 0x1f07003f) {
+         if (avio_feof(s->pb)) {
+             av_log(s, AV_LOG_ERROR, "Cannot find DV header.\n");
+-            ret = AVERROR_INVALIDDATA;
+-            goto fail;
++            return AVERROR_INVALIDDATA;
+         }
+         if (state == 0x003f0700 || state == 0xff3f0700)
+             marker_pos = avio_tell(s->pb);
+@@ -521,33 +522,26 @@ static int dv_read_header(AVFormatContext *s)
+ 
+     if (avio_read(s->pb, c->buf + 4, DV_PROFILE_BYTES - 4) != DV_PROFILE_BYTES - 4 ||
+         avio_seek(s->pb, -DV_PROFILE_BYTES, SEEK_CUR) < 0) {
+-        ret = AVERROR(EIO);
+-        goto fail;
++        return AVERROR(EIO);
+     }
+ 
+-    c->dv_demux->sys = av_dv_frame_profile(c->dv_demux->sys,
++    c->dv_demux.sys = av_dv_frame_profile(c->dv_demux.sys,
+                                            c->buf,
+                                            DV_PROFILE_BYTES);
+-    if (!c->dv_demux->sys) {
++    if (!c->dv_demux.sys) {
+         av_log(s, AV_LOG_ERROR,
+                "Can't determine profile of DV input stream.\n");
+-        ret = AVERROR_INVALIDDATA;
+-        goto fail;
++        return AVERROR_INVALIDDATA;
+     }
+ 
+-    s->bit_rate = av_rescale_q(c->dv_demux->sys->frame_size,
++    s->bit_rate = av_rescale_q(c->dv_demux.sys->frame_size,
+                                (AVRational) { 8, 1 },
+-                               c->dv_demux->sys->time_base);
++                               c->dv_demux.sys->time_base);
+ 
+     if (s->pb->seekable & AVIO_SEEKABLE_NORMAL)
+         dv_read_timecode(s);
+ 
+     return 0;
+-
+-fail:
+-    av_freep(&c->dv_demux);
+-
+-    return ret;
+ }
+ 
+ static int dv_read_packet(AVFormatContext *s, AVPacket *pkt)
+@@ -555,14 +549,14 @@ static int dv_read_packet(AVFormatContext *s, AVPacket *pkt)
+     int size;
+     RawDVContext *c = s->priv_data;
+ 
+-    size = avpriv_dv_get_packet(c->dv_demux, pkt);
++    size = avpriv_dv_get_packet(&c->dv_demux, pkt);
+ 
+     if (size < 0) {
+         int ret;
+         int64_t pos = avio_tell(s->pb);
+-        if (!c->dv_demux->sys)
++        if (!c->dv_demux.sys)
+             return AVERROR(EIO);
+-        size = c->dv_demux->sys->frame_size;
++        size = c->dv_demux.sys->frame_size;
+         ret = avio_read(s->pb, c->buf, size);
+         if (ret < 0) {
+             return ret;
+@@ -570,7 +564,7 @@ static int dv_read_packet(AVFormatContext *s, AVPacket *pkt)
+             return AVERROR(EIO);
+         }
+ 
+-        size = avpriv_dv_produce_packet(c->dv_demux, pkt, c->buf, size, pos);
++        size = avpriv_dv_produce_packet(&c->dv_demux, pkt, c->buf, size, pos);
+     }
+ 
+     return size;
+@@ -580,7 +574,7 @@ static int dv_read_seek(AVFormatContext *s, int stream_index,
+                         int64_t timestamp, int flags)
+ {
+     RawDVContext *r   = s->priv_data;
+-    DVDemuxContext *c = r->dv_demux;
++    DVDemuxContext *c = &r->dv_demux;
+     int64_t offset    = dv_frame_offset(s, c, timestamp, flags);
+ 
+     if (avio_seek(s->pb, offset, SEEK_SET) < 0)
+@@ -590,13 +584,6 @@ static int dv_read_seek(AVFormatContext *s, int stream_index,
+     return 0;
+ }
+ 
+-static int dv_read_close(AVFormatContext *s)
+-{
+-    RawDVContext *c = s->priv_data;
+-    av_freep(&c->dv_demux);
+-    return 0;
+-}
+-
+ static int dv_probe(const AVProbeData *p)
+ {
+     unsigned marker_pos = 0;
+@@ -646,7 +633,6 @@ AVInputFormat ff_dv_demuxer = {
+     .read_probe     = dv_probe,
+     .read_header    = dv_read_header,
+     .read_packet    = dv_read_packet,
+-    .read_close     = dv_read_close,
+     .read_seek      = dv_read_seek,
+     .extensions     = "dv,dif",
+ };
+diff --git a/libavformat/mov.c b/libavformat/mov.c
+index d16840f..1532e74 100644
+--- a/libavformat/mov.c
++++ b/libavformat/mov.c
+@@ -1108,7 +1108,7 @@ static int mov_read_ftyp(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+     av_dict_set_int(&c->fc->metadata, "minor_version", minor_ver, 0);
+ 
+     comp_brand_size = atom.size - 8;
+-    if (comp_brand_size < 0)
++    if (comp_brand_size < 0 || comp_brand_size == INT_MAX)
+         return AVERROR_INVALIDDATA;
+     comp_brands_str = av_malloc(comp_brand_size + 1); /* Add null terminator */
+     if (!comp_brands_str)
+diff --git a/libavformat/mxf.c b/libavformat/mxf.c
+index 7d154ca..e51fc48 100644
+--- a/libavformat/mxf.c
++++ b/libavformat/mxf.c
+@@ -86,6 +86,55 @@ const MXFCodecUL ff_mxf_codec_tag_uls[] = {
+     { { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 },  0,                         0 },
+ };
+ 
++const MXFCodecUL ff_mxf_color_primaries_uls[] = {
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x06,0x04,0x01,0x01,0x01,0x03,0x01,0x00,0x00 }, 14, AVCOL_PRI_SMPTE170M },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x06,0x04,0x01,0x01,0x01,0x03,0x02,0x00,0x00 }, 14, AVCOL_PRI_BT470BG },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x06,0x04,0x01,0x01,0x01,0x03,0x03,0x00,0x00 }, 14, AVCOL_PRI_BT709 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x03,0x04,0x00,0x00 }, 14, AVCOL_PRI_BT2020 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x03,0x05,0x00,0x00 }, 14, AVCOL_PRI_SMPTE428 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x03,0x06,0x00,0x00 }, 14, AVCOL_PRI_SMPTE432 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x03,0x08,0x00,0x00 }, 14, AVCOL_PRI_SMPTE428 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x03,0x0a,0x00,0x00 }, 14, AVCOL_PRI_SMPTE431 },
++
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x06,0x04,0x01,0x01,0x01,0x03,0x01,0x00,0x00 }, 14, AVCOL_PRI_SMPTE240M },
++
++    { { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 },  0, AVCOL_PRI_UNSPECIFIED },
++};
++
++const MXFCodecUL ff_mxf_color_trc_uls[] = {
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x01,0x01,0x01,0x01,0x00,0x00 }, 14, AVCOL_TRC_GAMMA22 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x01,0x01,0x01,0x02,0x00,0x00 }, 14, AVCOL_TRC_BT709 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x01,0x01,0x01,0x03,0x00,0x00 }, 14, AVCOL_TRC_SMPTE240M },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x01,0x01,0x01,0x04,0x00,0x00 }, 14, AVCOL_TRC_BT709 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x06,0x04,0x01,0x01,0x01,0x01,0x05,0x00,0x00 }, 14, AVCOL_TRC_BT1361_ECG },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x06,0x04,0x01,0x01,0x01,0x01,0x06,0x00,0x00 }, 14, AVCOL_TRC_LINEAR },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x08,0x04,0x01,0x01,0x01,0x01,0x07,0x00,0x00 }, 14, AVCOL_TRC_SMPTE428 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x01,0x08,0x00,0x00 }, 14, AVCOL_TRC_IEC61966_2_4 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0E,0x04,0x01,0x01,0x01,0x01,0x09,0x00,0x00 }, 14, AVCOL_TRC_BT2020_10 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x01,0x0A,0x00,0x00 }, 14, AVCOL_TRC_SMPTE2084 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x01,0x0B,0x00,0x00 }, 14, AVCOL_TRC_ARIB_STD_B67 },
++
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x01,0x01,0x01,0x01,0x00,0x00 }, 14, AVCOL_TRC_GAMMA28 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x01,0x01,0x01,0x02,0x00,0x00 }, 14, AVCOL_TRC_SMPTE170M },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0E,0x04,0x01,0x01,0x01,0x01,0x09,0x00,0x00 }, 14, AVCOL_TRC_BT2020_12 },
++
++    { { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 },  0, AVCOL_TRC_UNSPECIFIED },
++};
++
++
++const MXFCodecUL ff_mxf_color_space_uls[] = {
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x01,0x01,0x02,0x01,0x00,0x00 }, 14, AVCOL_SPC_BT470BG },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x01,0x01,0x02,0x02,0x00,0x00 }, 14, AVCOL_SPC_BT709 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x06,0x04,0x01,0x01,0x01,0x02,0x03,0x00,0x00 }, 14, AVCOL_SPC_SMPTE240M },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x02,0x04,0x00,0x00 }, 14, AVCOL_SPC_YCGCO },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x02,0x05,0x00,0x00 }, 14, AVCOL_SPC_RGB },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0D,0x04,0x01,0x01,0x01,0x02,0x06,0x00,0x00 }, 14, AVCOL_SPC_BT2020_NCL },
++
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x06,0x04,0x01,0x01,0x01,0x02,0x03,0x00,0x00 }, 14, AVCOL_SPC_SMPTE170M },
++
++    { { 0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 },  0, AVCOL_SPC_UNSPECIFIED },
++};
++
+ static const struct {
+     enum AVPixelFormat pix_fmt;
+     const char data[16];
+diff --git a/libavformat/mxf.h b/libavformat/mxf.h
+index f2fff27..fc587f1 100644
+--- a/libavformat/mxf.h
++++ b/libavformat/mxf.h
+@@ -91,6 +91,9 @@ extern const MXFCodecUL ff_mxf_data_definition_uls[];
+ extern const MXFCodecUL ff_mxf_codec_uls[];
+ extern const MXFCodecUL ff_mxf_pixel_format_uls[];
+ extern const MXFCodecUL ff_mxf_codec_tag_uls[];
++extern const MXFCodecUL ff_mxf_color_primaries_uls[];
++extern const MXFCodecUL ff_mxf_color_trc_uls[];
++extern const MXFCodecUL ff_mxf_color_space_uls[];
+ 
+ int ff_mxf_decode_pixel_layout(const char pixel_layout[16], enum AVPixelFormat *pix_fmt);
+ int ff_mxf_get_content_package_rate(AVRational time_base);
+diff --git a/libavformat/mxfdec.c b/libavformat/mxfdec.c
+index f0975f4..4b56984 100644
+--- a/libavformat/mxfdec.c
++++ b/libavformat/mxfdec.c
+@@ -207,6 +207,9 @@ typedef struct MXFDescriptor {
+     uint8_t *extradata;
+     int extradata_size;
+     enum AVPixelFormat pix_fmt;
++    UID color_primaries_ul;
++    UID color_trc_ul;
++    UID color_space_ul;
+ } MXFDescriptor;
+ 
+ typedef struct MXFIndexTableSegment {
+@@ -1201,9 +1204,18 @@ static int mxf_read_generic_descriptor(void *arg, AVIOContext *pb, int tag, int
+         descriptor->aspect_ratio.num = avio_rb32(pb);
+         descriptor->aspect_ratio.den = avio_rb32(pb);
+         break;
++    case 0x3210:
++        avio_read(pb, descriptor->color_trc_ul, 16);
++        break;
+     case 0x3212:
+         descriptor->field_dominance = avio_r8(pb);
+         break;
++    case 0x3219:
++        avio_read(pb, descriptor->color_primaries_ul, 16);
++        break;
++    case 0x321A:
++        avio_read(pb, descriptor->color_space_ul, 16);
++        break;
+     case 0x3301:
+         descriptor->component_depth = avio_rb32(pb);
+         break;
+@@ -2480,6 +2492,9 @@ static int mxf_parse_structural_metadata(MXFContext *mxf)
+             }
+             if (descriptor->aspect_ratio.num && descriptor->aspect_ratio.den)
+                 st->display_aspect_ratio = descriptor->aspect_ratio;
++            st->codecpar->color_primaries = mxf_get_codec_ul(ff_mxf_color_primaries_uls, &descriptor->color_primaries_ul)->id;
++            st->codecpar->color_trc       = mxf_get_codec_ul(ff_mxf_color_trc_uls, &descriptor->color_trc_ul)->id;
++            st->codecpar->color_space     = mxf_get_codec_ul(ff_mxf_color_space_uls, &descriptor->color_space_ul)->id;
+         } else if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+             container_ul = mxf_get_codec_ul(mxf_sound_essence_container_uls, essence_container_ul);
+             /* Only overwrite existing codec ID if it is unset or A-law, which is the default according to SMPTE RP 224. */
+diff --git a/libavformat/version.h b/libavformat/version.h
+index 33cebed..4d31e1e 100644
+--- a/libavformat/version.h
++++ b/libavformat/version.h
+@@ -32,7 +32,7 @@
+ // Major bumping may affect Ticket5467, 5421, 5451(compatibility with Chromium)
+ // Also please add any ticket numbers that you believe might be affected here
+ #define LIBAVFORMAT_VERSION_MAJOR  58
+-#define LIBAVFORMAT_VERSION_MINOR  49
++#define LIBAVFORMAT_VERSION_MINOR  50
+ #define LIBAVFORMAT_VERSION_MICRO 100
+ 
+ #define LIBAVFORMAT_VERSION_INT AV_VERSION_INT(LIBAVFORMAT_VERSION_MAJOR, \
+diff --git a/libavutil/channel_layout.c b/libavutil/channel_layout.c
+index 3bd5ee2..ac773a9 100644
+--- a/libavutil/channel_layout.c
++++ b/libavutil/channel_layout.c
+@@ -62,6 +62,11 @@ static const struct channel_name channel_names[] = {
+     [33] = { "SDL",       "surround direct left"  },
+     [34] = { "SDR",       "surround direct right" },
+     [35] = { "LFE2",      "low frequency 2"       },
++    [36] = { "TSL",       "top side left"         },
++    [37] = { "TSR",       "top side right"        },
++    [38] = { "BFC",       "bottom front center"   },
++    [39] = { "BFL",       "bottom front left"     },
++    [40] = { "BFR",       "bottom front right"    },
+ };
+ 
+ static const char *get_channel_name(int channel_id)
+@@ -104,6 +109,7 @@ static const struct {
+     { "octagonal",   8,  AV_CH_LAYOUT_OCTAGONAL },
+     { "hexadecagonal", 16, AV_CH_LAYOUT_HEXADECAGONAL },
+     { "downmix",     2,  AV_CH_LAYOUT_STEREO_DOWNMIX, },
++    { "22.2",          24, AV_CH_LAYOUT_22POINT2, },
+ };
+ 
+ static uint64_t get_channel_layout_single(const char *name, int name_len)
+diff --git a/libavutil/channel_layout.h b/libavutil/channel_layout.h
+index 50bb8f0..d39ae11 100644
+--- a/libavutil/channel_layout.h
++++ b/libavutil/channel_layout.h
+@@ -71,6 +71,11 @@
+ #define AV_CH_SURROUND_DIRECT_LEFT   0x0000000200000000ULL
+ #define AV_CH_SURROUND_DIRECT_RIGHT  0x0000000400000000ULL
+ #define AV_CH_LOW_FREQUENCY_2        0x0000000800000000ULL
++#define AV_CH_TOP_SIDE_LEFT          0x0000001000000000ULL
++#define AV_CH_TOP_SIDE_RIGHT         0x0000002000000000ULL
++#define AV_CH_BOTTOM_FRONT_CENTER    0x0000004000000000ULL
++#define AV_CH_BOTTOM_FRONT_LEFT      0x0000008000000000ULL
++#define AV_CH_BOTTOM_FRONT_RIGHT     0x0000010000000000ULL
+ 
+ /** Channel mask value used for AVCodecContext.request_channel_layout
+     to indicate that the user requests the channel order of the decoder output
+@@ -110,6 +115,7 @@
+ #define AV_CH_LAYOUT_OCTAGONAL         (AV_CH_LAYOUT_5POINT0|AV_CH_BACK_LEFT|AV_CH_BACK_CENTER|AV_CH_BACK_RIGHT)
+ #define AV_CH_LAYOUT_HEXADECAGONAL     (AV_CH_LAYOUT_OCTAGONAL|AV_CH_WIDE_LEFT|AV_CH_WIDE_RIGHT|AV_CH_TOP_BACK_LEFT|AV_CH_TOP_BACK_RIGHT|AV_CH_TOP_BACK_CENTER|AV_CH_TOP_FRONT_CENTER|AV_CH_TOP_FRONT_LEFT|AV_CH_TOP_FRONT_RIGHT)
+ #define AV_CH_LAYOUT_STEREO_DOWNMIX    (AV_CH_STEREO_LEFT|AV_CH_STEREO_RIGHT)
++#define AV_CH_LAYOUT_22POINT2          (AV_CH_LAYOUT_5POINT1_BACK|AV_CH_FRONT_LEFT_OF_CENTER|AV_CH_FRONT_RIGHT_OF_CENTER|AV_CH_BACK_CENTER|AV_CH_LOW_FREQUENCY_2|AV_CH_SIDE_LEFT|AV_CH_SIDE_RIGHT|AV_CH_TOP_FRONT_LEFT|AV_CH_TOP_FRONT_RIGHT|AV_CH_TOP_FRONT_CENTER|AV_CH_TOP_CENTER|AV_CH_TOP_BACK_LEFT|AV_CH_TOP_BACK_RIGHT|AV_CH_TOP_SIDE_LEFT|AV_CH_TOP_SIDE_RIGHT|AV_CH_TOP_BACK_CENTER|AV_CH_BOTTOM_FRONT_CENTER|AV_CH_BOTTOM_FRONT_LEFT|AV_CH_BOTTOM_FRONT_RIGHT)
+ 
+ enum AVMatrixEncoding {
+     AV_MATRIX_ENCODING_NONE,
+diff --git a/libavutil/version.h b/libavutil/version.h
+index 975fb87..3e7e1f4 100644
+--- a/libavutil/version.h
++++ b/libavutil/version.h
+@@ -79,7 +79,7 @@
+  */
+ 
+ #define LIBAVUTIL_VERSION_MAJOR  56
+-#define LIBAVUTIL_VERSION_MINOR  57
++#define LIBAVUTIL_VERSION_MINOR  58
+ #define LIBAVUTIL_VERSION_MICRO 100
+ 
+ #define LIBAVUTIL_VERSION_INT   AV_VERSION_INT(LIBAVUTIL_VERSION_MAJOR, \
+diff --git a/libswresample/rematrix.c b/libswresample/rematrix.c
+index 6b5feaa..d0c4a21 100644
+--- a/libswresample/rematrix.c
++++ b/libswresample/rematrix.c
+@@ -88,7 +88,7 @@ static int even(int64_t layout){
+     return 0;
+ }
+ 
+-static int clean_layout(void *s, int64_t layout){
++static int64_t clean_layout(void *s, int64_t layout){
+     if(layout && layout != AV_CH_FRONT_CENTER && !(layout&(layout-1))) {
+         char buf[128];
+         av_get_channel_layout_string(buf, sizeof(buf), -1, layout);
+@@ -141,6 +141,16 @@ av_cold int swr_build_matrix(uint64_t in_ch_layout_param, uint64_t out_ch_layout
+     )
+         in_ch_layout = AV_CH_LAYOUT_STEREO;
+ 
++    if (in_ch_layout == AV_CH_LAYOUT_22POINT2 &&
++        out_ch_layout != AV_CH_LAYOUT_22POINT2) {
++        in_ch_layout = AV_CH_LAYOUT_5POINT1_BACK;
++        av_get_channel_layout_string(buf, sizeof(buf), -1, in_ch_layout);
++        av_log(log_context, AV_LOG_WARNING,
++               "Full-on remixing from 22.2 has not yet been implemented! "
++               "Processing the input as '%s'\n",
++               buf);
++    }
++
+     if(!sane_layout(in_ch_layout)){
+         av_get_channel_layout_string(buf, sizeof(buf), -1, in_ch_layout_param);
+         av_log(log_context, AV_LOG_ERROR, "Input channel layout '%s' is not supported\n", buf);
+diff --git a/libswscale/bayer_template.c b/libswscale/bayer_template.c
+index 1af1b60..46b5a49 100644
+--- a/libswscale/bayer_template.c
++++ b/libswscale/bayer_template.c
+@@ -118,6 +118,72 @@
+     B(1, 1) = (T(0, 1) + T(2, 1)) >> (1 + BAYER_SHIFT);
+ #endif
+ 
++#if defined(BAYER_BGGR) || defined(BAYER_RGGB)
++#define BAYER_TO_RGB48_COPY \
++    R(0, 0) = \
++    R(0, 1) = \
++    R(1, 1) = \
++    R(1, 0) = S(1, 1); \
++    \
++    G(0, 1) = S(0, 1); \
++    G(0, 0) = \
++    G(1, 1) = (T(0, 1) + T(1, 0)) >> 1; \
++    G(1, 0) = S(1, 0); \
++    \
++    B(1, 1) = \
++    B(0, 0) = \
++    B(0, 1) = \
++    B(1, 0) = S(0, 0);
++#define BAYER_TO_RGB48_INTERPOLATE \
++    R(0, 0) = (T(-1, -1) + T(-1,  1) + T(1, -1) + T(1, 1)) >> 2; \
++    G(0, 0) = (T(-1,  0) + T( 0, -1) + T(0,  1) + T(1, 0)) >> 2; \
++    B(0, 0) =  S(0, 0); \
++    \
++    R(0, 1) = (T(-1, 1) + T(1, 1)) >> 1; \
++    G(0, 1) =  S(0,  1); \
++    B(0, 1) = (T(0,  0) + T(0, 2)) >> 1; \
++    \
++    R(1, 0) = (T(1, -1) + T(1, 1)) >> 1; \
++    G(1, 0) =  S(1,  0); \
++    B(1, 0) = (T(0,  0) + T(2, 0)) >> 1; \
++    \
++    R(1, 1) =  S(1, 1); \
++    G(1, 1) = (T(0, 1) + T(1, 0) + T(1, 2) + T(2, 1)) >> 2; \
++    B(1, 1) = (T(0, 0) + T(0, 2) + T(2, 0) + T(2, 2)) >> 2;
++#else
++#define BAYER_TO_RGB48_COPY \
++    R(0, 0) = \
++    R(0, 1) = \
++    R(1, 1) = \
++    R(1, 0) = S(1, 0); \
++    \
++    G(0, 0) = S(0, 0); \
++    G(1, 1) = S(1, 1); \
++    G(0, 1) = \
++    G(1, 0) = (T(0, 0) + T(1, 1)) >> 1; \
++    \
++    B(1, 1) = \
++    B(0, 0) = \
++    B(0, 1) = \
++    B(1, 0) = S(0, 1);
++#define BAYER_TO_RGB48_INTERPOLATE \
++    R(0, 0) = (T(-1, 0) + T(1, 0)) >> 1; \
++    G(0, 0) =  S(0, 0); \
++    B(0, 0) = (T(0, -1) + T(0, 1)) >> 1; \
++    \
++    R(0, 1) = (T(-1, 0) + T(-1, 2) + T(1, 0) + T(1, 2)) >> 2; \
++    G(0, 1) = (T(-1, 1) + T(0,  0) + T(0, 2) + T(1, 1)) >> 2; \
++    B(0, 1) =  S(0, 1); \
++    \
++    R(1, 0) =  S(1, 0); \
++    G(1, 0) = (T(0, 0)  + T(1, -1) + T(1,  1) + T(2, 0)) >> 2; \
++    B(1, 0) = (T(0, -1) + T(0,  1) + T(2, -1) + T(2, 1)) >> 2; \
++    \
++    R(1, 1) = (T(1, 0) + T(1, 2)) >> 1; \
++    G(1, 1) =  S(1, 1); \
++    B(1, 1) = (T(0, 1) + T(2, 1)) >> 1;
++#endif
++
+ /**
+  * invoke ff_rgb24toyv12 for 2x2 pixels
+  */
+@@ -153,6 +219,40 @@ static void BAYER_RENAME(rgb24_interpolate)(const uint8_t *src, int src_stride,
+     }
+ }
+ 
++static void BAYER_RENAME(rgb48_copy)(const uint8_t *src, int src_stride, uint8_t *ddst, int dst_stride, int width)
++{
++    uint16_t *dst = (uint16_t *)ddst;
++    int i;
++
++    dst_stride /= 2;
++    for (i = 0 ; i < width; i+= 2) {
++        BAYER_TO_RGB48_COPY
++        src += 2 * BAYER_SIZEOF;
++        dst += 6;
++    }
++}
++
++static void BAYER_RENAME(rgb48_interpolate)(const uint8_t *src, int src_stride, uint8_t *ddst, int dst_stride, int width)
++{
++    uint16_t *dst = (uint16_t *)ddst;
++    int i;
++
++    dst_stride /= 2;
++    BAYER_TO_RGB48_COPY
++    src += 2 * BAYER_SIZEOF;
++    dst += 6;
++
++    for (i = 2 ; i < width - 2; i+= 2) {
++        BAYER_TO_RGB48_INTERPOLATE
++        src += 2 * BAYER_SIZEOF;
++        dst += 6;
++    }
++
++    if (width > 2) {
++        BAYER_TO_RGB48_COPY
++    }
++}
++
+ static void BAYER_RENAME(yv12_copy)(const uint8_t *src, int src_stride, uint8_t *dstY, uint8_t *dstU, uint8_t *dstV, int luma_stride, int width, int32_t *rgb2yuv)
+ {
+     uint8_t dst[12];
+@@ -203,6 +303,8 @@ static void BAYER_RENAME(yv12_interpolate)(const uint8_t *src, int src_stride, u
+ #undef B
+ #undef BAYER_TO_RGB24_COPY
+ #undef BAYER_TO_RGB24_INTERPOLATE
++#undef BAYER_TO_RGB48_COPY
++#undef BAYER_TO_RGB48_INTERPOLATE
+ 
+ #undef BAYER_RENAME
+ 
+diff --git a/libswscale/swscale_internal.h b/libswscale/swscale_internal.h
+index 1a1b6f0..d207d3b 100644
+--- a/libswscale/swscale_internal.h
++++ b/libswscale/swscale_internal.h
+@@ -764,6 +764,13 @@ static av_always_inline int isBayer(enum AVPixelFormat pix_fmt)
+     return !!(desc->flags & AV_PIX_FMT_FLAG_BAYER);
+ }
+ 
++static av_always_inline int isBayer16BPS(enum AVPixelFormat pix_fmt)
++{
++    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
++    av_assert0(desc);
++    return desc->comp[1].depth == 8;
++}
++
+ static av_always_inline int isAnyRGB(enum AVPixelFormat pix_fmt)
+ {
+     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+diff --git a/libswscale/swscale_unscaled.c b/libswscale/swscale_unscaled.c
+index 5fb572b..563de39 100644
+--- a/libswscale/swscale_unscaled.c
++++ b/libswscale/swscale_unscaled.c
+@@ -1326,6 +1326,55 @@ static int bayer_to_rgb24_wrapper(SwsContext *c, const uint8_t* src[], int srcSt
+     return srcSliceH;
+ }
+ 
++static int bayer_to_rgb48_wrapper(SwsContext *c, const uint8_t* src[], int srcStride[], int srcSliceY,
++                                  int srcSliceH, uint8_t* dst[], int dstStride[])
++{
++    uint8_t *dstPtr= dst[0] + srcSliceY * dstStride[0];
++    const uint8_t *srcPtr= src[0];
++    int i;
++    void (*copy)       (const uint8_t *src, int src_stride, uint8_t *dst, int dst_stride, int width);
++    void (*interpolate)(const uint8_t *src, int src_stride, uint8_t *dst, int dst_stride, int width);
++
++    switch(c->srcFormat) {
++#define CASE(pixfmt, prefix) \
++    case pixfmt: copy        = bayer_##prefix##_to_rgb48_copy; \
++                 interpolate = bayer_##prefix##_to_rgb48_interpolate; \
++                 break;
++    CASE(AV_PIX_FMT_BAYER_BGGR8,    bggr8)
++    CASE(AV_PIX_FMT_BAYER_BGGR16LE, bggr16le)
++    CASE(AV_PIX_FMT_BAYER_BGGR16BE, bggr16be)
++    CASE(AV_PIX_FMT_BAYER_RGGB8,    rggb8)
++    CASE(AV_PIX_FMT_BAYER_RGGB16LE, rggb16le)
++    CASE(AV_PIX_FMT_BAYER_RGGB16BE, rggb16be)
++    CASE(AV_PIX_FMT_BAYER_GBRG8,    gbrg8)
++    CASE(AV_PIX_FMT_BAYER_GBRG16LE, gbrg16le)
++    CASE(AV_PIX_FMT_BAYER_GBRG16BE, gbrg16be)
++    CASE(AV_PIX_FMT_BAYER_GRBG8,    grbg8)
++    CASE(AV_PIX_FMT_BAYER_GRBG16LE, grbg16le)
++    CASE(AV_PIX_FMT_BAYER_GRBG16BE, grbg16be)
++#undef CASE
++    default: return 0;
++    }
++
++    av_assert0(srcSliceH > 1);
++
++    copy(srcPtr, srcStride[0], dstPtr, dstStride[0], c->srcW);
++    srcPtr += 2 * srcStride[0];
++    dstPtr += 2 * dstStride[0];
++
++    for (i = 2; i < srcSliceH - 2; i += 2) {
++        interpolate(srcPtr, srcStride[0], dstPtr, dstStride[0], c->srcW);
++        srcPtr += 2 * srcStride[0];
++        dstPtr += 2 * dstStride[0];
++    }
++
++    if (i + 1 == srcSliceH) {
++        copy(srcPtr, -srcStride[0], dstPtr, -dstStride[0], c->srcW);
++    } else if (i < srcSliceH)
++        copy(srcPtr, srcStride[0], dstPtr, dstStride[0], c->srcW);
++    return srcSliceH;
++}
++
+ static int bayer_to_yv12_wrapper(SwsContext *c, const uint8_t* src[], int srcStride[], int srcSliceY,
+                                  int srcSliceH, uint8_t* dst[], int dstStride[])
+ {
+@@ -2047,6 +2096,8 @@ void ff_get_unscaled_swscale(SwsContext *c)
+     if (isBayer(srcFormat)) {
+         if (dstFormat == AV_PIX_FMT_RGB24)
+             c->swscale = bayer_to_rgb24_wrapper;
++        else if (dstFormat == AV_PIX_FMT_RGB48)
++            c->swscale = bayer_to_rgb48_wrapper;
+         else if (dstFormat == AV_PIX_FMT_YUV420P)
+             c->swscale = bayer_to_yv12_wrapper;
+         else if (!isBayer(dstFormat)) {
+diff --git a/libswscale/utils.c b/libswscale/utils.c
+index dcd1dba..9ca378b 100644
+--- a/libswscale/utils.c
++++ b/libswscale/utils.c
+@@ -1536,8 +1536,9 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
+ 
+     if (isBayer(srcFormat)) {
+         if (!unscaled ||
+-            (dstFormat != AV_PIX_FMT_RGB24 && dstFormat != AV_PIX_FMT_YUV420P)) {
+-            enum AVPixelFormat tmpFormat = AV_PIX_FMT_RGB24;
++            (dstFormat != AV_PIX_FMT_RGB24 && dstFormat != AV_PIX_FMT_YUV420P &&
++             dstFormat != AV_PIX_FMT_RGB48)) {
++            enum AVPixelFormat tmpFormat = isBayer16BPS(srcFormat) ? AV_PIX_FMT_RGB48 : AV_PIX_FMT_RGB24;
+ 
+             ret = av_image_alloc(c->cascaded_tmp, c->cascaded_tmpStride,
+                                 srcW, srcH, tmpFormat, 64);
+diff --git a/tests/dnn/dnn-layer-mathunary-test.c b/tests/dnn/dnn-layer-mathunary-test.c
+index 5afc5c1..0bfcdcb 100644
+--- a/tests/dnn/dnn-layer-mathunary-test.c
++++ b/tests/dnn/dnn-layer-mathunary-test.c
+@@ -56,6 +56,10 @@ static float get_expected(float f, DNNMathUnaryOperation op)
+         return acosh(f);
+     case DMUO_ATANH:
+         return atanh(f);
++    case DMUO_CEIL:
++        return ceil(f);
++    case DMUO_FLOOR:
++        return floor(f);
+     default:
+         av_assert0(!"not supported yet");
+         return 0.f;
+@@ -128,5 +132,9 @@ int main(int agrc, char **argv)
+         return 1;
+     if (test(DMUO_ATANH))
+         return 1;
++    if (test(DMUO_CEIL))
++        return 1;
++    if (test(DMUO_FLOOR))
++        return 1;
+     return 0;
+ }
+diff --git a/tests/fate/aac.mak b/tests/fate/aac.mak
+index bd28322..4b38d36 100644
+--- a/tests/fate/aac.mak
++++ b/tests/fate/aac.mak
+@@ -150,7 +150,7 @@ FATE_AAC += $(FATE_AAC_CT:%=fate-aac-ct-%)
+ 
+ FATE_AAC_ENCODE += fate-aac-aref-encode
+ fate-aac-aref-encode: ./tests/data/asynth-44100-2.wav
+-fate-aac-aref-encode: CMD = enc_dec_pcm adts wav s16le $(REF) -c:a aac -aac_is 0 -aac_pns 0 -aac_ms 0 -aac_tns 0 -b:a 512k
++fate-aac-aref-encode: CMD = enc_dec_pcm adts wav s16le $(REF) -c:a aac -aac_is 0 -aac_pns 0 -aac_ms 0 -aac_tns 0 -b:a 512k -fflags +bitexact -flags +bitexact
+ fate-aac-aref-encode: CMP = stddev
+ fate-aac-aref-encode: REF = ./tests/data/asynth-44100-2.wav
+ fate-aac-aref-encode: CMP_SHIFT = -4096
+@@ -159,7 +159,7 @@ fate-aac-aref-encode: SIZE_TOLERANCE = 2464
+ fate-aac-aref-encode: FUZZ = 89
+ 
+ FATE_AAC_ENCODE += fate-aac-ln-encode
+-fate-aac-ln-encode: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -c:a aac -aac_is 0 -aac_pns 0 -aac_ms 0 -aac_tns 0 -b:a 512k
++fate-aac-ln-encode: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -c:a aac -aac_is 0 -aac_pns 0 -aac_ms 0 -aac_tns 0 -b:a 512k -fflags +bitexact -flags +bitexact
+ fate-aac-ln-encode: CMP = stddev
+ fate-aac-ln-encode: REF = $(SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav
+ fate-aac-ln-encode: CMP_SHIFT = -4096
+@@ -168,7 +168,7 @@ fate-aac-ln-encode: SIZE_TOLERANCE = 3560
+ fate-aac-ln-encode: FUZZ = 30
+ 
+ FATE_AAC_ENCODE += fate-aac-ln-encode-128k
+-fate-aac-ln-encode-128k: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -c:a aac -aac_is 0 -aac_pns 0 -aac_ms 0 -aac_tns 0 -b:a 128k -cutoff 22050
++fate-aac-ln-encode-128k: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -c:a aac -aac_is 0 -aac_pns 0 -aac_ms 0 -aac_tns 0 -b:a 128k -cutoff 22050 -fflags +bitexact -flags +bitexact
+ fate-aac-ln-encode-128k: CMP = stddev
+ fate-aac-ln-encode-128k: REF = $(SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav
+ fate-aac-ln-encode-128k: CMP_SHIFT = -4096
+@@ -195,7 +195,7 @@ fate-aac-tns-encode: FUZZ = 7
+ fate-aac-tns-encode: SIZE_TOLERANCE = 3560
+ 
+ FATE_AAC_ENCODE += fate-aac-is-encode
+-fate-aac-is-encode: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -c:a aac -aac_pns 0 -aac_is 1 -aac_ms 0 -b:a 128k -aac_tns 0 -cutoff 22050
++fate-aac-is-encode: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -c:a aac -aac_pns 0 -aac_is 1 -aac_ms 0 -b:a 128k -aac_tns 0 -cutoff 22050 -fflags +bitexact -flags +bitexact
+ fate-aac-is-encode: CMP = stddev
+ fate-aac-is-encode: REF = $(SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav
+ fate-aac-is-encode: CMP_SHIFT = -4096
+@@ -204,7 +204,7 @@ fate-aac-is-encode: SIZE_TOLERANCE = 3560
+ fate-aac-is-encode: FUZZ = 10
+ 
+ FATE_AAC_ENCODE += fate-aac-ms-encode
+-fate-aac-ms-encode: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -c:a aac -aac_pns 0 -aac_is 0 -aac_ms 1 -aac_tns 0 -b:a 128k -cutoff 22050
++fate-aac-ms-encode: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -c:a aac -aac_pns 0 -aac_is 0 -aac_ms 1 -aac_tns 0 -b:a 128k -cutoff 22050 -fflags +bitexact -flags +bitexact
+ fate-aac-ms-encode: CMP = stddev
+ fate-aac-ms-encode: REF = $(SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav
+ fate-aac-ms-encode: CMP_SHIFT = -4096
+@@ -224,7 +224,7 @@ fate-aac-yoraw-encode: FUZZ = 17
+ 
+ 
+ FATE_AAC_ENCODE += fate-aac-pred-encode
+-fate-aac-pred-encode: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -profile:a aac_main -c:a aac -aac_is 0 -aac_pns 0 -aac_ms 0 -aac_tns 0 -b:a 128k -cutoff 22050
++fate-aac-pred-encode: CMD = enc_dec_pcm adts wav s16le $(TARGET_SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav -profile:a aac_main -c:a aac -aac_is 0 -aac_pns 0 -aac_ms 0 -aac_tns 0 -b:a 128k -cutoff 22050 -fflags +bitexact -flags +bitexact
+ fate-aac-pred-encode: CMP = stddev
+ fate-aac-pred-encode: REF = $(SAMPLES)/audio-reference/luckynight_2ch_44kHz_s16.wav
+ fate-aac-pred-encode: CMP_SHIFT = -4096
+diff --git a/tests/fate/acodec.mak b/tests/fate/acodec.mak
+index 197b6ed..3e2a184 100644
+--- a/tests/fate/acodec.mak
++++ b/tests/fate/acodec.mak
+@@ -44,14 +44,15 @@ fate-acodec-pcm-u%be: FMT = nut
+ fate-acodec-pcm-u%le: FMT = nut
+ fate-acodec-pcm-f%be: FMT = au
+ 
+-FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_ADX,     ADX)  += adx
+-FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_APM, APM)  += ima_apm
+-FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_QT,  AIFF) += ima_qt
+-FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_SSI, KVAG) += ima_ssi
+-FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_WAV, WAV)  += ima_wav
+-FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_MS,      WAV)  += ms
+-FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_SWF,     FLV)  += swf
+-FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_YAMAHA,  WAV)  += yamaha
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_ADX,     ADX)      += adx
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_ARGO,    ARGO_ASF) += argo
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_APM, APM)      += ima_apm
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_QT,  AIFF)     += ima_qt
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_SSI, KVAG)     += ima_ssi
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_IMA_WAV, WAV)      += ima_wav
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_MS,      WAV)      += ms
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_SWF,     FLV)      += swf
++FATE_ACODEC_ADPCM-$(call ENCDEC, ADPCM_YAMAHA,  WAV)      += yamaha
+ 
+ FATE_ACODEC_ADPCM := $(FATE_ACODEC_ADPCM-yes:%=fate-acodec-adpcm-%)
+ FATE_ACODEC += $(FATE_ACODEC_ADPCM)
+@@ -60,6 +61,7 @@ fate-acodec-adpcm: $(FATE_ACODEC_ADPCM)
+ fate-acodec-adpcm-%: CODEC = adpcm_$(@:fate-acodec-adpcm-%=%)
+ 
+ fate-acodec-adpcm-adx:     FMT = adx
++fate-acodec-adpcm-argo:    FMT = argo_asf
+ fate-acodec-adpcm-ima_apm: FMT = apm
+ fate-acodec-adpcm-ima_qt:  FMT = aiff
+ fate-acodec-adpcm-ima_ssi: FMT = kvag
+diff --git a/tests/fate/hlsenc.mak b/tests/fate/hlsenc.mak
+index c56a541..dce1f37 100644
+--- a/tests/fate/hlsenc.mak
++++ b/tests/fate/hlsenc.mak
+@@ -85,8 +85,8 @@ FATE_HLSENC-$(call ALLYES, HLS_DEMUXER MPEGTS_MUXER MPEGTS_DEMUXER AEVALSRC_FILT
+ fate-hls-list-size: tests/data/hls_list_size.m3u8
+ fate-hls-list-size: CMD = framecrc -flags +bitexact -i $(TARGET_PATH)/tests/data/hls_list_size.m3u8 -vf setpts=N*23
+ 
+-tests/data/hls_segment_type_fmp4.m3u8: TAG = GEN
+-tests/data/hls_segment_type_fmp4.m3u8: ffmpeg$(PROGSSUF)$(EXESUF) | tests/data
++tests/data/hls_fmp4.m3u8: TAG = GEN
++tests/data/hls_fmp4.m3u8: ffmpeg$(PROGSSUF)$(EXESUF) | tests/data
+ 	$(M)$(TARGET_EXEC) $(TARGET_PATH)/$< \
+ 	-f lavfi -re -i "aevalsrc=cos(2*PI*t)*sin(2*PI*(440+4*t)*t):d=5" -map 0 -codec:a mp2fixed \
+ 	-hls_segment_type mpegts -hls_fmp4_init_filename now.mp4 -hls_list_size 0 \
+@@ -94,20 +94,20 @@ tests/data/hls_segment_type_fmp4.m3u8: ffmpeg$(PROGSSUF)$(EXESUF) | tests/data
+ 	$(TARGET_PATH)/tests/data/hls_fmp4.m3u8 2>/dev/null
+ 
+ FATE_HLSENC-$(call ALLYES, HLS_DEMUXER MPEGTS_MUXER MPEGTS_DEMUXER AEVALSRC_FILTER LAVFI_INDEV MP2FIXED_ENCODER) += fate-hls-fmp4
+-fate-hls-fmp4: tests/data/hls_segment_type_fmp4.m3u8
++fate-hls-fmp4: tests/data/hls_fmp4.m3u8
+ fate-hls-fmp4: CMD = framecrc -flags +bitexact -i $(TARGET_PATH)/tests/data/hls_fmp4.m3u8 -vf setpts=N*23
+ 
+ tests/data/hls_fmp4_ac3.m3u8: TAG = GEN
+ tests/data/hls_fmp4_ac3.m3u8: ffmpeg$(PROGSSUF)$(EXESUF) | tests/data
+ 	$(M)$(TARGET_EXEC) $(TARGET_PATH)/$< \
+ 	-stream_loop 4 -i $(SAMPLES)/ac3/monsters_inc_5.1_448_small.ac3 -c copy -map 0 \
+-	-hls_segment_type fmp4 -hls_fmp4_init_filename now.mp4 -hls_list_size 0 \
+-	-hls_time 2 -hls_segment_filename "$(TARGET_PATH)/tests/data/hls_fmp4_%d.m4s" \
++	-hls_segment_type fmp4 -hls_fmp4_init_filename now_ac3.mp4 -hls_list_size 0 \
++	-hls_time 2 -hls_segment_filename "$(TARGET_PATH)/tests/data/hls_fmp4_ac3_%d.m4s" \
+ 	$(TARGET_PATH)/tests/data/hls_fmp4_ac3.m3u8 2>/dev/null
+ 
+ FATE_HLSENC-$(call ALLYES, HLS_DEMUXER EAC3_DEMUXER) += fate-hls-fmp4_ac3
+ fate-hls-fmp4_ac3: tests/data/hls_fmp4_ac3.m3u8
+-fate-hls-fmp4_ac3: CMD = probeaudiostream $(TARGET_PATH)/tests/data/now.mp4
++fate-hls-fmp4_ac3: CMD = probeaudiostream $(TARGET_PATH)/tests/data/now_ac3.mp4
+ 
+ FATE_SAMPLES_FFMPEG += $(FATE_HLSENC-yes)
+ fate-hlsenc: $(FATE_HLSENC-yes)
+diff --git a/tests/ref/acodec/adpcm-argo b/tests/ref/acodec/adpcm-argo
+new file mode 100644
+index 0000000..127153c
+--- /dev/null
++++ b/tests/ref/acodec/adpcm-argo
+@@ -0,0 +1,4 @@
++14b2507d14e95c20bb7ae49b4fcbcbf1 *tests/data/fate/acodec-adpcm-argo.argo_asf
++281190 tests/data/fate/acodec-adpcm-argo.argo_asf
++cc5e5c695adeaebaa2b1f0df5ebd59ee *tests/data/fate/acodec-adpcm-argo.out.wav
++stddev: 1542.05 PSNR: 32.57 MAXDIFF:59667 bytes:  1058400/  1058432
+diff --git a/tests/ref/fate/mxf-d10-user-comments b/tests/ref/fate/mxf-d10-user-comments
+index e787650..de4f26c 100644
+--- a/tests/ref/fate/mxf-d10-user-comments
++++ b/tests/ref/fate/mxf-d10-user-comments
+@@ -1 +1 @@
+-b659c1204f8d04e2a5607af083590dca
++68f0fa62b6a676894afbbe4c34ebf70b
+diff --git a/tests/ref/fate/mxf-opatom-user-comments b/tests/ref/fate/mxf-opatom-user-comments
+index 1834b9e..90e3fb2 100644
+--- a/tests/ref/fate/mxf-opatom-user-comments
++++ b/tests/ref/fate/mxf-opatom-user-comments
+@@ -1 +1 @@
+-892cf02e44bf7d61b6d6f01e41db9375
++f6760a9e710ba478bc3949f3e5c9b34a
+diff --git a/tests/ref/fate/mxf-probe-d10 b/tests/ref/fate/mxf-probe-d10
+index b59fe4b..17f4763 100644
+--- a/tests/ref/fate/mxf-probe-d10
++++ b/tests/ref/fate/mxf-probe-d10
+@@ -18,7 +18,7 @@ pix_fmt=yuv422p
+ level=5
+ color_range=tv
+ color_space=unknown
+-color_transfer=unknown
++color_transfer=bt470m
+ color_primaries=unknown
+ chroma_location=topleft
+ field_order=tt
+diff --git a/tests/ref/fate/mxf-probe-dnxhd b/tests/ref/fate/mxf-probe-dnxhd
+index 5d385e8..012d3ea 100644
+--- a/tests/ref/fate/mxf-probe-dnxhd
++++ b/tests/ref/fate/mxf-probe-dnxhd
+@@ -126,8 +126,8 @@ pix_fmt=yuv422p
+ level=-99
+ color_range=unknown
+ color_space=bt709
+-color_transfer=unknown
+-color_primaries=unknown
++color_transfer=bt709
++color_primaries=bt709
+ chroma_location=unspecified
+ field_order=progressive
+ timecode=N/A
+diff --git a/tests/ref/fate/mxf-probe-dv25 b/tests/ref/fate/mxf-probe-dv25
+index d0fb308..810f145 100644
+--- a/tests/ref/fate/mxf-probe-dv25
++++ b/tests/ref/fate/mxf-probe-dv25
+@@ -18,7 +18,7 @@ pix_fmt=yuv420p
+ level=-99
+ color_range=unknown
+ color_space=unknown
+-color_transfer=unknown
++color_transfer=bt470m
+ color_primaries=unknown
+ chroma_location=topleft
+ field_order=bb
+diff --git a/tests/ref/fate/mxf-reel_name b/tests/ref/fate/mxf-reel_name
+index cfe62df..16022b1 100644
+--- a/tests/ref/fate/mxf-reel_name
++++ b/tests/ref/fate/mxf-reel_name
+@@ -1 +1 @@
+-a788589c14f343dcc6d75aaaec0f0266
++73a891041b2fc836a893ffb49fff4fff
+diff --git a/tests/ref/fate/mxf-user-comments b/tests/ref/fate/mxf-user-comments
+index e91b23b..ddf51d9 100644
+--- a/tests/ref/fate/mxf-user-comments
++++ b/tests/ref/fate/mxf-user-comments
+@@ -1 +1 @@
+-c6469c0ae2aaee602eacbc009080ae8e
++1255faf854223a74d707553121e5eca3
+diff --git a/tools/python/convert_from_tensorflow.py b/tools/python/convert_from_tensorflow.py
+index 85db7bf..2fb8c4c 100644
+--- a/tools/python/convert_from_tensorflow.py
++++ b/tools/python/convert_from_tensorflow.py
+@@ -72,7 +72,9 @@ class TFConverter:
+         self.conv2d_scopename_inputname_dict = {}
+         self.op2code = {'Conv2D':1, 'DepthToSpace':2, 'MirrorPad':3, 'Maximum':4, 'MathBinary':5, 'MathUnary':6}
+         self.mathbin2code = {'Sub':0, 'Add':1, 'Mul':2, 'RealDiv':3, 'Minimum':4}
+-        self.mathun2code  = {'Abs':0, 'Sin':1, 'Cos':2, 'Tan':3, 'Asin':4, 'Acos':5, 'Atan':6, 'Sinh':7, 'Cosh':8, 'Tanh':9, 'Asinh':10, 'Acosh':11, 'Atanh':12}
++        self.mathun2code  = {'Abs':0, 'Sin':1, 'Cos':2, 'Tan':3, 'Asin':4,
++                'Acos':5, 'Atan':6, 'Sinh':7, 'Cosh':8, 'Tanh':9, 'Asinh':10,
++                'Acosh':11, 'Atanh':12, 'Ceil':13, 'Floor':14}
+         self.mirrorpad_mode = {'CONSTANT':0, 'REFLECT':1, 'SYMMETRIC':2}
+         self.name_operand_dict = {}
+ 
+diff --git a/tools/python/convert_header.py b/tools/python/convert_header.py
+index 9851d84..b12b507 100644
+--- a/tools/python/convert_header.py
++++ b/tools/python/convert_header.py
+@@ -23,4 +23,4 @@ str = 'FFMPEGDNNNATIVE'
+ major = 1
+ 
+ # increase minor when we don't have to re-convert the model file
+-minor = 18
++minor = 20

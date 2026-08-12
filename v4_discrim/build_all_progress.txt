@@ -1,0 +1,9 @@
+[2026-08-04 03:35:47] === build_all_usable start ===
+[2026-08-04 03:35:47] waiting for discrim-env-images/usable_scan.json (scan still running)...
+[2026-08-04 05:50:17] usable_scan.json present.
+[2026-08-04 05:50:17] dataset_usable.json: 582 usable bugs
+[2026-08-04 05:50:17] STAGE 3: building patch corpus for 582 bugs (resumable)...
+[2026-08-04 06:12:31] STAGE 3 done: 577 bugs have a clean patch.
+[2026-08-04 06:12:31] STAGE 4: build + push both arms (resumable)...
+[2026-08-04 11:53:54] STAGE 4 done: 576 bugs built + pushed (x2 arms).
+[2026-08-04 11:53:54] === build_all_usable COMPLETE: patch_ok=577 build_ok=576 ===

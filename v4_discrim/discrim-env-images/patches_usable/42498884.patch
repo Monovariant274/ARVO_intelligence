@@ -1,0 +1,23 @@
+diff --git a/plugins/out_s3/s3.c b/plugins/out_s3/s3.c
+index 0e886b3..aa81b3b 100644
+--- a/plugins/out_s3/s3.c
++++ b/plugins/out_s3/s3.c
+@@ -307,14 +307,14 @@ static void s3_context_destroy(struct flb_s3 *ctx)
+         flb_tls_destroy(ctx->sts_provider_tls);
+     }
+ 
+-    if (ctx->client_tls) {
+-        flb_tls_destroy(ctx->client_tls);
+-    }
+-
+     if (ctx->s3_client) {
+         flb_aws_client_destroy(ctx->s3_client);
+     }
+ 
++    if (ctx->client_tls) {
++        flb_tls_destroy(ctx->client_tls);
++    }
++
+     if (ctx->free_endpoint == FLB_TRUE) {
+         flb_free(ctx->endpoint);
+     }

@@ -1,0 +1,12 @@
+diff --git a/src/oplist.c b/src/oplist.c
+index b3b782f..df12fb3 100644
+--- a/src/oplist.c
++++ b/src/oplist.c
+@@ -851,6 +851,7 @@ PLIST_API int plist_from_openstep(const char *plist_ostep, uint32_t length, plis
+         } else if (ctx.pos < ctx.end && *ctx.pos == '=') {
+             /* attempt to parse this as 'strings' data */
+             plist_free(*plist);
++
+             plist_t pl = plist_new_dict();
+             ctx.pos = plist_ostep;
+             parse_dict_data(&ctx, pl);

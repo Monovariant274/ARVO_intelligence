@@ -1,0 +1,13 @@
+diff --git a/src/conf.c b/src/conf.c
+index 7015eac..c79fcc8 100644
+--- a/src/conf.c
++++ b/src/conf.c
+@@ -157,7 +157,7 @@ static int config__add_listener(struct mosquitto__config *config)
+ 		log__printf(NULL, MOSQ_LOG_ERR, "Error: Out of memory.");
+ 		return MOSQ_ERR_NOMEM;
+ 	}
+-	listener = &config->listeners[config->listener_count-1];
++	listener = &config->listeners[config->listener_count];
+ 	memset(listener, 0, sizeof(struct mosquitto__listener));
+ 	listener->security_options = mosquitto_calloc(1, sizeof(struct mosquitto__security_options));
+ 	if(!listener->security_options){

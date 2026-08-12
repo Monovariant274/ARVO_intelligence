@@ -1,0 +1,37 @@
+diff --git a/lib/http.h b/lib/http.h
+index 6232bbc..5bacb17 100644
+--- a/lib/http.h
++++ b/lib/http.h
+@@ -176,7 +176,6 @@ struct HTTP {
+   int status_code; /* HTTP status code */
+   const uint8_t *pausedata; /* pointer to data received in on_data_chunk */
+   size_t pauselen; /* the number of bytes left in data */
+-  bool closed; /* TRUE on HTTP2 stream close */
+   bool close_handled; /* TRUE if stream closure is handled by libcurl */
+ 
+   char **push_headers;       /* allocated array */
+@@ -184,6 +183,7 @@ struct HTTP {
+   size_t push_headers_alloc; /* number of entries allocated */
+ #endif
+ #if defined(USE_NGHTTP2) || defined(USE_NGHTTP3)
++  bool closed;
+   char *mem;     /* points to a buffer in memory to store received data */
+   size_t len;    /* size of the buffer 'mem' points to */
+   size_t memlen; /* size of data copied to mem */
+diff --git a/lib/vquic/ngtcp2.c b/lib/vquic/ngtcp2.c
+index 008a75c..1cdbb7d 100644
+--- a/lib/vquic/ngtcp2.c
++++ b/lib/vquic/ngtcp2.c
+@@ -1784,12 +1784,6 @@ static CURLcode http_request(struct connectdata *conn, const void *mem,
+     }
+   }
+ 
+-  stream->header_recvbuf = Curl_add_buffer_init();
+-  if(!stream->header_recvbuf) {
+-    result = CURLE_OUT_OF_MEMORY;
+-    goto fail;
+-  }
+-
+   switch(data->set.httpreq) {
+   case HTTPREQ_POST:
+   case HTTPREQ_POST_FORM:

@@ -1,0 +1,43 @@
+diff --git a/src/pcre2_auto_possess.c b/src/pcre2_auto_possess.c
+index 23275a2..51bd689 100644
+--- a/src/pcre2_auto_possess.c
++++ b/src/pcre2_auto_possess.c
+@@ -7,7 +7,7 @@ and semantics are as close as possible to those of the Perl 5 language.
+ 
+                        Written by Philip Hazel
+      Original API code Copyright (c) 1997-2012 University of Cambridge
+-          New API code Copyright (c) 2016-2017 University of Cambridge
++          New API code Copyright (c) 2016-2018 University of Cambridge
+ 
+ -----------------------------------------------------------------------------
+ Redistribution and use in source and binary forms, with or without
+@@ -1235,6 +1235,7 @@ for (;;)
+ #endif
+ 
+     case OP_MARK:
++    case OP_COMMIT_ARG:
+     case OP_PRUNE_ARG:
+     case OP_SKIP_ARG:
+     case OP_THEN_ARG:
+diff --git a/testdata/testinput1 b/testdata/testinput1
+index 5b01e99..552735b 100644
+--- a/testdata/testinput1
++++ b/testdata/testinput1
+@@ -6246,4 +6246,6 @@ ef) x/x,mark
+ #pattern -no_start_optimize
+ #subject -mark 
+ 
++/(.COMMIT)(*COMMIT::::::::::interal error:::)/
++
+ # End of testinput1 
+diff --git a/testdata/testoutput1 b/testdata/testoutput1
+index eaea8e8..597261d 100644
+--- a/testdata/testoutput1
++++ b/testdata/testoutput1
+@@ -9906,4 +9906,6 @@ No match, mark = X
+ #pattern -no_start_optimize
+ #subject -mark 
+ 
++/(.COMMIT)(*COMMIT::::::::::interal error:::)/
++
+ # End of testinput1 

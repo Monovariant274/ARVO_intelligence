@@ -1,0 +1,21 @@
+diff --git a/src/tools.c b/src/tools.c
+index 3796c98..5f44a2f 100644
+--- a/src/tools.c
++++ b/src/tools.c
+@@ -5751,11 +5751,12 @@ uint32_t parse_line(char *in, char *out, size_t *outlen, char **args, int *nbarg
+ 	/* end of output string */
+ 	EMIT_CHAR(0);
+ 
+-	/* don't add empty arg after trailing spaces. Note that args[arg]
+-	 * may contain some distances relative to NULL if <out> was NULL,
+-	 * so we test <out> instead of args[arg].
++
++
++
++
+ 	 */
+-	if (arg < argsmax && out && *(args[arg]))
++	if (arg < argsmax && args[arg] != out + outpos - 1)
+ 		arg++;
+ 
+ 	if (quote) {

@@ -1,0 +1,24 @@
+diff --git a/base/gxipixel.c b/base/gxipixel.c
+index 8e0a9901f..1b02e55b4 100644
+--- a/base/gxipixel.c
++++ b/base/gxipixel.c
+@@ -287,6 +287,7 @@ gx_image_enum_begin(gx_device * dev, const gs_gstate * pgs,
+     int orthogonal;
+     int force_interpolation = 0;
+ 
++    penum->pcs = NULL;
+     penum->clues = NULL;
+     penum->icc_setup.has_transfer = false;
+     penum->icc_setup.is_lab = false;
+@@ -1077,9 +1078,9 @@ fail:
+         penum->clip_dev = NULL;
+     }
+     gs_free_object(mem, penum->clip_dev, "image clipper");
+-    gs_free_object(mem, penum, "gx_begin_image1");
+-    rc_decrement_cs(pcs, "error in gx_begin_image1");
++    rc_decrement_cs(penum->pcs, "error in gx_begin_image1");
+     penum->pcs = NULL;
++    gs_free_object(mem, penum, "gx_begin_image1");
+     return code;
+ }
+ 

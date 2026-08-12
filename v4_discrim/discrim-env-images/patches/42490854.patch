@@ -1,0 +1,12 @@
+diff --git a/README.md b/README.md
+index 7322db3..bc563e3 100644
+--- a/README.md
++++ b/README.md
+@@ -20,6 +20,7 @@ The following image formats have read-only support:
+ 
+ The following image formats have read and write support:
+ 
++- AV1 Image File Format (AVIF)
+ - Encapsulated PostScript (eps)
+ - Personal Computer Exchange (pcx)
+ - SGI images (rgb, rgba, sgi, bw)

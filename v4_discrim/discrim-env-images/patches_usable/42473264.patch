@@ -1,0 +1,28 @@
+diff --git a/ChangeLog b/ChangeLog
+index a3d8cfe..9e20c12 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -122,7 +122,8 @@ tests such as (?(VERSION>=0)...) when the version test was true. Incorrect
+ processing or a crash could result.
+ 
+ 30. When PCRE2_UTF is set, allow non-ASCII letters and decimal digits in group 
+-names, as Perl does.
++names, as Perl does. There was a small bug in this new code, found by
++ClusterFuzz 12950, fixed before release.
+ 
+ 
+ Version 10.32 10-September-2018
+diff --git a/src/pcre2_compile.c b/src/pcre2_compile.c
+index 0c38b5b..266d321 100644
+--- a/src/pcre2_compile.c
++++ b/src/pcre2_compile.c
+@@ -2246,8 +2246,8 @@ if (utf && is_group)
+     if (type != ucp_Nd && PRIV(ucp_gentype)[type] != ucp_L &&
+         c != CHAR_UNDERSCORE) break;
+     ptr++;
+-    FORWARDCHAR(ptr);
+     if (ptr >= ptrend) break;
++    FORWARDCHAR(ptr);
+     GETCHAR(c, ptr);
+     type = UCD_CHARTYPE(c);
+     }

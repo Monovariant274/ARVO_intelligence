@@ -4,6 +4,287 @@ Handoff doc. Read this to resume without re-deriving context.
 
 ---
 
+## NEW DIRECTION (2026-08-02) — v4 "discrimination reward" two-arm experiment (Chenxi collab)
+
+**Supersedes the immediate Phase-6 GRPO next-step as the active track.** User is coordinating with
+Chenxi (kaloronahuang) to pivot the reward from single-site crash *location* prediction to exec-rl's
+**v4 crash/no-crash discrimination reward**. This is NOT a cheap re-score of the existing sweep — it is
+a new experiment with a different task shape. Recorded here so it isn't re-derived.
+
+- **Chenxi's newer repo CLONED at `~/sample_repo/system-intelligence-kalorona`** (github
+  `kaloronahuang/system-intelligence`, `main` @ `1b4610d` "two-arm-dataset" merge). Kept ALONGSIDE the
+  old `~/sample_repo/system-intelligence` (branch `sysintel`, older) — both share the same remote; the
+  new clone is just newer `main`. The old copy is what the rest of this doc's exec-rl references point at.
+- **What v4 actually is (read from `system-intelligence-kalorona/exec-rl/exec_rl/reward_v4.py`):** a
+  crash/no-crash VERDICT reward over **two arms per bug** — `crash` arm = vuln/parent commit (reproducer
+  crashes), `fix` arm = fix commit (same reproducer runs clean). Agent is NOT told which arm it's in;
+  it must decide crash-or-not by reading code. Scoring: fix arm → no-crash 1.0 / crash 0.0; crash arm →
+  no-crash 0.0 / crash = stack-similarity S∈[0,1] (max-weight common subsequence, depth-weighted, line
+  proximity on the crash-site frame). Agent output schema is a VERDICT object
+  (`{crashes: bool, bugClass, reason, crashFrames[], allocFrames[], freeFrames[]}`), NOT our single
+  file/function/line site — so our recorded 800 sweep3fp predictions CANNOT be re-scored under v4.
+- **"Discriminability"** (the metric to measure) = how cleanly the agent separates the crash arm from the
+  fix arm. Reference probe: `system-intelligence-kalorona/v3_discrim_run.py`
+  (5 bugs × {crash, nocrash} × 3 samples, inference-only, captures the verdict). v4 test:
+  `exec-rl/tests/test_reward_v4.py`; agent prompt: `exec-rl/agent-configs/crash-predictor.v4`.
+- **Environment normalization — DOC IN HAND (2026-08-02).** Chenxi's spec is on the `sysintel` branch of
+  the local clone: `docs/discrim-env-images/README.md` (+ `Dockerfile`, `build_shard.sh` beside it). Title:
+  "Building Leak-Normalized Two-Arm Environment Images (Discrimination Tasks)," explicitly addressed to
+  "Jinghe — adapting the sysintel discrimination-environment build pipeline to the ARVO dataset."
+  Assessed SUFFICIENT to build the images. Key contents:
+  - **Approach = PRE-BAKED images, not runtime normalization** — normalizing at run time caused PrepError
+    storms + disk blow-up at scale, so each arm is baked into its own image ahead of time.
+  - **§2 threat model = 8 leak channels, each with a fix:** (1) git history → nuke `.git`, re-init ONE
+    synthetic commit; (2) commit/author timestamps → pin to a content-derived epoch; (3) file mtimes →
+    `touch -h` every path to that epoch; (4) git index stat-cache → `rm -f .git/index && git read-tree HEAD`;
+    (5) patch residue → apply the patch only in a DISCARDED build stage; (6) image structure/layer metadata
+    → structurally identical stages for both arms; (7) layer birth-time → randomize pull/build order;
+    (8) gc noise → `git config gc.auto 0`.
+  - **§4 Dockerfile = 6 stages:** kenvsrc → base → pristine → {parent-prep | fix-prep} → {parent-commit |
+    fix-commit}. Both arms descend from the SAME `pristine` source tree.
+  - **§5 ARVO adaptations (the load-bearing part):** ⚠️ **DO NOT take the fix tree from ARVO's `-fix` image
+    and the vul tree from the `-vul` image** — the two ARVO images differ in more than source (build
+    timestamps, layer metadata) = leaks. Instead take source from the `-vul` image ONLY, and produce the
+    fix arm by APPLYING THE FIX AS A COMMENTLESS PATCH inside `fix-prep`. Parameterize the tree path
+    (`/src/<project>`, vs the kernel's `/linux`). Epoch anchor = the PARENT commit's committer timestamp
+    (`ARG EPOCH`). One shared base image. ARVO trees are 10–100× smaller than the kernel tree.
+  - **§3 registry:** targets GCP Artifact Registry `us-docker.pkg.dev/triangulate-396717/sysintel-env/`,
+    ARVO images under prefix `sysintel-user-`, scheme `sysintel-user-arvo-{bugId}-{vul|fix}:latest`.
+    (⚠️ external infra — push access to be confirmed; can build locally otherwise.)
+  - **§6 footguns:** touch race → 5× retry; watch shard trailing-newline; disk discipline; idempotence;
+    verify btime fingerprint; **nothing after the tree COPY may touch the tree.** §8 gives an acceptance
+    checklist; §9: reference fleet = 468 bugs × 2 arms = 936 images.
+  - **NEW dependency this surfaces:** we must supply a **commentless oracle patch** per bug at
+    `patches/{bugId}.patch`. This is exactly the harfbuzz giveaway-comment leak found in 1a — the patch
+    corpus needs a comment-stripping step. Source: diff ARVO's `vuln_commit`→`fix_commit` (both already in
+    `meta.json`), strip comments.
+- **Encouraging:** our `data/<id>/meta.json` already records BOTH `vuln_commit` and `fix_commit`, so the
+  ARVO fix (no-crash) arm is buildable from data already harvested — no re-harvest needed for the source.
+
+- **➡️ DETAILED ITEM 1–3 RECORD LIVES IN `v4_discrim/progress1.md`.** That standalone doc is the
+  authoritative, audited write-up of items 1–3 (task contract, dataset, results, soundness audit, full
+  directory inventory) PLUS **§10 = the full-corpus usable-image build (2026-08-04)**: scaling the
+  two-arm image build/push to every soundly-buildable bug (`scan_usable.py` + `build_all_usable.sh`,
+  resumable, ~600–640 usable projected). If you are resuming the v4 work, read `progress1.md` — this
+  section here is only a high-level pointer.
+
+- **WORKING FOLDER (2026-08-02): `v4_discrim/`** — all of items 1–4 happen here, self-contained.
+  Layout: `lib/` = copies of the reusable ARVO pipeline modules (fetch_source, sandbox_contract,
+  launch_sandbox, run_prediction, reward/score/difficulty/frame_clean, answer_schema, batch_predict,
+  select_bugs, Dockerfile.sandbox); `vendor/exec_rl/` = Chenxi's v4 reward vendored as a minimal
+  importable package (`reward_v4` + its closure: `reward`, `reward_v2/{schema,similarity}`,
+  `models/entities`, `crash_taxonomy`; `reward_v2/__init__` emptied to avoid dragging idf/scorer) —
+  verified `import exec_rl.reward_v4` runs standalone; `vendor/v3_discrim_run.py` = Chenxi's reference
+  probe; `discrim-env-images/{README.md,Dockerfile,build_shard.sh}` = the normalization doc, extracted
+  from `origin/sysintel`; `data -> ../data` symlink (both arms' commits already in each `meta.json`);
+  `patches/` (for the 2b commentless patch corpus) and `runs/` scaffolded empty.
+- **ITEM 1 BUILT + RUNNING (2026-08-02).** All of item 1 is implemented in `v4_discrim/` and the
+  50-bug sweep is executing in tmux session **`v4disc`** (alongside the `harvest` session).
+  - New code (all in `v4_discrim/`): `verdict_schema.py` (1b — arm-neutral verdict output +
+    validity gate, strict subset of vendor `parse_crash_verdict`); `gt_adapter.py` (ARVO
+    `ground_truth.json` → reward_v4 gold: `raw_file`→`rawLine`, synth `reason`, `bugClass` from
+    `crash_type_coarse`, prefers `frames_clean`); `score_verdict.py` (1c — the ONE scoring path,
+    wraps `parse_crash_verdict`+`score_crash_verdict`, `-1` for off-schema); `run_verdict.py` (1b —
+    one (bug,arm,sample) rollout: arm→commit, per-arm `src_<arm>`/`answer_<arm>` dirs, ARM-NEUTRAL
+    prompt with NO "a fuzzer found a crash" giveaway, reuses run_prediction's SafeLitellmModel/
+    templates); `build_dataset.py` (1a — froze 50 bugs / 34 projects into `dataset.json`, seed 0,
+    ≤3/project, eligibility = both commits + fetchable + ≥1 usable gold frame; eligible pool 4669);
+    `batch_verdict.py` (1d — 50×2 arms×k, manifest.jsonl, (bug,arm)-level resume, bug-level
+    concurrency); `discriminability.py` (1e — TPR/FPR/**Youden J**, accuracy, paired per-bug delta,
+    mean v4 reward per arm; run it on the manifest when the sweep finishes).
+  - **Launch (running):** `batch_verdict.py --k 5 --concurrency 4 --step-limit 40 --cost-limit 1.0
+    --max-cost 80 --cleanup-src --name v4disc`, model `gemini/gemini-3-flash-preview` (paid key,
+    provided by user). 500 rollouts, est ~$40–60 / a few hours. Output: `runs/v4disc/manifest.jsonl`
+    (+ `run.log`). Verified end-to-end on 1 bug×2 arms before launch: full lockdown sandbox, both
+    arms fetched, crash-arm verdict valid. **Watch item:** step-limit 15 was too tight (fix arm hit
+    LimitsExceeded without writing → invalid); raised to 40. If invalid-rate stays high in the
+    metric, raise step-limit further and re-run.
+  - **When it finishes (1e):** `cd v4_discrim && python3 discriminability.py runs/v4disc/manifest.jsonl`
+    → prints separation + writes `runs/v4disc/discriminability.json`. Check the tmux tail for
+    `EXITCODE=` / the `batch 'v4disc' done` line; resume a partial run with the SAME command (it's
+    (bug,arm)-level resumable). NOTE: item 1 runs on the EXISTING fetch-source sandbox, NOT the
+    leak-normalized images (2/3) — so its discriminability is an upper-band baseline that 2/3 tighten.
+- **Four-item plan (user's, with phase breakdown):**
+  1. Rerun the pipeline with v4 reward, measure discriminability on 50 bugs. → 1a build two-arm dataset
+     (crash+fix trees per bug from the two commits); 1b switch agent task/output to the v4 verdict schema;
+     1c wire `reward_v4.score_crash_verdict`; 1d run 50 bugs × 2 arms × k samples; 1e measure crash-vs-fix
+     separation (Chenxi's discriminability metric).
+  2/3. Build the normalized two-arm Docker images per Chenxi's doc (`docs/discrim-env-images/README.md`).
+     → 2a ✅ get doc (in hand, assessed sufficient); 2b **patch corpus — BUILT 2026-08-02** (see block
+     below); 2c adapt Chenxi's 6-stage Dockerfile to ARVO (§5): source from `-vul` image only, fix arm =
+     apply the commentless patch in `fix-prep`, parameterize tree path `/src/<project>`, epoch = parent
+     committer timestamp; 2d run the 8-channel normalization (nuke+reinit `.git`, pin timestamps,
+     `touch -h` mtimes, `read-tree`, `gc.auto=0`); 2e build both arms via `build_shard.sh`; 2f acceptance
+     check per §8 (arms indistinguishable except source — btime fingerprint, no patch residue); 2g push to
+     registry (or keep local — GCP access TBD).
+
+- **⤷ NEWER v4 WORK (2026-08-04/05) NOT reflected below — see `v4_discrim/progress1.md`:** §10 full-corpus
+  leak-normalized image build (576/577 bugs, 1,152 images); §11 Gemini-3.5-flash normalized sweep result
+  (J +0.096 vs g3-flash-norm +0.035 — but a no-crash-bias artifact, not better crash-reading); §12 the
+  trajectory-persistence fix (prior runs' per-rollout trajectories were clobbered/unrecoverable); §13 the
+  in-progress trajectory-capturing RE-RUN of BOTH models (`v4disc_norm_flash3_traj` + `v4disc_norm_g35_traj`,
+  running under `run_traj_sweeps.sh`, ~24 h). The block below is the original 2026-08-02 item-1/3 record.
+
+- **★ LIVE STATUS (2026-08-02, overnight autonomous run) — items 2c–2g + item-3 harness DONE; two
+  matched sweeps launched. READ THIS FIRST ON WAKE.**
+  - **✅ RUN COMPLETE (~22:02) — BOTH matched sweeps done; item-3 headline below.** 2g build wrote all
+    100 images; item-1-adjacent baseline (`v4disc_adj`) 500 rows (errored 25, invalid 30, cost $48.38);
+    item-3 normalized (`v4disc_norm`) 500 rows (errored 0, invalid 3, cost $51.70) — auto-fired by
+    `launch_item3.sh` as planned. Metrics in `runs/{v4disc_adj,v4disc_norm}/discriminability.json`.
+  - **★★ ITEM-3 RESULT (audited 2026-08-03).** Same 50 adjacent bugs, k=5, gemini-3-flash-preview,
+    arm-neutral prompt — only the environment differs (raw fetched source vs leak-normalized per-bug
+    image). Per-arm detail (valid = on-schema verdict; says-crash rate + mean reward over VALID rows):
+
+    | run | arm | n | valid | invalid | says-crash | mean R(valid) |
+    |---|---|---|---|---|---|---|
+    | adj (raw) | crash | 250 | 248 | 0.8% | 35.9% | +0.034 |
+    | adj (raw) | fix   | 250 | 222 | 11.2% | 26.6% | +0.734 |
+    | norm      | crash | 250 | 249 | 0.4% | 35.3% | +0.032 |
+    | norm      | fix   | 250 | 248 | 0.8% | 31.9% | +0.681 |
+
+    Pooled discriminability + paired per-bug + best-of-5 (pass@k over the 5 samples of each (bug,arm)):
+
+    | metric | adj (raw, leaky) | norm (leak-normalized) |
+    |---|---|---|
+    | Youden J (TPR−FPR) | +0.093 | +0.035 |
+    | accuracy | 53.6% | 51.7% |
+    | TPR (crash says-crash) | 35.9% | 35.3% |
+    | FPR (fix says-crash) | 26.6% | 31.9% |
+    | paired mean Δ (p_crash−p_fix) | +0.088 | +0.032 |
+    | paired both-arms-valid bugs | 45 | 50 |
+    | pass@1 / pass@5 crash | 35.6% / 82.0% | 35.2% / 78.0% |
+    | pass@1 / pass@5 fix | 65.2% / 86.0% | 67.6% / 94.0% |
+    | JOINT pass@5 (both arms right ≥once) | 70.0% | 72.0% |
+
+    **Reading (directional, NOT statistically strong — see caveats):** both regimes are only WEAKLY
+    discriminating; J sits near 0 either way and accuracy is near the 50% coin-flip. Normalization nudges
+    it further toward chance, driven almost entirely by FPR rising (26.6→31.9%) while TPR is flat — i.e.
+    once fix-arm metadata leaks (patch comments, mtimes, index stat-cache) are gone, the agent calls
+    "crash" on clean fix trees about as often as on real bugs. Consistent with the agent reading *some*
+    leak signal in raw source, not purely the code; normalization strips it, as intended.
+  - **⚠ SOUNDNESS CAVEATS on the adj→norm delta (do not over-claim leak-exploitation):**
+    1. **Within noise.** n=50 bugs, ~250 valid rows/arm. The FPR gap of +5.3pt is ≈1.3 standard errors
+       (SE≈4pt) — NOT significant; the J gap (+0.093 vs +0.035) is small vs sampling error. Treat "leaks
+       were exploited" as *suggestive*, not proven. The robust statement is "both regimes ≈ chance."
+    2. **Censoring is apples-to-oranges.** The raw run's fix arm had 11.2% invalid (vs 0.8% norm), so its
+       FPR is measured over a smaller, censored valid sample (222 vs 248). If off-schema verdicts
+       correlate with the model being confused on fix trees, the raw FPR is biased. So part of the
+       adj→norm FPR move is a validity-rate artifact, not pure leak removal.
+  - **NOTE — negative reward-separation is EXPECTED, not a metric inversion.** mean-reward-separation
+    (crash−fix) is −0.70 (adj) / −0.65 (norm) because the crash arm's reward is localization-weighted
+    (S=0.80·stack+0.15·class+0.05·allocfree, mean≈0.09 even when says-crash is correct) while the fix arm
+    pays a flat 1.0 for a correct no-crash. This is the reward_v4 magnitude asymmetry (matters only for
+    RL/item 4, inert for the item 1–3 binary discrimination metrics), NOT the arms being swapped.
+  - **CODE AUDIT (2026-08-03) — item 1–3 path is clean.** Independent re-derivation of TPR/FPR/J/accuracy
+    from both manifests matches the stored `discriminability.json` to the digit. Both runs: 500 rows, 50
+    bugs, 100 (bug,arm) cells, **all exactly 5 samples, zero duplicate (bug,arm,sample), zero integrity
+    anomalies** (every valid row has a bool `crashes` + reward∈[0,1]; every invalid row reward=−1). The
+    two runs cover the **identical 50-bug set** → the comparison is not confounded. No bugs found.
+  - **Operational win (independent of the discrimination story):** normalization slashed fix-arm invalid
+    11.2%→0.8% and errored 25→0 (baked images need no git-fetch), and lifted paired-valid bugs 45→50 — so
+    the normalized images are the right substrate going forward regardless of the (weak) J delta.
+  - **[HISTORICAL — all three below COMPLETED, see RESULT above] What ran (two tmux sessions):**
+    1. `dbuild2g` — **item 2g build+push** of the 50-bug ADJACENT set × 2 arms (100 images) to
+       `us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-<bug>-{vul,fix}:latest`.
+       Cmd: `python3 build_shard_arvo.py --manifest discrim-env-images/patch_corpus_adjacent.json
+       --push --keep --summary-out discrim-env-images/build_report_adjacent.json`. `--keep` leaves
+       images on disk so item 3 reuses them without a re-pull. Check: `tail build2g_stdout.log`;
+       done when `BUILD2G_EXIT=` appears + `discrim-env-images/build_report_adjacent.json` is written.
+    2. `v4disc` — **item-1-adjacent baseline sweep** (raw fetched source in `arvo-sandbox:base`, the
+       upper-band leaky baseline) over the SAME 50 adjacent bugs. Cmd: `python3 batch_verdict.py
+       --dataset dataset_adjacent.json --k 5 --concurrency 4 --step-limit 30 --cost-limit 1.0
+       --max-cost 150 --cleanup-src --name v4disc_adj`. Output `runs/v4disc_adj/manifest.jsonl`.
+       Check: `tail v4disc_adj_stdout.log`; done at `ADJ_EXIT=`. NOTE the venv (`~/ARVO_intelligence/.venv`)
+       must be active — `minisweagent` lives there; a bare `python3` fails `ModuleNotFoundError`.
+  - **[HISTORICAL — DONE] item-3 normalized-image sweep.** Must run in the
+    `v4disc` shell (the GEMINI_API_KEY is exported ONLY there; it is deliberately NOT in any file).
+    Cmd (identical driver, `--images` flag): `python3 batch_verdict.py --images --dataset
+    dataset_adjacent.json --k 5 --concurrency 4 --step-limit 30 --cost-limit 1.0 --max-cost 150
+    --name v4disc_norm`. Then metrics on both: `python3 discriminability.py runs/v4disc_adj/manifest.jsonl`
+    and `... runs/v4disc_norm/manifest.jsonl`. The adj-vs-norm J/accuracy delta = the raw-vs-normalized
+    leak effect (item 3's headline result). Two matched sweeps on the SAME 50 bugs so the comparison
+    isn't confounded by the bug set.
+  - **ITEM 2c/2d/2e DONE — `v4_discrim/discrim-env-images/Dockerfile.arvo` + `build_shard_arvo.py`.**
+    ARVO adaptation of Chenxi's 6-stage leak-normalization Dockerfile: source enters via the BUILD
+    CONTEXT (not a per-bug `-vul` source image — ARVO has none at fix^); `build_shard_arvo.py`
+    materializes the fix^ tree itself (`git archive <fix^> | tar -x`, no .git), passes `--build-arg
+    BUG/TREE=/src/<project>/EPOCH` (EPOCH = fix^ committer `%ct`), builds `--target vul-commit` and
+    `--target fix-commit` from the SAME tree. Both arms: git→1 synthetic commit @EPOCH, all mtimes
+    `touch -h @EPOCH`, index stat-cache zeroed (`rm .git/index; read-tree`) then warmed
+    (`checkStat=minimal`). Patch applied only in the discarded `fix-prep` stage.
+  - **⚠ LEAK FOUND + FIXED during 2f (also affects Chenxi's kernel Dockerfile — flagged to user):**
+    content files were @EPOCH but the tree-root dir, `.git`, and `.git/index` kept BUILD-TIME mtimes,
+    which differ between the two arms' builds by the few seconds between them → a `stat()`-able channel
+    telling the arms apart. Fixed by re-anchoring EVERY mtime to @EPOCH at the end of the final
+    `vul-commit`/`fix-commit` RUN (`checkStat=minimal` makes the index file's own mtime irrelevant to
+    the warm, so re-touching `.git/index` costs nothing). Final stages now carry `ARG EPOCH`.
+  - **★ DISTANCE-1 RISK RESOLVED via ADJACENT SET (supersedes the 2b ⚠RISK block below).** The
+    `fix^`-may-already-be-safe / multi-commit-fix-series hazard is eliminated by RESTRICTING the set to
+    bugs where `vuln_commit == fix_commit^` (crash and fix revisions ADJACENT). Then fix^ is BOTH the
+    ARVO-verified-crashing tree AND the minimal-diff base. Built with `build_dataset.py --adjacent`
+    (git-checks `fix^ == vuln`, cached in `adjacency_cache.json`) → `dataset_adjacent.json` (50 bugs,
+    `adjacent=true`). Patch corpus rebuilt on this set: `build_patch_corpus.py ... --out
+    discrim-env-images/patch_corpus_adjacent.json` → `patches_adjacent/{bug}.patch` (50/50 clean,
+    median ~2 files). All matched sweeps run on this adjacent set, NOT the original `dataset.json`.
+  - **ITEM 3 HARNESS BUILT — `v4_discrim/run_verdict_img.py` + `batch_verdict.py --images`.** Same
+    arm-neutral prompt / verdict schema / `score_verdict` path as item 1; the ONLY change is the
+    environment: the per-bug arm IMAGE is the container base (source baked at `/src/<project>`,
+    cwd=tree), mounting ONLY poc(ro)+answer(rw) — no source bind-mount, no `.git` mask (the image's
+    `.git` is one synthetic arm-neutral commit). Plumbing smoke-tested on a locally-kept `-vul` image
+    under the full lockdown contract: tree readable, poc readable, answer writable, python3 works.
+    (`git log` fails "dubious ownership" — tree is root-owned vs the `--user` uid; harmless and
+    desirable — git history stays unprobed and is arm-neutral regardless.)
+  - **Small fixes made along the way:** `lib/fetch_source.py` + `build_shard_arvo.py` +
+    `build_dataset.py` all learned the ffmpeg mirror (`git.ffmpeg.org` intermittently 502s →
+    sha-identical GitHub mirror) to stop errored sweep rows. `build_patch_corpus.py`: `a.out =
+    a.out.resolve()` so a relative `--out` doesn't break the `patch.relative_to(_HERE)` bookkeeping
+    (this had silently marked all 50 adjacent rows "failed" though the patch files were written), and
+    `repo_addr` is now recorded in each corpus row (the build worker needs it).
+
+- **ITEM 2b BUILT (2026-08-02) — `v4_discrim/build_patch_corpus.py` → `discrim-env-images/patches/{bug}.patch`.**
+  Per bug: diff → strip C comments from added lines (`lib/strip_comments.strip_diff`, vendored from
+  Chenxi's exec-rl) → `git apply --check` → `discrim-env-images/patch_corpus.json` summary. Binary files
+  (fuzz seeds/corpora) excluded from the patch — they're source-irrelevant AND can't be `git apply`-ed
+  under a shallow fetch. Sequential (one scratch repo, deleted per bug) so peak disk stays flat next to
+  the running sweep. Resumable.
+  - **CRASH-BASE DECISION (user, 2026-08-02): base = `fix_commit^`, patch = commentless `fix^..fix`,**
+    matching Chenxi's `kenv-base-<bug>-parent-commit`. Rejected the literal §5 reading (diff
+    `vuln_commit`→`fix_commit`) because ARVO's `vuln_commit` is generally NOT `fix^` and can be a whole
+    release behind fix (gnutls: `vuln..fix` = 347 files vs `fix^..fix` = 2 files) — that would leak arm
+    identity via hundreds of unrelated changes. `fix^..fix` makes the two arms differ by EXACTLY the fix.
+  - **⚠ RISK found while building (NOT yet resolved):** ARVO's `fix_commit` is sometimes the TAIL of a
+    multi-commit fix series. Concrete: harfbuzz 42525070 — `vuln..fix` distance = 3, series is
+    `73f2f93 "Fix another leak"` → `3dd1de4 "Fix a few return_trace's"` (=`fix^`, our base) →
+    `af3fdf1 "Simplify error handling"` (=`fix_commit`). So `fix^` may ALREADY be safe (real fix in an
+    earlier commit) → the poc might not crash at our crash base, and `fix^..fix` may capture a non-security
+    refactor. ARVO only *verifies* crash at `vuln_commit` (crashes) and clean at `fix_commit`; intermediate
+    commits are unverified. **Next: measure `vuln..fix` commit-distance distribution across all 50 (after
+    the corpus build finishes, to avoid network contention). If many bugs have distance >1, we likely need
+    the crash-at-`fix^` verification gate (the option the user declined) or to restrict the set to
+    distance==1 bugs. NB PROGRESS.md §"Harvesting mechanic" line ~269 claims `vuln_commit` == parent-of-fix;
+    the harfbuzz evidence shows that is NOT reliably true — treat that claim as suspect.**
+  - PROGRESS note this corrects: line ~269 ("`vuln_commit` = parent-of-fix commit") is empirically false
+    for the sampled bugs; ARVO's `vuln_commit` sits 1..N commits before `fix_commit`.
+  4. Re-run the experiment with Chenxi's own code (his `KernelAgent`/`v3_discrim_run.py` harness) →
+     4a get his agent; 4b adapt to the ARVO two-arm dataset (or adopt his dataset); 4c run + compare.
+- **Dependency order:** normalized images (2/3) gate item 1's real run; item 4 comes last. The doc (2a) is
+  now unblocked; 2b (patch corpus) is the next concrete build step and needs no external infra.
+- **FIRST STEP — ✅ DONE 2026-08-02. ARVO two-arm dataset is buildable, zero new code.** Verified
+  `fetch_source.materialize_source()` checks out BOTH arms cleanly on 3 distinct projects (imagemagick
+  42470067, harfbuzz 42470093, wireshark 42470183): each arm shallow-fetched in 1–13s, HEAD matched the
+  requested commit, full source tree present, arms differ. Just point the existing fetcher at `fix_commit`
+  instead of `vuln_commit` — no code change. Confirmed the fix arm carries the REAL fix (harfbuzz
+  `src/hb-dsalgs.hh`: template ctor restricted to ptr/ref to stop accidental copies) — a genuine
+  crash-vs-no-crash code delta. **Also validated the need for normalization live:** that fix arm ships a
+  giveaway code comment ("...causing unwanted copies and bugs that come with it") that flags it as the
+  patched version — exactly the leak item 2/3's strip-patch-comments step must remove. So 1a's biggest
+  unknown (is the fix arm real/buildable?) is CLEARED.
+- **OPEN DECISION to settle with Chenxi:** for the 50 bugs, use ARVO bugs (build fix-arm from our
+  `fix_commit`) vs. adopt his kernel two-arm dataset — decides whether item 1 is "extend our harvest" or
+  "consume his dataset."
+
+---
+
 ## LIVE STATUS (as of 2026-07-31) — PHASE 5 COMPLETE. split.json built. Next = Phase 6 (verl GRPO training)
 
 - **sweep3fp (Phase 5g pass@k) — ✅ DONE 2026-07-31** — `runs/sweep3fp/manifest.jsonl`, **800/800 samples,
@@ -84,7 +365,7 @@ Handoff doc. Read this to resume without re-deriving context.
   capability baseline; NOT mixed into the gemini-3-flash-preview difficulty split (sweep3fp).
   - **Band quality (dry-run on 34 scored 3.5 bugs) looked healthy:** 28 keep (std>0) / 5 saturated /
     1 dead; kept reward mean 0.313, std mean 0.102 / max 0.472 — on track for plenty of keepable bugs.
-- **harvest (Phase 2)** — tmux session `harvest`. At ~[2086/6138] (~34%) as of 2026-07-30 06:30, pulling normally.
+- **harvest (Phase 2)** — tmux session `harvest`. At ~[4568/6138] (~74%) as of 2026-08-02, pulling normally.
   Independent of sweep1 (sweep locked its 100 bugs at launch). Re-run `python3 frame_clean.py` after.
   - Check:   `wc -l data/manifest.jsonl`  ·  `tail -f harvest.log`  ·  `tmux ls`
 

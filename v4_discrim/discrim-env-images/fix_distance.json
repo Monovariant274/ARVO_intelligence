@@ -1,0 +1,407 @@
+{
+  "n": 50,
+  "n_distance_measured": 49,
+  "n_distance_eq_1": 6,
+  "bugs": [
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 411,
+      "bug_id": "42482686",
+      "project": "gnutls"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 2,
+      "bug_id": "42496472",
+      "project": "openthread"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 3,
+      "bug_id": "42525070",
+      "project": "harfbuzz"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 8,
+      "bug_id": "42502733",
+      "project": "libvips"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 533,
+      "bug_id": "42523920",
+      "project": "poco"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 110,
+      "bug_id": "42496381",
+      "project": "openthread"
+    },
+    {
+      "method": "full",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 33,
+      "bug_id": "42513893",
+      "project": "ghostpdl"
+    },
+    {
+      "method": "full",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 5,
+      "bug_id": "42520968",
+      "project": "ghostpdl"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 353,
+      "bug_id": "42529262",
+      "project": "imagemagick"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1,
+      "bug_id": "42475500",
+      "project": "karchive"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 21,
+      "bug_id": "42497648",
+      "project": "wpantund"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 2,
+      "bug_id": "42521256",
+      "project": "librabbitmq"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 32,
+      "bug_id": "42480020",
+      "project": "opensc"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 15,
+      "bug_id": "42507446",
+      "project": "imagemagick"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 138,
+      "bug_id": "42510351",
+      "project": "gdal"
+    },
+    {
+      "method": "shallow<= 3000",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 575,
+      "bug_id": "42494165",
+      "project": "skia"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 2455,
+      "bug_id": "42523045",
+      "project": "qemu"
+    },
+    {
+      "method": "full",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 217,
+      "bug_id": "42515627",
+      "project": "ghostpdl"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 24,
+      "bug_id": "42488076",
+      "project": "openh264"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 148,
+      "bug_id": "42483920",
+      "project": "imagemagick"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 21,
+      "bug_id": "42487846",
+      "project": "openh264"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 32,
+      "bug_id": "42480195",
+      "project": "opensc"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 63,
+      "bug_id": "42479239",
+      "project": "gdal"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 290,
+      "bug_id": "42525012",
+      "project": "skia"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1,
+      "bug_id": "42488013",
+      "project": "c-blosc2"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1408,
+      "bug_id": "42521437",
+      "project": "assimp"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 12,
+      "bug_id": "42526031",
+      "project": "PcapPlusPlus"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 78,
+      "bug_id": "42527115",
+      "project": "binutils-gdb"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 6,
+      "bug_id": "42504347",
+      "project": "dav1d"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 10,
+      "bug_id": "42490511",
+      "project": "glib"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 18,
+      "bug_id": "42488899",
+      "project": "fluent-bit"
+    },
+    {
+      "method": "shallow<= 3000",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 699,
+      "bug_id": "42486093",
+      "project": "gdal"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 131,
+      "bug_id": "42502186",
+      "project": "mruby"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 17,
+      "bug_id": "42497193",
+      "project": "unicorn"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 215,
+      "bug_id": "42488894",
+      "project": "wolfssl"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1,
+      "bug_id": "42483290",
+      "project": "oniguruma"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 54,
+      "bug_id": "42522551",
+      "project": "arrow"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1,
+      "bug_id": "42526950",
+      "project": "oss-fuzz-example"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 382,
+      "bug_id": "42507667",
+      "project": "ndpi"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 15,
+      "bug_id": "42482389",
+      "project": "binutils-gdb"
+    },
+    {
+      "method": "full",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1263,
+      "bug_id": "42528497",
+      "project": "ffmpeg"
+    },
+    {
+      "method": "full",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 454,
+      "bug_id": "42487339",
+      "project": "ffmpeg"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1,
+      "bug_id": "42490854",
+      "project": "kimageformats"
+    },
+    {
+      "method": "shallow<= 400",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 459,
+      "bug_id": "42500437",
+      "project": "espeak-ng"
+    },
+    {
+      "method": "full",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1798,
+      "bug_id": "42527470",
+      "project": "ffmpeg"
+    },
+    {
+      "method": "shallow<= 5",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1,
+      "bug_id": "42492964",
+      "project": "flatbuffers"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 19,
+      "bug_id": "42497295",
+      "project": "mruby"
+    },
+    {
+      "method": "shallow<= 50",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 28,
+      "bug_id": "42516415",
+      "project": "binutils-gdb"
+    },
+    {
+      "method": "shallow<= 3000",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": true,
+      "distance": 1033,
+      "bug_id": "42480628",
+      "project": "php-src"
+    },
+    {
+      "method": "full",
+      "vuln_reachable": true,
+      "vuln_is_ancestor": false,
+      "distance": null,
+      "bug_id": "42477503",
+      "project": "libvips"
+    }
+  ]
+}

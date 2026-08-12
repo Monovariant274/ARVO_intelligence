@@ -1,0 +1,66 @@
+diff --git a/src/imageformats/qoi.cpp b/src/imageformats/qoi.cpp
+index a7b5dd4..fae24eb 100644
+--- a/src/imageformats/qoi.cpp
++++ b/src/imageformats/qoi.cpp
+@@ -26,6 +26,7 @@ namespace // Private
+ 
+ #define QOI_MAGIC (((unsigned int)'q') << 24 | ((unsigned int)'o') << 16 | ((unsigned int)'i') << 8 | ((unsigned int)'f'))
+ #define QOI_HEADER_SIZE 14
++#define QOI_END_STREAM_PAD 8
+ 
+ struct QoiHeader {
+     quint32 MagicNumber;
+@@ -62,6 +63,10 @@ static bool IsSupported(const QoiHeader &head)
+     if (head.Width == 0 || head.Height == 0 || head.Channels < 3 || head.Colorspace > 1) {
+         return false;
+     }
++
++    if (head.Width > 300000 || head.Height > 300000) {
++        return false;
++    }
+     return true;
+ }
+ 
+@@ -94,7 +99,12 @@ static bool LoadQOI(QIODevice *device, const QoiHeader &qoi, QImage &img)
+         255,
+     };
+ 
+-    quint64 px_len = quint64(qoi.Width) * qoi.Channels * 3 / 2;
++
++
++
++
++
++    quint64 px_len = std::max(quint64(1024), quint64(qoi.Width) * qoi.Channels * 3 / 2);
+     if (px_len > kMaxQVectorSize) {
+         return false;
+     }
+@@ -120,10 +130,14 @@ static bool LoadQOI(QIODevice *device, const QoiHeader &qoi, QImage &img)
+             ba.append(device->read(px_len));
+         }
+ 
+-        quint64 chunks_len = ba.size() - 8; // 8 is the size of the QOI padding
++        if (ba.size() < QOI_END_STREAM_PAD) {
++            return false;
++        }
++
++        quint64 chunks_len = ba.size() - QOI_END_STREAM_PAD;
+         quint64 p = 0;
+         QRgb *scanline = (QRgb *)img.scanLine(y);
+-        quint8 *input = reinterpret_cast<quint8 *>(ba.data());
++        const quint8 *input = reinterpret_cast<const quint8 *>(ba.constData());
+         for (quint32 x = 0; x < qoi.Width; ++x) {
+             if (run > 0) {
+                 run--;
+@@ -165,7 +179,10 @@ static bool LoadQOI(QIODevice *device, const QoiHeader &qoi, QImage &img)
+         }
+     }
+ 
+-    return true;
++
++
++
++    return (ba.startsWith(QByteArray::fromRawData("\x00\x00\x00\x00\x00\x00\x00\x01", 8)));
+ }
+ 
+ } // namespace

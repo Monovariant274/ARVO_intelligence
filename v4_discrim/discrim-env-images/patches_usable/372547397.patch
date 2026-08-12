@@ -1,0 +1,48 @@
+diff --git a/cram/cram_encode.c b/cram/cram_encode.c
+index 3cad124..f4a75a6 100644
+--- a/cram/cram_encode.c
++++ b/cram/cram_encode.c
+@@ -1842,7 +1842,7 @@ int cram_encode_container(cram_fd *fd, cram_container *c) {
+     // Don't try embed ref if we repeatedly fail
+     pthread_mutex_lock(&fd->ref_lock);
+     int failed_embed = (fd->no_ref_counter >= 5); // maximum 5 tries
+-    if (!failed_embed && c->embed_ref == -2) {
++    if (!failed_embed && c->embed_ref == -2 && c->ref_id >= 0) {
+         hts_log_warning("Retrying embed_ref=2 mode for #%d/5", fd->no_ref_counter);
+         fd->no_ref = c->no_ref = 0;
+         fd->embed_ref = c->embed_ref = 2;
+@@ -1921,6 +1921,12 @@ int cram_encode_container(cram_fd *fd, cram_container *c) {
+                 // Do not confuse with fd->ref_free which is a pointer to a
+                 // reference string to free.
+                 c->ref_free = 1;
++            } else {
++
++
++
++                embed_ref = 0;
++                no_ref = c->no_ref = 1;
+             }
+         }
+         c->ref_seq_id = c->ref_id;
+@@ -1967,7 +1973,7 @@ int cram_encode_container(cram_fd *fd, cram_container *c) {
+ 
+         // Embed consensus / MD-generated ref
+         if (embed_ref == 2) {
+-            if (cram_generate_reference(c, s, r1) < 0) {
++            if (c->ref_id < 0 || cram_generate_reference(c, s, r1) < 0) {
+                 // Should this be a permanent thing via fd->no_ref?
+                 // Doing so means we cannot easily switch back again should
+                 // things fix themselves later on.  This is likely not a
+diff --git a/cram/cram_io.c b/cram/cram_io.c
+index 94b31f0..7009887 100644
+--- a/cram/cram_io.c
++++ b/cram/cram_io.c
+@@ -4954,6 +4954,8 @@ int cram_write_SAM_hdr(cram_fd *fd, sam_hdr_t *hdr) {
+                         hts_log_warning("NOTE: the CRAM file will be bigger "
+                                         "than using an external reference");
+                         pthread_mutex_lock(&fd->ref_lock);
++
++
+                         fd->embed_ref = 2;
+                         pthread_mutex_unlock(&fd->ref_lock);
+                         break;

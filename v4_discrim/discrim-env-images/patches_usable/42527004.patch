@@ -1,0 +1,13 @@
+diff --git a/tests/fuzz/fuzz.c b/tests/fuzz/fuzz.c
+index 6912941..7ba83cb 100644
+--- a/tests/fuzz/fuzz.c
++++ b/tests/fuzz/fuzz.c
+@@ -734,7 +734,7 @@ xmlFuzzEntityLoader(const char *URL, const char *ID ATTRIBUTE_UNUSED,
+         return(NULL);
+     }
+     input->base = input->cur = xmlBufContent(input->buf->buffer);
+-    input->end = input->base + entity->size;
++    input->end = input->base + xmlBufUse(input->buf->buffer);
+ 
+     return input;
+ }

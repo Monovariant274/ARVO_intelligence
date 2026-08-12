@@ -1,0 +1,21 @@
+diff --git a/fuzz/wget_options_fuzzer.in/clusterfuzz-testcase-minimized-wget_options_fuzzer-5704034783068160 b/fuzz/wget_options_fuzzer.in/clusterfuzz-testcase-minimized-wget_options_fuzzer-5704034783068160
+new file mode 100644
+index 0000000..a0bf0e5
+--- /dev/null
++++ b/fuzz/wget_options_fuzzer.in/clusterfuzz-testcase-minimized-wget_options_fuzzer-5704034783068160
+@@ -0,0 +1 @@
++includedirectories=,
+\ No newline at end of file
+diff --git a/src/options.c b/src/options.c
+index 755e6a4..2b1fe3e 100644
+--- a/src/options.c
++++ b/src/options.c
+@@ -469,7 +469,7 @@ static char *set_char_prefix(const char *val, char prefix)
+ {
+ 	if (val && *val) {
+ 		// we just need a scratch buffer, no need for optimal size calculation
+-		char *prefixed_val = wget_malloc(strlen(val) * 2 + 1), *dst = prefixed_val;
++		char *prefixed_val = wget_malloc(strlen(val) * 3 + 1), *dst = prefixed_val;
+ 
+ 		*dst++ = prefix;
+ 		for (const char *src = val; *src; src++) {

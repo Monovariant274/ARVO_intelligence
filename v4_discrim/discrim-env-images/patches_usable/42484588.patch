@@ -1,0 +1,73 @@
+diff --git a/xmlreader.c b/xmlreader.c
+index 3fd9aa4..6ae6e92 100644
+--- a/xmlreader.c
++++ b/xmlreader.c
+@@ -278,6 +278,59 @@ xmlTextReaderRemoveID(xmlDocPtr doc, xmlAttrPtr attr) {
+     return(0);
+ }
+ 
++
++
++
++
++
++
++
++static int
++xmlTextReaderWalkRemoveRef(const void *data, void *user)
++{
++    xmlRefPtr ref = (xmlRefPtr)data;
++    xmlAttrPtr attr = (xmlAttrPtr)user;
++
++    if (ref->attr == attr) {
++        ref->name = xmlStrdup(attr->name);
++        ref->attr = NULL;
++        return 0;
++    }
++    return 1;
++}
++
++
++
++
++
++
++
++
++
++
++static int
++xmlTextReaderRemoveRef(xmlDocPtr doc, xmlAttrPtr attr) {
++    xmlListPtr ref_list;
++    xmlRefTablePtr table;
++    xmlChar *ID;
++
++    if (doc == NULL) return(-1);
++    if (attr == NULL) return(-1);
++    table = (xmlRefTablePtr) doc->refs;
++    if (table == NULL)
++        return(-1);
++
++    ID = xmlNodeListGetString(doc, attr->children, 1);
++    if (ID == NULL)
++        return(-1);
++    ref_list = xmlHashLookup(table, ID);
++    xmlFree(ID);
++    if(ref_list == NULL)
++        return (-1);
++    xmlListWalk(ref_list, xmlTextReaderWalkRemoveRef, attr);
++    return(0);
++}
++
+ /**
+  * xmlTextReaderFreeProp:
+  * @reader:  the xmlTextReaderPtr used
+@@ -304,6 +357,8 @@ xmlTextReaderFreeProp(xmlTextReaderPtr reader, xmlAttrPtr cur) {
+ 	 (cur->parent->doc->extSubset != NULL))) {
+         if (xmlIsID(cur->parent->doc, cur->parent, cur))
+ 	    xmlTextReaderRemoveID(cur->parent->doc, cur);
++        if (xmlIsRef(cur->parent->doc, cur->parent, cur))
++            xmlTextReaderRemoveRef(cur->parent->doc, cur);
+     }
+     if (cur->children != NULL)
+         xmlTextReaderFreeNodeList(reader, cur->children);

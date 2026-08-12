@@ -1,0 +1,313 @@
+{
+  "bugs": [
+    "42510353",
+    "42506732",
+    "42503478",
+    "42475254",
+    "42481010",
+    "42532755",
+    "42516694",
+    "42499386",
+    "42496870",
+    "42485317",
+    "42490829",
+    "42516681",
+    "42529061",
+    "42481822",
+    "42490490",
+    "42488096",
+    "42490854",
+    "42495801",
+    "42502085",
+    "42481120",
+    "42487091",
+    "42531416",
+    "42492491",
+    "42481135",
+    "42474904",
+    "42510346",
+    "42481045",
+    "42526333",
+    "42479381",
+    "42474174",
+    "42488393",
+    "42470928",
+    "42475500",
+    "42509806",
+    "42498672",
+    "42475467",
+    "42522642",
+    "42522648",
+    "42522792",
+    "42496296",
+    "42513063",
+    "42482052",
+    "42492002",
+    "42493031",
+    "42495278",
+    "42506977",
+    "42498988",
+    "42499827",
+    "42520935",
+    "42474170"
+  ],
+  "params": {
+    "n": 50,
+    "max_per_project": 3,
+    "seed": 0,
+    "eligible_pool": 4979,
+    "adjacent": true
+  },
+  "meta": [
+    {
+      "id": "42510353",
+      "project": "libvips",
+      "sanitizer": "ubsan"
+    },
+    {
+      "id": "42506732",
+      "project": "unrar",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42503478",
+      "project": "imagemagick",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42475254",
+      "project": "qtbase",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42481010",
+      "project": "wavpack",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42532755",
+      "project": "gdal",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42516694",
+      "project": "haproxy",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42499386",
+      "project": "mruby",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42496870",
+      "project": "json",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42485317",
+      "project": "mruby",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42490829",
+      "project": "kimageformats",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42516681",
+      "project": "gpsd",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42529061",
+      "project": "ghostpdl",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42481822",
+      "project": "harfbuzz",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42490490",
+      "project": "glib",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42488096",
+      "project": "openh264",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42490854",
+      "project": "kimageformats",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42495801",
+      "project": "wasm3",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42502085",
+      "project": "file",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42481120",
+      "project": "harfbuzz",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42487091",
+      "project": "openexr",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42531416",
+      "project": "ndpi",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42492491",
+      "project": "libssh2",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42481135",
+      "project": "harfbuzz",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42474904",
+      "project": "wget2",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42510346",
+      "project": "libvips",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42481045",
+      "project": "uWebSockets",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42526333",
+      "project": "libraw",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42479381",
+      "project": "openh264",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42474174",
+      "project": "mupdf",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42488393",
+      "project": "openh264",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42470928",
+      "project": "librawspeed",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42475500",
+      "project": "karchive",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42509806",
+      "project": "ffmpeg",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42498672",
+      "project": "re2",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42475467",
+      "project": "libspng",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42522642",
+      "project": "libxslt",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42522648",
+      "project": "libxml2",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42522792",
+      "project": "simdutf",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42496296",
+      "project": "wasm3",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42513063",
+      "project": "libvpx",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42482052",
+      "project": "pcre2",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42492002",
+      "project": "leptonica",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42493031",
+      "project": "ffmpeg",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42495278",
+      "project": "skcms",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42506977",
+      "project": "gdal",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42498988",
+      "project": "fmt",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42499827",
+      "project": "spice-usbredir",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42520935",
+      "project": "mupdf",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42474170",
+      "project": "capstonenext",
+      "sanitizer": "msan"
+    }
+  ]
+}

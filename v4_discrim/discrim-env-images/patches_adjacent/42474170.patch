@@ -1,0 +1,39 @@
+diff --git a/arch/ARM/ARMGenInstrInfo.inc b/arch/ARM/ARMGenInstrInfo.inc
+index 4c948ec..7d22b5f 100644
+--- a/arch/ARM/ARMGenInstrInfo.inc
++++ b/arch/ARM/ARMGenInstrInfo.inc
+@@ -2979,6 +2979,7 @@ enum {
+ 	ARM_tUDF	= 3213,
+ 	ARM_tUXTB	= 3214,
+ 	ARM_tUXTH	= 3215,
++	ARM_t__brkdiv0	= 3216,
+ 	ARM_INSTRUCTION_LIST_END = 3217
+ };
+ 
+diff --git a/arch/ARM/ARMMappingInsn.inc b/arch/ARM/ARMMappingInsn.inc
+index 80db83a..fa9d908 100644
+--- a/arch/ARM/ARMMappingInsn.inc
++++ b/arch/ARM/ARMMappingInsn.inc
+@@ -18769,3 +18769,10 @@
+ 	{ 0 }, { 0 }, { ARM_GRP_THUMB, ARM_GRP_THUMB1ONLY, ARM_GRP_V6, 0 }, 0, 0
+ #endif
+ },
++
++{
++	ARM_t__brkdiv0, ARM64_INS_BRK,
++#ifndef CAPSTONE_DIET
++	{ 0 }, { 0 }, { ARM_GRP_THUMB, ARM_GRP_THUMB1ONLY, ARM_GRP_V6, 0 }, 0, 0
++#endif
++},
+diff --git a/arch/ARM/ARMMappingInsnOp.inc b/arch/ARM/ARMMappingInsnOp.inc
+index 2c654a1..7cfb8f1 100644
+--- a/arch/ARM/ARMMappingInsnOp.inc
++++ b/arch/ARM/ARMMappingInsnOp.inc
+@@ -10726,3 +10726,7 @@
+ {	/* ARM_tUXTH, ARM_INS_UXTH: uxth */
+ 	{ CS_AC_WRITE, CS_AC_READ, 0 }
+ },
++
++{
++	{ CS_AC_WRITE, CS_AC_READ, 0 }
++},

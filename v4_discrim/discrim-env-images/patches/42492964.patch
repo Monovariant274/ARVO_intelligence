@@ -1,0 +1,131 @@
+diff --git a/include/flatbuffers/base.h b/include/flatbuffers/base.h
+index 46340ec..54a51aa 100644
+--- a/include/flatbuffers/base.h
++++ b/include/flatbuffers/base.h
+@@ -330,6 +330,11 @@ typedef uintmax_t largest_scalar_t;
+ // We support aligning the contents of buffers up to this size.
+ #define FLATBUFFERS_MAX_ALIGNMENT 16
+ 
++inline bool VerifyAlignmentRequirements(size_t align, size_t min_align = 1) {
++  return (min_align <= align) && (align <= (FLATBUFFERS_MAX_ALIGNMENT)) &&
++         (align & (align - 1)) == 0;
++}
++
+ #if defined(_MSC_VER)
+   #pragma warning(disable: 4351) // C4351: new behavior: elements of array ... will be default initialized
+   #pragma warning(push)
+diff --git a/include/flatbuffers/flatbuffers.h b/include/flatbuffers/flatbuffers.h
+index 4402c71..c7fadd5 100644
+--- a/include/flatbuffers/flatbuffers.h
++++ b/include/flatbuffers/flatbuffers.h
+@@ -1670,11 +1670,13 @@ class FlatBufferBuilder {
+   // This is useful when storing a nested_flatbuffer in a vector of bytes,
+   // or when storing SIMD floats, etc.
+   void ForceVectorAlignment(size_t len, size_t elemsize, size_t alignment) {
++    FLATBUFFERS_ASSERT(VerifyAlignmentRequirements(alignment));
+     PreAlign(len * elemsize, alignment);
+   }
+ 
+   // Similar to ForceVectorAlignment but for String fields.
+   void ForceStringAlignment(size_t len, size_t alignment) {
++    FLATBUFFERS_ASSERT(VerifyAlignmentRequirements(alignment));
+     PreAlign((len + 1) * sizeof(char), alignment);
+   }
+ 
+diff --git a/include/flatbuffers/idl.h b/include/flatbuffers/idl.h
+index 1f549f9..116f500 100644
+--- a/include/flatbuffers/idl.h
++++ b/include/flatbuffers/idl.h
+@@ -967,6 +967,8 @@ class Parser : public ParserState {
+   FLATBUFFERS_CHECKED_ERROR CheckClash(std::vector<FieldDef *> &fields,
+                                        StructDef *struct_def,
+                                        const char *suffix, BaseType baseType);
++  FLATBUFFERS_CHECKED_ERROR ParseAlignAttribute(
++      const std::string &align_constant, size_t min_align, size_t *align);
+ 
+   bool SupportsAdvancedUnionFeatures() const;
+   bool SupportsAdvancedArrayFeatures() const;
+diff --git a/include/flatbuffers/util.h b/include/flatbuffers/util.h
+index 7a3e12f..f30bd98 100644
+--- a/include/flatbuffers/util.h
++++ b/include/flatbuffers/util.h
+@@ -335,6 +335,9 @@ inline bool StringToFloatImpl(T *val, const char *const str) {
+ // - If the converted value falls out of range of corresponding return type, a
+ // range error occurs. In this case value MAX(T)/MIN(T) is returned.
+ template<typename T> inline bool StringToNumber(const char *s, T *val) {
++
++
++  static_assert(sizeof(T) < sizeof(int64_t), "unexpected type T");
+   FLATBUFFERS_ASSERT(s && val);
+   int64_t i64;
+   // The errno check isn't needed, will return MAX/MIN on overflow.
+diff --git a/src/idl_parser.cpp b/src/idl_parser.cpp
+index 7cdddaf..e32adc6 100644
+--- a/src/idl_parser.cpp
++++ b/src/idl_parser.cpp
+@@ -1458,6 +1458,23 @@ void SimpleQsort(T *begin, T *end, size_t width, F comparator, S swapper) {
+   SimpleQsort(r, end, width, comparator, swapper);
+ }
+ 
++CheckedError Parser::ParseAlignAttribute(const std::string &align_constant,
++                                         size_t min_align, size_t *align) {
++
++  uint8_t align_value;
++  if (StringToNumber(align_constant.c_str(), &align_value) &&
++      VerifyAlignmentRequirements(static_cast<size_t>(align_value),
++                                  min_align)) {
++
++    return NoError();
++  }
++  return Error("unexpected force_align value '" + align_constant +
++               "', alignment must be a power of two integer ranging from the "
++               "type\'s natural alignment " +
++               NumToString(min_align) + " to " +
++               NumToString(FLATBUFFERS_MAX_ALIGNMENT));
++}
++
+ CheckedError Parser::ParseVector(const Type &type, uoffset_t *ovalue,
+                                  FieldDef *field, size_t fieldn) {
+   uoffset_t count = 0;
+@@ -1470,13 +1487,14 @@ CheckedError Parser::ParseVector(const Type &type, uoffset_t *ovalue,
+   });
+   ECHECK(err);
+ 
+-  const auto *force_align = field->attributes.Lookup("force_align");
+-  const size_t align =
+-      force_align ? static_cast<size_t>(atoi(force_align->constant.c_str()))
+-                  : 1;
+   const size_t len = count * InlineSize(type) / InlineAlignment(type);
+   const size_t elemsize = InlineAlignment(type);
+-  if (align > 1) { builder_.ForceVectorAlignment(len, elemsize, align); }
++  const auto force_align = field->attributes.Lookup("force_align");
++  if (force_align) {
++    size_t align;
++    ECHECK(ParseAlignAttribute(force_align->constant, 1, &align));
++    if (align > 1) { builder_.ForceVectorAlignment(len, elemsize, align); }
++  }
+ 
+   builder_.StartVector(len, elemsize);
+   for (uoffset_t i = 0; i < count; i++) {
+@@ -2457,17 +2475,12 @@ CheckedError Parser::ParseDecl() {
+       struct_def->attributes.Lookup("original_order") == nullptr && !fixed;
+   EXPECT('{');
+   while (token_ != '}') ECHECK(ParseField(*struct_def));
+-  auto force_align = struct_def->attributes.Lookup("force_align");
+   if (fixed) {
++    const auto force_align = struct_def->attributes.Lookup("force_align");
+     if (force_align) {
+-      auto align = static_cast<size_t>(atoi(force_align->constant.c_str()));
+-      if (force_align->type.base_type != BASE_TYPE_INT ||
+-          align < struct_def->minalign || align > FLATBUFFERS_MAX_ALIGNMENT ||
+-          align & (align - 1))
+-        return Error(
+-            "force_align must be a power of two integer ranging from the"
+-            "struct\'s natural alignment to " +
+-            NumToString(FLATBUFFERS_MAX_ALIGNMENT));
++      size_t align;
++      ECHECK(ParseAlignAttribute(force_align->constant, struct_def->minalign,
++                                 &align));
+       struct_def->minalign = align;
+     }
+     if (!struct_def->bytesize) return Error("size 0 structs not allowed");

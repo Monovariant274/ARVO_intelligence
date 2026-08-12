@@ -1,0 +1,106 @@
+diff --git a/MagickCore/composite.c b/MagickCore/composite.c
+index 4ddcaa5..8386115 100644
+--- a/MagickCore/composite.c
++++ b/MagickCore/composite.c
+@@ -1637,7 +1637,8 @@ MagickExport MagickBooleanType CompositeImage(Image *image,
+               }
+               case FreezeCompositeOp:
+               {
+-                pixel=QuantumRange*(1.0-2.0*(1.0-Sa)*PerceptibleReciprocal(Da));
++                pixel=QuantumRange*(1.0-(1.0-Sa)*(1.0-Sa)*
++                  PerceptibleReciprocal(Da));
+                 break;
+               }
+               case InterpolateCompositeOp:
+@@ -1669,7 +1670,7 @@ MagickExport MagickBooleanType CompositeImage(Image *image,
+               }
+               case ReflectCompositeOp:
+               {
+-                pixel=QuantumRange*(2.0*Sa*PerceptibleReciprocal(1.0-Da));
++                pixel=QuantumRange*(Sa*Sa*PerceptibleReciprocal(1.0-Da));
+                 break;
+               }
+               case StampCompositeOp:
+@@ -1966,7 +1967,8 @@ MagickExport MagickBooleanType CompositeImage(Image *image,
+           }
+           case FreezeCompositeOp:
+           {
+-            pixel=QuantumRange*(1.0-2.0*(1.0-Sca)*PerceptibleReciprocal(Dca));
++            pixel=QuantumRange*(1.0-(1.0-Sca)*(1.0-Sca)*
++              PerceptibleReciprocal(Dca));
+             break;
+           }
+           case HardLightCompositeOp:
+@@ -2270,7 +2272,7 @@ MagickExport MagickBooleanType CompositeImage(Image *image,
+           }
+           case ReflectCompositeOp:
+           {
+-            pixel=QuantumRange*(2.0*Sca*PerceptibleReciprocal(1.0-Dca));
++            pixel=QuantumRange*(Sca*Sca*PerceptibleReciprocal(1.0-Dca));
+             break;
+           }
+           case SaturateCompositeOp:
+diff --git a/coders/heic.c b/coders/heic.c
+index f5db596..6aee9b3 100644
+--- a/coders/heic.c
++++ b/coders/heic.c
+@@ -340,26 +340,24 @@ static MagickBooleanType ReadHEICImageByID(const ImageInfo *image_info,
+     (void) SetImageProperty(image,"exif:Orientation","1",exception);
+   error=heif_decode_image(image_handle,&heif_image,heif_colorspace_YCbCr,
+     heif_chroma_420,decode_options);
++  if (decode_options != (struct heif_decoding_options *) NULL)
++    heif_decoding_options_free(decode_options);
+   if (IsHeifSuccess(&error,image,exception) == MagickFalse)
+     {
+       heif_image_handle_release(image_handle);
+       return(MagickFalse);
+     }
+-  if (decode_options != (struct heif_decoding_options *) NULL)
++
++    Correct the width and height of the image.
++
++  image->columns=(size_t) heif_image_get_width(heif_image,heif_channel_Y);
++  image->rows=(size_t) heif_image_get_height(heif_image,heif_channel_Y);
++  status=SetImageExtent(image,image->columns,image->rows,exception);
++  if (status == MagickFalse)
+     {
+-      /*
+-        Correct the width and height of the image.
+-      */
+-      image->columns=(size_t) heif_image_get_width(heif_image,heif_channel_Y);
+-      image->rows=(size_t) heif_image_get_height(heif_image,heif_channel_Y);
+-      status=SetImageExtent(image,image->columns,image->rows,exception);
+-      heif_decoding_options_free(decode_options);
+-      if (status == MagickFalse)
+-        {
+-          heif_image_release(heif_image);
+-          heif_image_handle_release(image_handle);
+-          return(MagickFalse);
+-        }
++      heif_image_release(heif_image);
++      heif_image_handle_release(image_handle);
++      return(MagickFalse);
+     }
+   p_y=heif_image_get_plane_readonly(heif_image,heif_channel_Y,&stride_y);
+   p_cb=heif_image_get_plane_readonly(heif_image,heif_channel_Cb,&stride_cb);
+diff --git a/coders/jpeg.c b/coders/jpeg.c
+index e5dd912..d860706 100644
+--- a/coders/jpeg.c
++++ b/coders/jpeg.c
+@@ -497,7 +497,7 @@ static boolean ReadComment(j_decompress_ptr jpeg_info)
+ static boolean ReadICCProfile(j_decompress_ptr jpeg_info)
+ {
+   char
+-    magick[12];
++    magick[13];
+ 
+   ErrorManager
+     *error_manager;
+@@ -540,6 +540,7 @@ static boolean ReadICCProfile(j_decompress_ptr jpeg_info)
+     }
+   for (i=0; i < 12; i++)
+     magick[i]=(char) GetCharacter(jpeg_info);
++  magick[i]='\0';
+   if (LocaleCompare(magick,ICC_PROFILE) != 0)
+     {
+       /*

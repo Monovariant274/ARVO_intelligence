@@ -1,0 +1,13 @@
+diff --git a/coders/psd.c b/coders/psd.c
+index bb58487..67a0c54 100644
+--- a/coders/psd.c
++++ b/coders/psd.c
+@@ -1726,7 +1726,7 @@ static inline MagickBooleanType PSDSkipImage(const PSDInfo *psd_info,
+   const ImageInfo *image_info,const size_t index)
+ {
+   if (psd_info->has_merged_image == MagickFalse)
+-      return(MagickFalse);
++    return(MagickFalse);
+   if (image_info->number_scenes == 0)
+     return(MagickFalse);
+   if (index < image_info->scene)

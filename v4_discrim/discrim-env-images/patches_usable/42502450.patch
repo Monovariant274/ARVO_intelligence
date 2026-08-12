@@ -1,0 +1,179 @@
+diff --git a/src/gen-hb-version.py b/src/gen-hb-version.py
+index 879811f..4fac0a0 100755
+--- a/src/gen-hb-version.py
++++ b/src/gen-hb-version.py
+@@ -15,7 +15,7 @@ INPUT = sys.argv[3]
+ CURRENT_SOURCE_DIR = os.path.dirname(INPUT)
+ 
+ try:
+-	with open (OUTPUT, "r") as old_output:
++	with open (OUTPUT, "r", encoding='utf-8') as old_output:
+ 		for line in old_output:
+ 			old_version = re.match (r"#define HB_VERSION_STRING \"(\d.\d.\d)\"", line)
+ 			if old_version and old_version[1] == version:
+diff --git a/src/hb-ot-glyf-table.hh b/src/hb-ot-glyf-table.hh
+index 517e603..6b419ea 100644
+--- a/src/hb-ot-glyf-table.hh
++++ b/src/hb-ot-glyf-table.hh
+@@ -1118,7 +1118,7 @@ struct glyf
+       while (it)
+       {
+         auto item = *(it++);
+-        operation_count +=
++        operation_count =
+             add_gid_and_children (item.get_glyph_index (), gids_to_retain, depth, operation_count);
+       }
+ 
+diff --git a/src/hb-ot-math-table.hh b/src/hb-ot-math-table.hh
+index f9c5a83..c2e365d 100644
+--- a/src/hb-ot-math-table.hh
++++ b/src/hb-ot-math-table.hh
+@@ -836,12 +836,16 @@ struct MathVariants
+   void collect_coverage_and_indices (hb_sorted_vector_t<hb_codepoint_t>& new_coverage,
+                                      const Offset16To<Coverage>& coverage,
+                                      unsigned i,
++                                     unsigned end_index,
+                                      hb_set_t& indices,
+                                      const hb_set_t& glyphset,
+                                      const hb_map_t& glyph_map) const
+   {
++    if (!coverage) return;
++
+     for (const auto _ : (this+coverage).iter ())
+     {
++      if (i >= end_index) return;
+       if (glyphset.has (_))
+       {
+         unsigned new_gid = glyph_map.get (_);
+@@ -866,8 +870,8 @@ struct MathVariants
+     hb_sorted_vector_t<hb_codepoint_t> new_vert_coverage;
+     hb_sorted_vector_t<hb_codepoint_t> new_hori_coverage;
+     hb_set_t indices;
+-    collect_coverage_and_indices (new_vert_coverage, vertGlyphCoverage, 0, indices, glyphset, glyph_map);
+-    collect_coverage_and_indices (new_hori_coverage, horizGlyphCoverage, vertGlyphCount, indices, glyphset, glyph_map);
++    collect_coverage_and_indices (new_vert_coverage, vertGlyphCoverage, 0, vertGlyphCount, indices, glyphset, glyph_map);
++    collect_coverage_and_indices (new_hori_coverage, horizGlyphCoverage, vertGlyphCount, vertGlyphCount + horizGlyphCount, indices, glyphset, glyph_map);
+     
+     if (!c->serializer->check_assign (out->vertGlyphCount, new_vert_coverage.length, HB_SERIALIZE_ERROR_INT_OVERFLOW))
+       return_trace (false);
+diff --git a/src/hb-repacker.hh b/src/hb-repacker.hh
+index aac5cbd..fa2dd42 100644
+--- a/src/hb-repacker.hh
++++ b/src/hb-repacker.hh
+@@ -372,7 +372,7 @@ struct graph_t
+     // incoming edges to root_idx should be all 32 bit in length so we don't need to de-dup these
+     // set the subgraph incoming edge count to match all of root_idx's incoming edges
+     subgraph.set (root_idx, vertices_[root_idx].incoming_edges);
+-    find_subgraph(root_idx, subgraph);
++    find_subgraph (root_idx, subgraph);
+ 
+     hb_hashmap_t<unsigned, unsigned> index_map;
+     bool made_changes = false;
+@@ -392,7 +392,14 @@ struct graph_t
+     if (!made_changes)
+       return false;
+ 
+-    remap_obj_indices (index_map, subgraph.keys ());
++    auto new_subgraph =
++        + subgraph.keys ()
++        | hb_map([&] (unsigned node_idx) {
++          if (index_map.has (node_idx)) return index_map[node_idx];
++          return node_idx;
++        })
++        ;
++    remap_obj_indices (index_map, new_subgraph);
+     return true;
+   }
+ 
+diff --git a/src/test-repacker.cc b/src/test-repacker.cc
+index 6eb2263..32228f7 100644
+--- a/src/test-repacker.cc
++++ b/src/test-repacker.cc
+@@ -155,7 +155,7 @@ populate_serializer_with_isolation_overflow_complex (hb_serialize_context_t* c)
+   add_offset (obj_f, c);
+   unsigned obj_e = c->pop_pack ();
+ 
+-  start_object ("c", 1, c);
++  start_object ("cc", 2, c);
+   add_offset (obj_e, c);
+   unsigned obj_c = c->pop_pack ();
+ 
+@@ -180,6 +180,54 @@ populate_serializer_with_isolation_overflow_complex (hb_serialize_context_t* c)
+   c->end_serialize();
+ }
+ 
++static void
++populate_serializer_with_isolation_overflow_complex_expected (hb_serialize_context_t* c)
++{
++  std::string large_string(70000, 'a');
++  c->start_serialize<char> ();
++
++
++  unsigned obj_f_prime = add_object ("f", 1, c);
++
++  start_object ("e", 1, c);
++  add_offset (obj_f_prime, c);
++  unsigned obj_e_prime = c->pop_pack ();
++
++  start_object ("cc", 2, c);
++  add_offset (obj_e_prime, c);
++  unsigned obj_c = c->pop_pack ();
++
++  start_object ("d", 1, c);
++  add_offset (obj_e_prime, c);
++  unsigned obj_d_prime = c->pop_pack ();
++
++  start_object (large_string.c_str(), 60000, c);
++  add_offset (obj_c, c);
++  add_offset (obj_d_prime, c);
++  unsigned obj_b = c->pop_pack ();
++
++
++  unsigned obj_f = add_object ("f", 1, c);
++
++  start_object ("e", 1, c);
++  add_offset (obj_f, c);
++  unsigned obj_e = c->pop_pack ();
++
++  start_object ("d", 1, c);
++  add_offset (obj_e, c);
++  unsigned obj_d = c->pop_pack ();
++
++  start_object (large_string.c_str(), 10000, c);
++  add_offset (obj_d, c);
++  unsigned obj_g = c->pop_pack ();
++
++  start_object ("a", 1, c);
++  add_wide_offset (obj_b, c);
++  add_offset (obj_g, c);
++  c->pop_pack ();
++
++  c->end_serialize();
++}
+ 
+ static void
+ populate_serializer_with_isolation_overflow_spaces (hb_serialize_context_t* c)
+@@ -600,12 +648,20 @@ static void test_resolve_overflows_via_isolation_with_recursive_duplication ()
+   assert (!out.offset_overflow ());
+   hb_bytes_t result = out.copy_bytes ();
+ 
+-  unsigned expected_length = 8 + 10000 + 60000; // objects
+-  expected_length += 4 + 2 * 9; // links
+-  assert (result.length == expected_length);
++  void* expected_buffer = malloc (buffer_size);
++  hb_serialize_context_t e (expected_buffer, buffer_size);
++  assert (!e.offset_overflow ());
++  populate_serializer_with_isolation_overflow_complex_expected (&e);
++  hb_bytes_t expected_result = e.copy_bytes ();
++
++  assert (result.length == expected_result.length);
++  for (unsigned i = 0; i < result.length; i++)
++    assert (result[i] == expected_result[i]);
+ 
+   result.fini ();
++  expected_result.fini ();
+   free (buffer);
++  free (expected_buffer);
+   free (out_buffer);
+ }
+ 

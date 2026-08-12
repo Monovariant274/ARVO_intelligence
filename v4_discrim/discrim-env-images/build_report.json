@@ -1,0 +1,20 @@
+{
+  "n": 1,
+  "n_ok": 1,
+  "n_failed": 0,
+  "pushed": false,
+  "bugs": [
+    {
+      "bug_id": "42525070",
+      "project": "harfbuzz",
+      "ok": true,
+      "pushed": false,
+      "fetch": "shallow",
+      "epoch": "1685891714",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42525070-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42525070-fix:latest"
+      }
+    }
+  ]
+}

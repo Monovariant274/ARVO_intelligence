@@ -1,0 +1,1385 @@
+diff --git a/doc/filters.texi b/doc/filters.texi
+index 68f17dd..67587d9 100644
+--- a/doc/filters.texi
++++ b/doc/filters.texi
+@@ -21803,6 +21803,9 @@ Default is @code{3}.
+ Apply cross fade from one input video stream to another input video stream.
+ The cross fade is applied for specified duration.
+ 
++Both inputs must be constant frame-rate and have the same resolution, pixel format,
++frame rate and timebase.
++
+ The filter accepts the following options:
+ 
+ @table @option
+diff --git a/doc/muxers.texi b/doc/muxers.texi
+index 9c5f0a9..93f7927 100644
+--- a/doc/muxers.texi
++++ b/doc/muxers.texi
+@@ -2017,7 +2017,7 @@ No extension is registered so format name has to be supplied e.g. with the ffmpe
+ @subsection data
+ 
+ Data muxer accepts a single stream with any codec of any type.
+-The input stream has to be selected using the @code {-map} option with the ffmpeg CLI tool.
++The input stream has to be selected using the @code{-map} option with the ffmpeg CLI tool.
+ 
+ No extension is registered so format name has to be supplied e.g. with the ffmpeg CLI tool @code{-f data}.
+ 
+diff --git a/libavcodec/aarch64/aacpsdsp_init_aarch64.c b/libavcodec/aarch64/aacpsdsp_init_aarch64.c
+index 5e7e19b..cc9e4d7 100644
+--- a/libavcodec/aarch64/aacpsdsp_init_aarch64.c
++++ b/libavcodec/aarch64/aacpsdsp_init_aarch64.c
+@@ -18,6 +18,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/aarch64/cpu.h"
+ #include "libavcodec/aacpsdsp.h"
+ 
+diff --git a/libavcodec/aarch64/h264pred_init.c b/libavcodec/aarch64/h264pred_init.c
+index b144376..325a86b 100644
+--- a/libavcodec/aarch64/h264pred_init.c
++++ b/libavcodec/aarch64/h264pred_init.c
+@@ -45,42 +45,50 @@ void ff_pred8x8_0lt_dc_neon(uint8_t *src, ptrdiff_t stride);
+ void ff_pred8x8_l00_dc_neon(uint8_t *src, ptrdiff_t stride);
+ void ff_pred8x8_0l0_dc_neon(uint8_t *src, ptrdiff_t stride);
+ 
++void ff_pred16x16_top_dc_neon_10(uint8_t *src, ptrdiff_t stride);
++void ff_pred16x16_dc_neon_10(uint8_t *src, ptrdiff_t stride);
++void ff_pred16x16_hor_neon_10(uint8_t *src, ptrdiff_t stride);
++void ff_pred16x16_vert_neon_10(uint8_t *src, ptrdiff_t stride);
++
+ static av_cold void h264_pred_init_neon(H264PredContext *h, int codec_id,
+                                         const int bit_depth,
+                                         const int chroma_format_idc)
+ {
+-    const int high_depth = bit_depth > 8;
+-
+-    if (high_depth)
+-        return;
+-
+-    if (chroma_format_idc <= 1) {
+-        h->pred8x8[VERT_PRED8x8     ] = ff_pred8x8_vert_neon;
+-        h->pred8x8[HOR_PRED8x8      ] = ff_pred8x8_hor_neon;
+-        if (codec_id != AV_CODEC_ID_VP7 && codec_id != AV_CODEC_ID_VP8)
+-            h->pred8x8[PLANE_PRED8x8] = ff_pred8x8_plane_neon;
+-        h->pred8x8[DC_128_PRED8x8   ] = ff_pred8x8_128_dc_neon;
+-        if (codec_id != AV_CODEC_ID_RV40 && codec_id != AV_CODEC_ID_VP7 &&
+-            codec_id != AV_CODEC_ID_VP8) {
+-            h->pred8x8[DC_PRED8x8     ] = ff_pred8x8_dc_neon;
+-            h->pred8x8[LEFT_DC_PRED8x8] = ff_pred8x8_left_dc_neon;
+-            h->pred8x8[TOP_DC_PRED8x8 ] = ff_pred8x8_top_dc_neon;
+-            h->pred8x8[ALZHEIMER_DC_L0T_PRED8x8] = ff_pred8x8_l0t_dc_neon;
+-            h->pred8x8[ALZHEIMER_DC_0LT_PRED8x8] = ff_pred8x8_0lt_dc_neon;
+-            h->pred8x8[ALZHEIMER_DC_L00_PRED8x8] = ff_pred8x8_l00_dc_neon;
+-            h->pred8x8[ALZHEIMER_DC_0L0_PRED8x8] = ff_pred8x8_0l0_dc_neon;
++    if (bit_depth == 8) {
++        if (chroma_format_idc <= 1) {
++            h->pred8x8[VERT_PRED8x8     ] = ff_pred8x8_vert_neon;
++            h->pred8x8[HOR_PRED8x8      ] = ff_pred8x8_hor_neon;
++            if (codec_id != AV_CODEC_ID_VP7 && codec_id != AV_CODEC_ID_VP8)
++                h->pred8x8[PLANE_PRED8x8] = ff_pred8x8_plane_neon;
++            h->pred8x8[DC_128_PRED8x8   ] = ff_pred8x8_128_dc_neon;
++            if (codec_id != AV_CODEC_ID_RV40 && codec_id != AV_CODEC_ID_VP7 &&
++                codec_id != AV_CODEC_ID_VP8) {
++                h->pred8x8[DC_PRED8x8     ] = ff_pred8x8_dc_neon;
++                h->pred8x8[LEFT_DC_PRED8x8] = ff_pred8x8_left_dc_neon;
++                h->pred8x8[TOP_DC_PRED8x8 ] = ff_pred8x8_top_dc_neon;
++                h->pred8x8[ALZHEIMER_DC_L0T_PRED8x8] = ff_pred8x8_l0t_dc_neon;
++                h->pred8x8[ALZHEIMER_DC_0LT_PRED8x8] = ff_pred8x8_0lt_dc_neon;
++                h->pred8x8[ALZHEIMER_DC_L00_PRED8x8] = ff_pred8x8_l00_dc_neon;
++                h->pred8x8[ALZHEIMER_DC_0L0_PRED8x8] = ff_pred8x8_0l0_dc_neon;
++            }
+         }
+-    }
+ 
+-    h->pred16x16[DC_PRED8x8     ] = ff_pred16x16_dc_neon;
+-    h->pred16x16[VERT_PRED8x8   ] = ff_pred16x16_vert_neon;
+-    h->pred16x16[HOR_PRED8x8    ] = ff_pred16x16_hor_neon;
+-    h->pred16x16[LEFT_DC_PRED8x8] = ff_pred16x16_left_dc_neon;
+-    h->pred16x16[TOP_DC_PRED8x8 ] = ff_pred16x16_top_dc_neon;
+-    h->pred16x16[DC_128_PRED8x8 ] = ff_pred16x16_128_dc_neon;
+-    if (codec_id != AV_CODEC_ID_SVQ3 && codec_id != AV_CODEC_ID_RV40 &&
+-        codec_id != AV_CODEC_ID_VP7 && codec_id != AV_CODEC_ID_VP8)
+-        h->pred16x16[PLANE_PRED8x8  ] = ff_pred16x16_plane_neon;
++        h->pred16x16[DC_PRED8x8     ] = ff_pred16x16_dc_neon;
++        h->pred16x16[VERT_PRED8x8   ] = ff_pred16x16_vert_neon;
++        h->pred16x16[HOR_PRED8x8    ] = ff_pred16x16_hor_neon;
++        h->pred16x16[LEFT_DC_PRED8x8] = ff_pred16x16_left_dc_neon;
++        h->pred16x16[TOP_DC_PRED8x8 ] = ff_pred16x16_top_dc_neon;
++        h->pred16x16[DC_128_PRED8x8 ] = ff_pred16x16_128_dc_neon;
++        if (codec_id != AV_CODEC_ID_SVQ3 && codec_id != AV_CODEC_ID_RV40 &&
++            codec_id != AV_CODEC_ID_VP7 && codec_id != AV_CODEC_ID_VP8)
++            h->pred16x16[PLANE_PRED8x8  ] = ff_pred16x16_plane_neon;
++    }
++    if (bit_depth == 10) {
++        h->pred16x16[DC_PRED8x8     ] = ff_pred16x16_dc_neon_10;
++        h->pred16x16[VERT_PRED8x8   ] = ff_pred16x16_vert_neon_10;
++        h->pred16x16[HOR_PRED8x8    ] = ff_pred16x16_hor_neon_10;
++        h->pred16x16[TOP_DC_PRED8x8 ] = ff_pred16x16_top_dc_neon_10;
++    }
+ }
+ 
+ av_cold void ff_h264_pred_init_aarch64(H264PredContext *h, int codec_id,
+diff --git a/libavcodec/aarch64/h264pred_neon.S b/libavcodec/aarch64/h264pred_neon.S
+index 6fec33c..e40bdc8 100644
+--- a/libavcodec/aarch64/h264pred_neon.S
++++ b/libavcodec/aarch64/h264pred_neon.S
+@@ -359,3 +359,111 @@ function ff_pred8x8_0l0_dc_neon, export=1
+         dup             v1.8b,  v1.b[0]
+         b               .L_pred8x8_dc_end
+ endfunc
++
++.macro ldcol.16  rd,  rs,  rt,  n=4,  hi=0
++.if \n >= 4 || \hi == 0
++        ld1             {\rd\().h}[0],  [\rs], \rt
++        ld1             {\rd\().h}[1],  [\rs], \rt
++.endif
++.if \n >= 4 || \hi == 1
++        ld1             {\rd\().h}[2],  [\rs], \rt
++        ld1             {\rd\().h}[3],  [\rs], \rt
++.endif
++.if \n == 8
++        ld1             {\rd\().h}[4],  [\rs], \rt
++        ld1             {\rd\().h}[5],  [\rs], \rt
++        ld1             {\rd\().h}[6],  [\rs], \rt
++        ld1             {\rd\().h}[7],  [\rs], \rt
++.endif
++.endm
++
++
++
++function ff_pred16x16_128_dc_neon_10, export=1
++        movi            v0.8h, #2, lsl #8
++
++        b               .L_pred16x16_dc_10_end
++endfunc
++
++
++function ff_pred16x16_top_dc_neon_10, export=1
++        sub             x2,  x0,  x1
++
++        ld1             {v0.8h, v1.8h}, [x2]
++
++        add             v0.8h, v0.8h, v1.8h
++        addv            h0, v0.8h
++
++        urshr           v0.4h,  v0.4h,  #4
++        dup             v0.8h, v0.h[0]
++        b               .L_pred16x16_dc_10_end
++endfunc
++
++
++
++function ff_pred16x16_left_dc_neon_10, export=1
++        sub             x2,  x0,  #2
++        ldcol.16        v0,  x2,  x1,  8
++        ldcol.16        v1,  x2,  x1,  8
++
++        add             v0.8h, v0.8h, v1.8h
++        addv            h0,  v0.8h
++
++        urshr           v0.4h,  v0.4h,  #4
++        dup             v0.8h, v0.h[0]
++        b               .L_pred16x16_dc_10_end
++endfunc
++
++
++function ff_pred16x16_dc_neon_10, export=1
++        sub             x2,  x0,  x1
++        sub             x3,  x0,  #2
++
++        ld1             {v0.8h, v1.8h}, [x2]
++        ldcol.16        v2,  x3,  x1,  8
++        ldcol.16        v3,  x3,  x1,  8
++
++        add             v0.8h, v0.8h, v1.8h
++        add             v2.8h, v2.8h, v3.8h
++        add             v0.8h, v0.8h, v2.8h
++        addv            h0, v0.8h
++
++        urshr           v0.4h,  v0.4h,  #5
++        dup             v0.8h,  v0.h[0]
++.L_pred16x16_dc_10_end:
++        mov             v1.16b,  v0.16b
++        mov             w3,  #8
++6:      st1             {v0.8h, v1.8h}, [x0], x1
++        subs            w3,  w3,  #1
++        st1             {v0.8h, v1.8h}, [x0], x1
++        b.ne            6b
++        ret
++endfunc
++
++function ff_pred16x16_hor_neon_10, export=1
++        sub             x2,  x0,  #2
++        add             x3,  x0,  #16
++
++        mov             w4,  #16
++1:      ld1r            {v0.8h},  [x2],  x1
++        subs            w4,  w4,  #1
++        st1             {v0.8h},  [x0],  x1
++        st1             {v0.8h},  [x3],  x1
++        b.ne            1b
++        ret
++endfunc
++
++function ff_pred16x16_vert_neon_10, export=1
++        sub             x2,  x0,  x1
++        add             x1,  x1,  x1
++
++        ld1             {v0.8h, v1.8h},  [x2],  x1
++
++        mov             w3,  #8
++1:      subs            w3,  w3,  #1
++        st1             {v0.8h, v1.8h},  [x0],  x1
++        st1             {v0.8h, v1.8h},  [x2],  x1
++
++        b.ne            1b
++        ret
++endfunc
+diff --git a/libavcodec/aarch64/opusdsp_init.c b/libavcodec/aarch64/opusdsp_init.c
+index cc6a1b6..bb6d71b 100644
+--- a/libavcodec/aarch64/opusdsp_init.c
++++ b/libavcodec/aarch64/opusdsp_init.c
+@@ -18,6 +18,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/aarch64/cpu.h"
+ #include "libavcodec/opusdsp.h"
+ 
+diff --git a/libavcodec/arm/flacdsp_init_arm.c b/libavcodec/arm/flacdsp_init_arm.c
+index 564e3dc..c4a6e3a 100644
+--- a/libavcodec/arm/flacdsp_init_arm.c
++++ b/libavcodec/arm/flacdsp_init_arm.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavcodec/flacdsp.h"
+ #include "config.h"
+ 
+diff --git a/libavcodec/arm/mpegvideo_arm.c b/libavcodec/arm/mpegvideo_arm.c
+index 918be16..008ef18 100644
+--- a/libavcodec/arm/mpegvideo_arm.c
++++ b/libavcodec/arm/mpegvideo_arm.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/internal.h"
+ #include "libavutil/arm/cpu.h"
+ #include "libavcodec/avcodec.h"
+diff --git a/libavcodec/arm/mpegvideoencdsp_init_arm.c b/libavcodec/arm/mpegvideoencdsp_init_arm.c
+index 4bfe835..31d1474 100644
+--- a/libavcodec/arm/mpegvideoencdsp_init_arm.c
++++ b/libavcodec/arm/mpegvideoencdsp_init_arm.c
+@@ -18,6 +18,7 @@
+ 
+ #include <stdint.h>
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/arm/cpu.h"
+ #include "libavcodec/avcodec.h"
+diff --git a/libavcodec/arm/sbcdsp_init_arm.c b/libavcodec/arm/sbcdsp_init_arm.c
+index b8fa5a3..b3a2c3d 100644
+--- a/libavcodec/arm/sbcdsp_init_arm.c
++++ b/libavcodec/arm/sbcdsp_init_arm.c
+@@ -29,6 +29,7 @@
+  * SBC ARMv6 optimization for some basic "building bricks"
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/mem_internal.h"
+ #include "libavutil/arm/cpu.h"
+diff --git a/libavcodec/jpeglsdec.c b/libavcodec/jpeglsdec.c
+index 92df816..e17de09 100644
+--- a/libavcodec/jpeglsdec.c
++++ b/libavcodec/jpeglsdec.c
+@@ -45,11 +45,6 @@
+  */
+ //#define JLS_BROKEN
+ 
+-typedef struct JpegLSDecodeContext {
+-    MJpegDecodeContext mjpeg;
+-    JLSState state;
+-} JpegLSDecodeContext;
+-
+ /**
+  * Decode LSE block with initialization parameters
+  */
+@@ -355,10 +350,16 @@ int ff_jpegls_decode_picture(MJpegDecodeContext *s, int near,
+ {
+     int i, t = 0;
+     uint8_t *zero, *last, *cur;
+-    JLSState *const state = &((JpegLSDecodeContext*)s)->state;
++    JLSState *state = s->jls_state;
+     int off = 0, stride = 1, width, shift, ret = 0;
+     int decoded_height = 0;
+ 
++    if (!state) {
++        state = av_malloc(sizeof(*state));
++        if (!state)
++            return AVERROR(ENOMEM);
++        s->jls_state = state;
++    }
+     zero = av_mallocz(s->picture_ptr->linesize[0]);
+     if (!zero)
+         return AVERROR(ENOMEM);
+@@ -548,7 +549,7 @@ AVCodec ff_jpegls_decoder = {
+     .long_name      = NULL_IF_CONFIG_SMALL("JPEG-LS"),
+     .type           = AVMEDIA_TYPE_VIDEO,
+     .id             = AV_CODEC_ID_JPEGLS,
+-    .priv_data_size = sizeof(JpegLSDecodeContext),
++    .priv_data_size = sizeof(MJpegDecodeContext),
+     .init           = ff_mjpeg_decode_init,
+     .close          = ff_mjpeg_decode_end,
+     .receive_frame  = ff_mjpeg_receive_frame,
+diff --git a/libavcodec/mips/aacdec_mips.c b/libavcodec/mips/aacdec_mips.c
+index 7f24789..7b5f18a 100644
+--- a/libavcodec/mips/aacdec_mips.c
++++ b/libavcodec/mips/aacdec_mips.c
+@@ -52,6 +52,7 @@
+  * Reference: libavcodec/aacdec.c
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavcodec/aac.h"
+ #include "aacdec_mips.h"
+ #include "libavcodec/aactab.h"
+diff --git a/libavcodec/mips/cabac.h b/libavcodec/mips/cabac.h
+index 3d09e93..47d2969 100644
+--- a/libavcodec/mips/cabac.h
++++ b/libavcodec/mips/cabac.h
+@@ -24,6 +24,7 @@
+ #ifndef AVCODEC_MIPS_CABAC_H
+ #define AVCODEC_MIPS_CABAC_H
+ 
++#include "libavutil/attributes.h"
+ #include "libavcodec/cabac.h"
+ #include "libavutil/mips/asmdefs.h"
+ #include "config.h"
+diff --git a/libavcodec/mips/fft_mips.c b/libavcodec/mips/fft_mips.c
+index a6656d9..bf91fc3 100644
+--- a/libavcodec/mips/fft_mips.c
++++ b/libavcodec/mips/fft_mips.c
+@@ -48,6 +48,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ #include "config.h"
++#include "libavutil/attributes.h"
+ #include "libavcodec/fft.h"
+ #include "libavcodec/fft_table.h"
+ #include "libavutil/mips/asmdefs.h"
+diff --git a/libavcodec/mips/fmtconvert_mips.c b/libavcodec/mips/fmtconvert_mips.c
+index 9909584..89c6998 100644
+--- a/libavcodec/mips/fmtconvert_mips.c
++++ b/libavcodec/mips/fmtconvert_mips.c
+@@ -48,6 +48,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ #include "config.h"
++#include "libavutil/attributes.h"
+ #include "libavcodec/avcodec.h"
+ #include "libavcodec/fmtconvert.h"
+ #include "libavutil/mips/asmdefs.h"
+diff --git a/libavcodec/mips/h263dsp_init_mips.c b/libavcodec/mips/h263dsp_init_mips.c
+index a73eb12..829b10b 100644
+--- a/libavcodec/mips/h263dsp_init_mips.c
++++ b/libavcodec/mips/h263dsp_init_mips.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "h263dsp_mips.h"
+ 
+diff --git a/libavcodec/mips/h264chroma_init_mips.c b/libavcodec/mips/h264chroma_init_mips.c
+index 6bb19d3..5551a7c 100644
+--- a/libavcodec/mips/h264chroma_init_mips.c
++++ b/libavcodec/mips/h264chroma_init_mips.c
+@@ -19,6 +19,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "h264chroma_mips.h"
+ 
+diff --git a/libavcodec/mips/h264dsp_init_mips.c b/libavcodec/mips/h264dsp_init_mips.c
+index 9cd05e0..ce4dd36 100644
+--- a/libavcodec/mips/h264dsp_init_mips.c
++++ b/libavcodec/mips/h264dsp_init_mips.c
+@@ -19,6 +19,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "h264dsp_mips.h"
+ 
+diff --git a/libavcodec/mips/h264pred_init_mips.c b/libavcodec/mips/h264pred_init_mips.c
+index 0fd9bb7..d23d74a 100644
+--- a/libavcodec/mips/h264pred_init_mips.c
++++ b/libavcodec/mips/h264pred_init_mips.c
+@@ -19,6 +19,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "config.h"
+ #include "h264dsp_mips.h"
+diff --git a/libavcodec/mips/h264qpel_init_mips.c b/libavcodec/mips/h264qpel_init_mips.c
+index ea839f0..2633417 100644
+--- a/libavcodec/mips/h264qpel_init_mips.c
++++ b/libavcodec/mips/h264qpel_init_mips.c
+@@ -19,6 +19,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "h264dsp_mips.h"
+ 
+diff --git a/libavcodec/mips/idctdsp_init_mips.c b/libavcodec/mips/idctdsp_init_mips.c
+index 23efd9e..728e029 100644
+--- a/libavcodec/mips/idctdsp_init_mips.c
++++ b/libavcodec/mips/idctdsp_init_mips.c
+@@ -19,6 +19,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "idctdsp_mips.h"
+ #include "xvididct_mips.h"
+diff --git a/libavcodec/mips/lsp_mips.h b/libavcodec/mips/lsp_mips.h
+index 6219c5a..23b2b6b 100644
+--- a/libavcodec/mips/lsp_mips.h
++++ b/libavcodec/mips/lsp_mips.h
+@@ -56,6 +56,7 @@
+ 
+ #if HAVE_MIPSFPU && HAVE_INLINE_ASM
+ #if !HAVE_MIPS32R6 && !HAVE_MIPS64R6
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/asmdefs.h"
+ 
+ static av_always_inline void ff_lsp2polyf_mips(const double *lsp, double *f, int lp_half_order)
+diff --git a/libavcodec/mips/me_cmp_init_mips.c b/libavcodec/mips/me_cmp_init_mips.c
+index e3e33b8..90b8b91 100644
+--- a/libavcodec/mips/me_cmp_init_mips.c
++++ b/libavcodec/mips/me_cmp_init_mips.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "me_cmp_mips.h"
+ 
+diff --git a/libavcodec/mips/mpegvideo_init_mips.c b/libavcodec/mips/mpegvideo_init_mips.c
+index bfda90b..f687ad1 100644
+--- a/libavcodec/mips/mpegvideo_init_mips.c
++++ b/libavcodec/mips/mpegvideo_init_mips.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "h263dsp_mips.h"
+ #include "mpegvideo_mips.h"
+diff --git a/libavcodec/mips/mpegvideoencdsp_init_mips.c b/libavcodec/mips/mpegvideoencdsp_init_mips.c
+index 71831a6..3efbeec 100644
+--- a/libavcodec/mips/mpegvideoencdsp_init_mips.c
++++ b/libavcodec/mips/mpegvideoencdsp_init_mips.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "libavcodec/bit_depth_template.c"
+ #include "h263dsp_mips.h"
+diff --git a/libavcodec/mips/vc1dsp_mmi.c b/libavcodec/mips/vc1dsp_mmi.c
+index 8355cd1..348ecd2 100644
+--- a/libavcodec/mips/vc1dsp_mmi.c
++++ b/libavcodec/mips/vc1dsp_mmi.c
+@@ -20,6 +20,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/avassert.h"
+ #include "libavutil/mem_internal.h"
+ 
+@@ -27,7 +28,6 @@
+ #include "constants.h"
+ #include "vc1dsp_mips.h"
+ #include "hpeldsp_mips.h"
+-#include "libavutil/mem_internal.h"
+ #include "libavutil/mips/mmiutils.h"
+ 
+ #define VC1_INV_TRANCS_8_TYPE1(o1, o2, r1, r2, r3, r4, c0)                  \
+diff --git a/libavcodec/mips/vp8dsp_mmi.c b/libavcodec/mips/vp8dsp_mmi.c
+index aa6e856..ae0b555 100644
+--- a/libavcodec/mips/vp8dsp_mmi.c
++++ b/libavcodec/mips/vp8dsp_mmi.c
+@@ -23,6 +23,7 @@
+ 
+ #include "vp8dsp_mips.h"
+ #include "constants.h"
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/mmiutils.h"
+ #include "libavutil/mem_internal.h"
+ 
+diff --git a/libavcodec/mips/vp9dsp_init_mips.c b/libavcodec/mips/vp9dsp_init_mips.c
+index 5a8c599..27c8ec9 100644
+--- a/libavcodec/mips/vp9dsp_init_mips.c
++++ b/libavcodec/mips/vp9dsp_init_mips.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "config.h"
+ #include "libavutil/common.h"
+diff --git a/libavcodec/mips/xvididct_init_mips.c b/libavcodec/mips/xvididct_init_mips.c
+index ed545cf..658a579 100644
+--- a/libavcodec/mips/xvididct_init_mips.c
++++ b/libavcodec/mips/xvididct_init_mips.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mips/cpu.h"
+ #include "xvididct_mips.h"
+ 
+diff --git a/libavcodec/mjpegdec.c b/libavcodec/mjpegdec.c
+index f3d9e99..7c7cc20 100644
+--- a/libavcodec/mjpegdec.c
++++ b/libavcodec/mjpegdec.c
+@@ -2916,6 +2916,7 @@ av_cold int ff_mjpeg_decode_end(AVCodecContext *avctx)
+     reset_icc_profile(s);
+ 
+     av_freep(&s->hwaccel_picture_private);
++    av_freep(&s->jls_state);
+ 
+     return 0;
+ }
+diff --git a/libavcodec/mjpegdec.h b/libavcodec/mjpegdec.h
+index 0d69d91..2400a17 100644
+--- a/libavcodec/mjpegdec.h
++++ b/libavcodec/mjpegdec.h
+@@ -49,6 +49,8 @@ typedef struct ICCEntry {
+     int    length;
+ } ICCEntry;
+ 
++struct JLSState;
++
+ typedef struct MJpegDecodeContext {
+     AVClass *class;
+     AVCodecContext *avctx;
+@@ -163,6 +165,7 @@ typedef struct MJpegDecodeContext {
+     enum AVPixelFormat hwaccel_sw_pix_fmt;
+     enum AVPixelFormat hwaccel_pix_fmt;
+     void *hwaccel_picture_private;
++    struct JLSState *jls_state;
+ } MJpegDecodeContext;
+ 
+ int ff_mjpeg_build_vlc(VLC *vlc, const uint8_t *bits_table,
+diff --git a/libavcodec/neon/mpegvideo.c b/libavcodec/neon/mpegvideo.c
+index a96ae51..8f05d77 100644
+--- a/libavcodec/neon/mpegvideo.c
++++ b/libavcodec/neon/mpegvideo.c
+@@ -23,6 +23,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #if   ARCH_AARCH64
+ #   include "libavutil/aarch64/cpu.h"
+diff --git a/libavcodec/nvenc.c b/libavcodec/nvenc.c
+index 60006dc..d33ee48 100644
+--- a/libavcodec/nvenc.c
++++ b/libavcodec/nvenc.c
+@@ -152,6 +152,70 @@ static int nvenc_print_error(AVCodecContext *avctx, NVENCSTATUS err,
+     return ret;
+ }
+ 
++typedef struct GUIDTuple {
++    const GUID guid;
++    int flags;
++} GUIDTuple;
++
++#define PRESET_ALIAS(alias, name, ...) \
++    [PRESET_ ## alias] = { NV_ENC_PRESET_ ## name ## _GUID, __VA_ARGS__ }
++
++#define PRESET(name, ...) PRESET_ALIAS(name, name, __VA_ARGS__)
++
++static void nvenc_map_preset(NvencContext *ctx)
++{
++    GUIDTuple presets[] = {
++#ifdef NVENC_HAVE_NEW_PRESETS
++        PRESET(P1),
++        PRESET(P2),
++        PRESET(P3),
++        PRESET(P4),
++        PRESET(P5),
++        PRESET(P6),
++        PRESET(P7),
++        PRESET_ALIAS(SLOW,   P7, NVENC_TWO_PASSES),
++        PRESET_ALIAS(MEDIUM, P4, NVENC_ONE_PASS),
++        PRESET_ALIAS(FAST,   P1, NVENC_ONE_PASS),
++
++        PRESET_ALIAS(DEFAULT,             P4, NVENC_DEPRECATED_PRESET),
++        PRESET_ALIAS(HP,                  P1, NVENC_DEPRECATED_PRESET),
++        PRESET_ALIAS(HQ,                  P7, NVENC_DEPRECATED_PRESET),
++        PRESET_ALIAS(BD,                  P5, NVENC_DEPRECATED_PRESET),
++        PRESET_ALIAS(LOW_LATENCY_DEFAULT, P4, NVENC_DEPRECATED_PRESET | NVENC_LOWLATENCY),
++        PRESET_ALIAS(LOW_LATENCY_HP,      P1, NVENC_DEPRECATED_PRESET | NVENC_LOWLATENCY),
++        PRESET_ALIAS(LOW_LATENCY_HQ,      P7, NVENC_DEPRECATED_PRESET | NVENC_LOWLATENCY),
++        PRESET_ALIAS(LOSSLESS_DEFAULT,    P4, NVENC_DEPRECATED_PRESET | NVENC_LOSSLESS),
++        PRESET_ALIAS(LOSSLESS_HP,         P1, NVENC_DEPRECATED_PRESET | NVENC_LOSSLESS),
++#else
++        PRESET(DEFAULT),
++        PRESET(HP),
++        PRESET(HQ),
++        PRESET(BD),
++        PRESET_ALIAS(SLOW,   HQ,    NVENC_TWO_PASSES),
++        PRESET_ALIAS(MEDIUM, HQ,    NVENC_ONE_PASS),
++        PRESET_ALIAS(FAST,   HP,    NVENC_ONE_PASS),
++        PRESET(LOW_LATENCY_DEFAULT, NVENC_LOWLATENCY),
++        PRESET(LOW_LATENCY_HP,      NVENC_LOWLATENCY),
++        PRESET(LOW_LATENCY_HQ,      NVENC_LOWLATENCY),
++        PRESET(LOSSLESS_DEFAULT,    NVENC_LOSSLESS),
++        PRESET(LOSSLESS_HP,         NVENC_LOSSLESS),
++#endif
++    };
++
++    GUIDTuple *t = &presets[ctx->preset];
++
++    ctx->init_encode_params.presetGUID = t->guid;
++    ctx->flags = t->flags;
++
++#ifdef NVENC_HAVE_NEW_PRESETS
++    if (ctx->tuning_info == NV_ENC_TUNING_INFO_LOSSLESS)
++        ctx->flags |= NVENC_LOSSLESS;
++#endif
++}
++
++#undef PRESET
++#undef PRESET_ALIAS
++
+ static void nvenc_print_driver_requirement(AVCodecContext *avctx, int level)
+ {
+ #if NVENCAPI_CHECK_VERSION(11, 1)
+@@ -366,7 +430,7 @@ static int nvenc_check_capabilities(AVCodecContext *avctx)
+     }
+ 
+     ret = nvenc_check_cap(avctx, NV_ENC_CAPS_SUPPORT_LOSSLESS_ENCODE);
+-    if (ctx->preset >= PRESET_LOSSLESS_DEFAULT && ret <= 0) {
++    if (ctx->flags & NVENC_LOSSLESS && ret <= 0) {
+         av_log(avctx, AV_LOG_WARNING, "Lossless encoding not supported\n");
+         return AVERROR(ENOSYS);
+     }
+@@ -556,6 +620,11 @@ static av_cold int nvenc_setup_device(AVCodecContext *avctx)
+         return AVERROR_BUG;
+     }
+ 
++    nvenc_map_preset(ctx);
++
++    if (ctx->flags & NVENC_DEPRECATED_PRESET)
++        av_log(avctx, AV_LOG_WARNING, "The selected preset is deprecated. Use p1 to p7 + -tune or fast/medium/slow.\n");
++
+     if (avctx->pix_fmt == AV_PIX_FMT_CUDA || avctx->pix_fmt == AV_PIX_FMT_D3D11 || avctx->hw_frames_ctx || avctx->hw_device_ctx) {
+         AVHWFramesContext   *frames_ctx;
+         AVHWDeviceContext   *hwdev_ctx;
+@@ -646,65 +715,6 @@ static av_cold int nvenc_setup_device(AVCodecContext *avctx)
+     return 0;
+ }
+ 
+-typedef struct GUIDTuple {
+-    const GUID guid;
+-    int flags;
+-} GUIDTuple;
+-
+-#define PRESET_ALIAS(alias, name, ...) \
+-    [PRESET_ ## alias] = { NV_ENC_PRESET_ ## name ## _GUID, __VA_ARGS__ }
+-
+-#define PRESET(name, ...) PRESET_ALIAS(name, name, __VA_ARGS__)
+-
+-static void nvenc_map_preset(NvencContext *ctx)
+-{
+-    GUIDTuple presets[] = {
+-#ifdef NVENC_HAVE_NEW_PRESETS
+-        PRESET(P1),
+-        PRESET(P2),
+-        PRESET(P3),
+-        PRESET(P4),
+-        PRESET(P5),
+-        PRESET(P6),
+-        PRESET(P7),
+-        PRESET_ALIAS(SLOW,   P7, NVENC_TWO_PASSES),
+-        PRESET_ALIAS(MEDIUM, P4, NVENC_ONE_PASS),
+-        PRESET_ALIAS(FAST,   P1, NVENC_ONE_PASS),
+-        // Compat aliases
+-        PRESET_ALIAS(DEFAULT,             P4, NVENC_DEPRECATED_PRESET),
+-        PRESET_ALIAS(HP,                  P1, NVENC_DEPRECATED_PRESET),
+-        PRESET_ALIAS(HQ,                  P7, NVENC_DEPRECATED_PRESET),
+-        PRESET_ALIAS(BD,                  P5, NVENC_DEPRECATED_PRESET),
+-        PRESET_ALIAS(LOW_LATENCY_DEFAULT, P4, NVENC_DEPRECATED_PRESET | NVENC_LOWLATENCY),
+-        PRESET_ALIAS(LOW_LATENCY_HP,      P1, NVENC_DEPRECATED_PRESET | NVENC_LOWLATENCY),
+-        PRESET_ALIAS(LOW_LATENCY_HQ,      P7, NVENC_DEPRECATED_PRESET | NVENC_LOWLATENCY),
+-        PRESET_ALIAS(LOSSLESS_DEFAULT,    P4, NVENC_DEPRECATED_PRESET | NVENC_LOSSLESS),
+-        PRESET_ALIAS(LOSSLESS_HP,         P1, NVENC_DEPRECATED_PRESET | NVENC_LOSSLESS),
+-#else
+-        PRESET(DEFAULT),
+-        PRESET(HP),
+-        PRESET(HQ),
+-        PRESET(BD),
+-        PRESET_ALIAS(SLOW,   HQ,    NVENC_TWO_PASSES),
+-        PRESET_ALIAS(MEDIUM, HQ,    NVENC_ONE_PASS),
+-        PRESET_ALIAS(FAST,   HP,    NVENC_ONE_PASS),
+-        PRESET(LOW_LATENCY_DEFAULT, NVENC_LOWLATENCY),
+-        PRESET(LOW_LATENCY_HP,      NVENC_LOWLATENCY),
+-        PRESET(LOW_LATENCY_HQ,      NVENC_LOWLATENCY),
+-        PRESET(LOSSLESS_DEFAULT,    NVENC_LOSSLESS),
+-        PRESET(LOSSLESS_HP,         NVENC_LOSSLESS),
+-#endif
+-    };
+-
+-    GUIDTuple *t = &presets[ctx->preset];
+-
+-    ctx->init_encode_params.presetGUID = t->guid;
+-    ctx->flags = t->flags;
+-}
+-
+-#undef PRESET
+-#undef PRESET_ALIAS
+-
+ static av_cold void set_constqp(AVCodecContext *avctx)
+ {
+     NvencContext *ctx = avctx->priv_data;
+@@ -1262,18 +1272,15 @@ static av_cold int nvenc_setup_encoder(AVCodecContext *avctx)
+ 
+     ctx->init_encode_params.encodeConfig = &ctx->encode_config;
+ 
+-    nvenc_map_preset(ctx);
+-
+-    if (ctx->flags & NVENC_DEPRECATED_PRESET)
+-        av_log(avctx, AV_LOG_WARNING, "The selected preset is deprecated. Use p1 to p7 + -tune or fast/medium/slow.\n");
+-
+     preset_config.version = NV_ENC_PRESET_CONFIG_VER;
+     preset_config.presetCfg.version = NV_ENC_CONFIG_VER;
+ 
+ #ifdef NVENC_HAVE_NEW_PRESETS
+     ctx->init_encode_params.tuningInfo = ctx->tuning_info;
+ 
+-    if (ctx->flags & NVENC_LOWLATENCY)
++    if (ctx->flags & NVENC_LOSSLESS)
++        ctx->init_encode_params.tuningInfo = NV_ENC_TUNING_INFO_LOSSLESS;
++    else if (ctx->flags & NVENC_LOWLATENCY)
+         ctx->init_encode_params.tuningInfo = NV_ENC_TUNING_INFO_LOW_LATENCY;
+ 
+     nv_status = p_nvenc->nvEncGetEncodePresetConfigEx(ctx->nvencoder,
+@@ -1315,9 +1322,6 @@ static av_cold int nvenc_setup_encoder(AVCodecContext *avctx)
+      * */
+     if (ctx->rc_lookahead == 0 && ctx->encode_config.rcParams.enableLookahead)
+         ctx->rc_lookahead = ctx->encode_config.rcParams.lookaheadDepth;
+-
+-    if (ctx->init_encode_params.tuningInfo == NV_ENC_TUNING_INFO_LOSSLESS)
+-        ctx->flags |= NVENC_LOSSLESS;
+ #endif
+ 
+     if (ctx->weighted_pred == 1)
+diff --git a/libavcodec/nvenc.h b/libavcodec/nvenc.h
+index fefc5f7..314c270 100644
+--- a/libavcodec/nvenc.h
++++ b/libavcodec/nvenc.h
+@@ -103,7 +103,7 @@ enum {
+     PRESET_LOW_LATENCY_DEFAULT ,
+     PRESET_LOW_LATENCY_HQ ,
+     PRESET_LOW_LATENCY_HP,
+-    PRESET_LOSSLESS_DEFAULT, // lossless presets must be the last ones
++    PRESET_LOSSLESS_DEFAULT,
+     PRESET_LOSSLESS_HP,
+ #ifdef NVENC_HAVE_NEW_PRESETS
+     PRESET_P1,
+diff --git a/libavcodec/ppc/fft_init.c b/libavcodec/ppc/fft_init.c
+index 733e58b..65ce64f 100644
+--- a/libavcodec/ppc/fft_init.c
++++ b/libavcodec/ppc/fft_init.c
+@@ -21,6 +21,7 @@
+  */
+ 
+ #include "config.h"
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/ppc/cpu.h"
+ #include "libavutil/ppc/util_altivec.h"
+diff --git a/libavcodec/ppc/mpegvideodsp.c b/libavcodec/ppc/mpegvideodsp.c
+index 81f4845..42d65db 100644
+--- a/libavcodec/ppc/mpegvideodsp.c
++++ b/libavcodec/ppc/mpegvideodsp.c
+@@ -20,6 +20,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/mem_internal.h"
+ #include "libavutil/ppc/cpu.h"
+diff --git a/libavcodec/ppc/vp8dsp_altivec.c b/libavcodec/ppc/vp8dsp_altivec.c
+index 64ee703..273de84 100644
+--- a/libavcodec/ppc/vp8dsp_altivec.c
++++ b/libavcodec/ppc/vp8dsp_altivec.c
+@@ -22,6 +22,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/mem_internal.h"
+ #include "libavutil/ppc/cpu.h"
+diff --git a/libavcodec/rv10.c b/libavcodec/rv10.c
+index bd70689..9c3a48c 100644
+--- a/libavcodec/rv10.c
++++ b/libavcodec/rv10.c
+@@ -154,7 +154,7 @@ static int rv10_decode_picture_header(MpegEncContext *s)
+     return mb_count;
+ }
+ 
+-static int rv20_decode_picture_header(RVDecContext *rv)
++static int rv20_decode_picture_header(RVDecContext *rv, int whole_size)
+ {
+     MpegEncContext *s = &rv->m;
+     int seq, mb_pos, i, ret;
+@@ -232,6 +232,10 @@ static int rv20_decode_picture_header(RVDecContext *rv)
+                    "attempting to change resolution to %dx%d\n", new_w, new_h);
+             if (av_image_check_size(new_w, new_h, 0, s->avctx) < 0)
+                 return AVERROR_INVALIDDATA;
++
++            if (whole_size < (new_w + 15)/16 * ((new_h + 15)/16) / 8)
++                return AVERROR_INVALIDDATA;
++
+             ff_mpv_common_end(s);
+ 
+             // attempt to keep aspect during typical resolution switches
+@@ -447,7 +451,7 @@ static int rv10_decode_packet(AVCodecContext *avctx, const uint8_t *buf,
+     if (s->codec_id == AV_CODEC_ID_RV10)
+         mb_count = rv10_decode_picture_header(s);
+     else
+-        mb_count = rv20_decode_picture_header(rv);
++        mb_count = rv20_decode_picture_header(rv, whole_size);
+     if (mb_count < 0) {
+         if (mb_count != ERROR_SKIP_FRAME)
+             av_log(s->avctx, AV_LOG_ERROR, "HEADER ERROR\n");
+diff --git a/libavcodec/utils.c b/libavcodec/utils.c
+index 896b99d..6cd8b96 100644
+--- a/libavcodec/utils.c
++++ b/libavcodec/utils.c
+@@ -773,11 +773,15 @@ static int get_audio_frame_duration(enum AVCodecID id, int sr, int ch, int ba,
+             if (ba > 0) {
+                 /* calc from frame_bytes, channels, and block_align */
+                 int blocks = frame_bytes / ba;
++                int64_t tmp;
+                 switch (id) {
+                 case AV_CODEC_ID_ADPCM_IMA_WAV:
+                     if (bps < 2 || bps > 5)
+                         return 0;
+-                    return blocks * (1 + (ba - 4 * ch) / (bps * ch) * 8);
++                    tmp = blocks * (1LL + (ba - 4 * ch) / (bps * ch) * 8);
++                    if (tmp != (int)tmp)
++                        return 0;
++                    return tmp;
+                 case AV_CODEC_ID_ADPCM_IMA_DK3:
+                     return blocks * (((ba - 16) * 2 / 3 * 4) / ch);
+                 case AV_CODEC_ID_ADPCM_IMA_DK4:
+diff --git a/libavcodec/x86/aacencdsp_init.c b/libavcodec/x86/aacencdsp_init.c
+index d761c3c..049a241 100644
+--- a/libavcodec/x86/aacencdsp_init.c
++++ b/libavcodec/x86/aacencdsp_init.c
+@@ -21,6 +21,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/float_dsp.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libavcodec/aacenc.h"
+diff --git a/libavcodec/x86/celt_pvq_init.c b/libavcodec/x86/celt_pvq_init.c
+index 13724c3..5a0669e 100644
+--- a/libavcodec/x86/celt_pvq_init.c
++++ b/libavcodec/x86/celt_pvq_init.c
+@@ -21,6 +21,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libavcodec/opus_pvq.h"
+ 
+diff --git a/libavcodec/x86/fdct.c b/libavcodec/x86/fdct.c
+index d77f60c..033ff1c 100644
+--- a/libavcodec/x86/fdct.c
++++ b/libavcodec/x86/fdct.c
+@@ -30,6 +30,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/common.h"
+ #include "libavutil/mem_internal.h"
+ #include "libavutil/x86/asm.h"
+diff --git a/libavcodec/x86/flacdsp_init.c b/libavcodec/x86/flacdsp_init.c
+index 1971f81..6315b69 100644
+--- a/libavcodec/x86/flacdsp_init.c
++++ b/libavcodec/x86/flacdsp_init.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavcodec/flacdsp.h"
+ #include "libavutil/x86/cpu.h"
+ #include "config.h"
+diff --git a/libavcodec/x86/mdct15_init.c b/libavcodec/x86/mdct15_init.c
+index 444801d..641bfd0 100644
+--- a/libavcodec/x86/mdct15_init.c
++++ b/libavcodec/x86/mdct15_init.c
+@@ -22,6 +22,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libavcodec/mdct15.h"
+ 
+diff --git a/libavcodec/x86/opusdsp_init.c b/libavcodec/x86/opusdsp_init.c
+index 5c8a4c2..582fbb4 100644
+--- a/libavcodec/x86/opusdsp_init.c
++++ b/libavcodec/x86/opusdsp_init.c
+@@ -18,6 +18,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libavcodec/opusdsp.h"
+ 
+diff --git a/libavcodec/x86/sbcdsp_init.c b/libavcodec/x86/sbcdsp_init.c
+index 86effec..7416a86 100644
+--- a/libavcodec/x86/sbcdsp_init.c
++++ b/libavcodec/x86/sbcdsp_init.c
+@@ -29,6 +29,7 @@
+  * SBC MMX optimization for some basic "building bricks"
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libavcodec/sbcdsp.h"
+diff --git a/libavcodec/x86/snowdsp.c b/libavcodec/x86/snowdsp.c
+index 218e686..84bc74f 100644
+--- a/libavcodec/x86/snowdsp.c
++++ b/libavcodec/x86/snowdsp.c
+@@ -19,6 +19,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/x86/asm.h"
+ #include "libavcodec/avcodec.h"
+diff --git a/libavcodec/x86/takdsp_init.c b/libavcodec/x86/takdsp_init.c
+index fe0c846..b2e6e63 100644
+--- a/libavcodec/x86/takdsp_init.c
++++ b/libavcodec/x86/takdsp_init.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavcodec/takdsp.h"
+ #include "libavutil/x86/cpu.h"
+ #include "config.h"
+diff --git a/libavcodec/x86/ttadsp_init.c b/libavcodec/x86/ttadsp_init.c
+index 7441c97..f2954e5 100644
+--- a/libavcodec/x86/ttadsp_init.c
++++ b/libavcodec/x86/ttadsp_init.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavcodec/ttadsp.h"
+ #include "libavutil/x86/cpu.h"
+ #include "config.h"
+diff --git a/libavcodec/x86/ttaencdsp_init.c b/libavcodec/x86/ttaencdsp_init.c
+index 61971a4..b470142 100644
+--- a/libavcodec/x86/ttaencdsp_init.c
++++ b/libavcodec/x86/ttaencdsp_init.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavcodec/ttaencdsp.h"
+ #include "libavutil/x86/cpu.h"
+ #include "config.h"
+diff --git a/libavcodec/x86/v210-init.c b/libavcodec/x86/v210-init.c
+index cb9a6cb..5db1fef 100644
+--- a/libavcodec/x86/v210-init.c
++++ b/libavcodec/x86/v210-init.c
+@@ -16,6 +16,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavcodec/v210dec.h"
+ 
+diff --git a/libavcodec/x86/v210enc_init.c b/libavcodec/x86/v210enc_init.c
+index e997b4b..13a351d 100644
+--- a/libavcodec/x86/v210enc_init.c
++++ b/libavcodec/x86/v210enc_init.c
+@@ -16,6 +16,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libavcodec/v210enc.h"
+ 
+diff --git a/libavcodec/x86/vc1dsp_mmx.c b/libavcodec/x86/vc1dsp_mmx.c
+index 6541dda..c1c4d76 100644
+--- a/libavcodec/x86/vc1dsp_mmx.c
++++ b/libavcodec/x86/vc1dsp_mmx.c
+@@ -24,6 +24,7 @@
+  * OTHER DEALINGS IN THE SOFTWARE.
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/mem.h"
+ #include "libavutil/mem_internal.h"
+diff --git a/libavcodec/x86/vp56_arith.h b/libavcodec/x86/vp56_arith.h
+index 810cc8d..9f76399 100644
+--- a/libavcodec/x86/vp56_arith.h
++++ b/libavcodec/x86/vp56_arith.h
+@@ -25,6 +25,8 @@
+ #define AVCODEC_X86_VP56_ARITH_H
+ 
+ #if HAVE_INLINE_ASM && HAVE_FAST_CMOV && HAVE_6REGS
++#include "libavutil/attributes.h"
++
+ #define vp56_rac_get_prob vp56_rac_get_prob
+ static av_always_inline int vp56_rac_get_prob(VP56RangeCoder *c, uint8_t prob)
+ {
+diff --git a/libavcodec/x86/vp9dsp_init.h b/libavcodec/x86/vp9dsp_init.h
+index ebe7ca8..fc1e055 100644
+--- a/libavcodec/x86/vp9dsp_init.h
++++ b/libavcodec/x86/vp9dsp_init.h
+@@ -23,6 +23,7 @@
+ #ifndef AVCODEC_X86_VP9DSP_INIT_H
+ #define AVCODEC_X86_VP9DSP_INIT_H
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mem_internal.h"
+ 
+ #include "libavcodec/vp9dsp.h"
+diff --git a/libavfilter/aarch64/vf_nlmeans_init.c b/libavfilter/aarch64/vf_nlmeans_init.c
+index a1edefb..6793370 100644
+--- a/libavfilter/aarch64/vf_nlmeans_init.c
++++ b/libavfilter/aarch64/vf_nlmeans_init.c
+@@ -16,6 +16,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/aarch64/cpu.h"
+ #include "libavfilter/vf_nlmeans.h"
+ 
+diff --git a/libavfilter/af_mcompand.c b/libavfilter/af_mcompand.c
+index ce4f366..d1a3dc1 100644
+--- a/libavfilter/af_mcompand.c
++++ b/libavfilter/af_mcompand.c
+@@ -384,6 +384,9 @@ static int config_output(AVFilterLink *outlink)
+         s->bands[i].attack_rate = av_calloc(outlink->channels, sizeof(double));
+         s->bands[i].decay_rate = av_calloc(outlink->channels, sizeof(double));
+         s->bands[i].volume = av_calloc(outlink->channels, sizeof(double));
++        if (!s->bands[i].attack_rate || !s->bands[i].decay_rate || !s->bands[i].volume)
++            return AVERROR(ENOMEM);
++
+         for (k = 0; k < FFMIN(nb_attacks / 2, outlink->channels); k++) {
+             char *tstr3 = av_strtok(p3, ",", &saveptr3);
+ 
+diff --git a/libavformat/cafdec.c b/libavformat/cafdec.c
+index 2a9299d..d97ca45 100644
+--- a/libavformat/cafdec.c
++++ b/libavformat/cafdec.c
+@@ -79,7 +79,7 @@ static int read_desc_chunk(AVFormatContext *s)
+     st->codecpar->channels    = avio_rb32(pb);
+     st->codecpar->bits_per_coded_sample = avio_rb32(pb);
+ 
+-    if (caf->bytes_per_packet < 0 || caf->frames_per_packet < 0)
++    if (caf->bytes_per_packet < 0 || caf->frames_per_packet < 0 || st->codecpar->channels < 0)
+         return AVERROR_INVALIDDATA;
+ 
+     /* calculate bit rate for constant size packets */
+diff --git a/libavformat/hls.c b/libavformat/hls.c
+index 597bea7..b589ad2 100644
+--- a/libavformat/hls.c
++++ b/libavformat/hls.c
+@@ -842,6 +842,10 @@ static int parse_playlist(HLSContext *c, const char *url,
+             ff_parse_key_value(ptr, (ff_parse_key_val_cb) handle_init_section_args,
+                                &info);
+             cur_init_section = new_init_section(pls, &info, url);
++            if (!cur_init_section) {
++                ret = AVERROR(ENOMEM);
++                goto fail;
++            }
+             cur_init_section->key_type = key_type;
+             if (has_iv) {
+                 memcpy(cur_init_section->iv, iv, sizeof(iv));
+diff --git a/libavutil/cpu.c b/libavutil/cpu.c
+index 8e3576a..1215394 100644
+--- a/libavutil/cpu.c
++++ b/libavutil/cpu.c
+@@ -102,6 +102,7 @@ int av_get_cpu_flags(void)
+     return flags;
+ }
+ 
++#if FF_API_CPU_FLAGS
+ void av_set_cpu_flags_mask(int mask)
+ {
+     atomic_store_explicit(&cpu_flags, get_cpu_flags() & mask,
+@@ -192,7 +193,7 @@ int av_parse_cpu_flags(const char *s)
+ 
+     return flags & INT_MAX;
+ }
+-
++#endif
+ int av_parse_cpu_caps(unsigned *flags, const char *s)
+ {
+         static const AVOption cpuflags_opts[] = {
+@@ -291,6 +292,12 @@ int av_cpu_count(void)
+     DWORD_PTR proc_aff, sys_aff;
+     if (GetProcessAffinityMask(GetCurrentProcess(), &proc_aff, &sys_aff))
+         nb_cpus = av_popcount64(proc_aff);
++#elif HAVE_SYSCTL && defined(HW_NCPUONLINE)
++    int mib[2] = { CTL_HW, HW_NCPUONLINE };
++    size_t len = sizeof(nb_cpus);
++
++    if (sysctl(mib, 2, &nb_cpus, &len, NULL, 0) == -1)
++        nb_cpus = 0;
+ #elif HAVE_SYSCTL && defined(HW_NCPU)
+     int mib[2] = { CTL_HW, HW_NCPU };
+     size_t len = sizeof(nb_cpus);
+diff --git a/libavutil/cpu.h b/libavutil/cpu.h
+index 83099dd..18dfa49 100644
+--- a/libavutil/cpu.h
++++ b/libavutil/cpu.h
+@@ -24,6 +24,7 @@
+ #include <stddef.h>
+ 
+ #include "attributes.h"
++#include "version.h"
+ 
+ #define AV_CPU_FLAG_FORCE    0x80000000 /* force usage of selected flags (OR) */
+ 
+@@ -88,6 +89,7 @@ int av_get_cpu_flags(void);
+  */
+ void av_force_cpu_flags(int flags);
+ 
++#if FF_API_CPU_FLAGS
+ /**
+  * Set a mask on flags returned by av_get_cpu_flags().
+  * This function is mainly useful for testing.
+@@ -106,6 +108,7 @@ attribute_deprecated void av_set_cpu_flags_mask(int mask);
+  */
+ attribute_deprecated
+ int av_parse_cpu_flags(const char *s);
++#endif
+ 
+ /**
+  * Parse CPU caps from a string and update the given AV_CPU_* flags based on that.
+diff --git a/libavutil/mips/libm_mips.h b/libavutil/mips/libm_mips.h
+index 757867b..fbf7cf4 100644
+--- a/libavutil/mips/libm_mips.h
++++ b/libavutil/mips/libm_mips.h
+@@ -53,6 +53,8 @@
+ #ifndef AVUTIL_MIPS_LIBM_MIPS_H
+ #define AVUTIL_MIPS_LIBM_MIPS_H
+ 
++#include "libavutil/attributes.h"
++
+ static av_always_inline av_const long int lrintf_mips(float x)
+ {
+     register int ret_int;
+diff --git a/libavutil/version.h b/libavutil/version.h
+index dc8791f..658bcd4 100644
+--- a/libavutil/version.h
++++ b/libavutil/version.h
+@@ -135,6 +135,9 @@
+ #ifndef FF_API_BUFFER_SIZE_T
+ #define FF_API_BUFFER_SIZE_T            (LIBAVUTIL_VERSION_MAJOR < 57)
+ #endif
++#ifndef FF_API_CPU_FLAGS
++#define FF_API_CPU_FLAGS                (LIBAVUTIL_VERSION_MAJOR < 57)
++#endif
+ #ifndef FF_API_D2STR
+ #define FF_API_D2STR                    (LIBAVUTIL_VERSION_MAJOR < 58)
+ #endif
+diff --git a/libavutil/x86/lls_init.c b/libavutil/x86/lls_init.c
+index 1c5dca4..c786376 100644
+--- a/libavutil/x86/lls_init.c
++++ b/libavutil/x86/lls_init.c
+@@ -20,6 +20,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/lls.h"
+ #include "libavutil/x86/cpu.h"
+ 
+diff --git a/libswresample/aarch64/resample_init.c b/libswresample/aarch64/resample_init.c
+index d01ec18..87e4dd9 100644
+--- a/libswresample/aarch64/resample_init.c
++++ b/libswresample/aarch64/resample_init.c
+@@ -22,6 +22,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/avassert.h"
+ 
+diff --git a/libswresample/arm/resample_init.c b/libswresample/arm/resample_init.c
+index 09b9766..b119943 100644
+--- a/libswresample/arm/resample_init.c
++++ b/libswresample/arm/resample_init.c
+@@ -22,6 +22,7 @@
+ 
+ #include "config.h"
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/cpu.h"
+ #include "libavutil/avassert.h"
+ 
+diff --git a/libswresample/x86/audio_convert_init.c b/libswresample/x86/audio_convert_init.c
+index bb89cf6..a7d5ab8 100644
+--- a/libswresample/x86/audio_convert_init.c
++++ b/libswresample/x86/audio_convert_init.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libswresample/swresample_internal.h"
+ #include "libswresample/audioconvert.h"
+diff --git a/libswresample/x86/rematrix_init.c b/libswresample/x86/rematrix_init.c
+index d6616f8..e515e4b 100644
+--- a/libswresample/x86/rematrix_init.c
++++ b/libswresample/x86/rematrix_init.c
+@@ -18,6 +18,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libswresample/swresample_internal.h"
+ 
+diff --git a/libswresample/x86/resample_init.c b/libswresample/x86/resample_init.c
+index c6b2a36..32c080e 100644
+--- a/libswresample/x86/resample_init.c
++++ b/libswresample/x86/resample_init.c
+@@ -25,6 +25,7 @@
+  * @author Michael Niedermayer <michaelni@gmx.at>
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libswresample/resample.h"
+ 
+diff --git a/libswscale/aarch64/swscale.c b/libswscale/aarch64/swscale.c
+index eecbea8..09d0a71 100644
+--- a/libswscale/aarch64/swscale.c
++++ b/libswscale/aarch64/swscale.c
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include "config.h"
++#include "libavutil/attributes.h"
+ #include "libswscale/swscale.h"
+ #include "libswscale/swscale_internal.h"
+ #include "libavutil/aarch64/cpu.h"
+diff --git a/libswscale/arm/swscale.c b/libswscale/arm/swscale.c
+index 7b8fbcb..5f2fd2c 100644
+--- a/libswscale/arm/swscale.c
++++ b/libswscale/arm/swscale.c
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include "config.h"
++#include "libavutil/attributes.h"
+ #include "libswscale/swscale.h"
+ #include "libswscale/swscale_internal.h"
+ #include "libavutil/arm/cpu.h"
+diff --git a/libswscale/ppc/swscale_ppc_template.c b/libswscale/ppc/swscale_ppc_template.c
+index 0ffa927..84641f3 100644
+--- a/libswscale/ppc/swscale_ppc_template.c
++++ b/libswscale/ppc/swscale_ppc_template.c
+@@ -21,6 +21,7 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
++#include "libavutil/attributes.h"
+ #include "libavutil/mem_internal.h"
+ 
+ static void FUNC(yuv2planeX_8_16)(const int16_t *filter, int filterSize,
+diff --git a/libswscale/x86/hscale_fast_bilinear_simd.c b/libswscale/x86/hscale_fast_bilinear_simd.c
+index 850f0ad..f6409b4 100644
+--- a/libswscale/x86/hscale_fast_bilinear_simd.c
++++ b/libswscale/x86/hscale_fast_bilinear_simd.c
+@@ -19,6 +19,7 @@
+  */
+ 
+ #include "../swscale_internal.h"
++#include "libavutil/attributes.h"
+ #include "libavutil/x86/asm.h"
+ #include "libavutil/x86/cpu.h"
+ #include "libavutil/mem_internal.h"
+diff --git a/tools/target_dec_fuzzer.c b/tools/target_dec_fuzzer.c
+index 80da7af..38e14eb 100644
+--- a/tools/target_dec_fuzzer.c
++++ b/tools/target_dec_fuzzer.c
+@@ -152,6 +152,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+     maxsamples = maxsamples_per_frame * maxiteration;
+     switch (c->id) {
+     case AV_CODEC_ID_AGM:         maxpixels  /= 1024;  break;
++    case AV_CODEC_ID_ARBC:        maxpixels  /= 1024;  break;
+     case AV_CODEC_ID_BINKVIDEO:   maxpixels  /= 32;    break;
+     case AV_CODEC_ID_CFHD:        maxpixels  /= 128;   break;
+     case AV_CODEC_ID_COOK:        maxsamples /= 1<<20; break;
+@@ -193,6 +194,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+     case AV_CODEC_ID_TGV:         maxpixels  /= 32;    break;
+     case AV_CODEC_ID_THEORA:      maxpixels  /= 1024;  break;
+     case AV_CODEC_ID_TRUEMOTION2: maxpixels  /= 1024;  break;
++    case AV_CODEC_ID_TSCC:        maxpixels  /= 1024;  break;
+     case AV_CODEC_ID_VC1IMAGE:    maxpixels  /= 8192;  break;
+     case AV_CODEC_ID_VMNC:        maxpixels  /= 8192;  break;
+     case AV_CODEC_ID_VP4:         maxpixels  /= 4096;  break;

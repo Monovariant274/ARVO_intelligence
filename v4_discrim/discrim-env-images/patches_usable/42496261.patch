@@ -1,0 +1,47 @@
+diff --git a/ChangeLog b/ChangeLog
+index a49f89e..e56561a 100644
+--- a/ChangeLog
++++ b/ChangeLog
+@@ -1,8 +1,10 @@
+ 2021-04-17  7.0.11-9  <quetzlzacatenango@image...>
+   * Release ImageMagick version 7.0.11-9 GIT revision 18...
+ 
+-2021-04-17  7.0.11-8  <quetzlzacatenango@image...>
++2021-04-17  7.0.11-9  <quetzlzacatenango@image...>
+   * eliminate uninitialized value
++
++    https:
+ 
+ 2021-04-17  7.0.11-8  <quetzlzacatenango@image...>
+   * Release ImageMagick version 7.0.11-8 GIT revision 18636:53a252607:20210417
+diff --git a/MagickCore/colorspace.c b/MagickCore/colorspace.c
+index cad2a7a..f9bcf5d 100644
+--- a/MagickCore/colorspace.c
++++ b/MagickCore/colorspace.c
+@@ -610,9 +610,10 @@ static MagickBooleanType sRGBTransformImage(Image *image,
+           MagickRealType
+             gray;
+ 
+-          gray=0.212656*GetPixelRed(image,q)+0.715158*GetPixelGreen(image,q)+
+-            0.072186*GetPixelBlue(image,q);
+-          SetPixelGray(image,ClampToQuantum(DecodePixelGamma(gray)),q);
++          gray=0.212656*DecodePixelGamma(GetPixelRed(image,q))+0.715158*
++            DecodePixelGamma(GetPixelGreen(image,q))+0.072186*
++            DecodePixelGamma(GetPixelBlue(image,q));
++          SetPixelGray(image,ClampToQuantum(gray),q);
+           q+=GetPixelChannels(image);
+         }
+         sync=SyncCacheViewAuthenticPixels(image_view,exception);
+@@ -2188,9 +2189,9 @@ static MagickBooleanType TransformsRGBImage(Image *image,
+           MagickRealType
+             gray;
+ 
+-          gray=0.212656*GetPixelRed(image,q)+0.715158*GetPixelGreen(image,q)+
+-            0.072186*GetPixelBlue(image,q);
+-          gray=EncodePixelGamma(gray);
++          gray=0.212656*EncodePixelGamma(GetPixelRed(image,q))+0.715158*
++            EncodePixelGamma(GetPixelGreen(image,q))+0.072186*
++            EncodePixelGamma(GetPixelBlue(image,q));
+           SetPixelRed(image,ClampToQuantum(gray),q);
+           SetPixelGreen(image,ClampToQuantum(gray),q);
+           SetPixelBlue(image,ClampToQuantum(gray),q);

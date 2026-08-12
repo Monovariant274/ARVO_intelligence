@@ -1,0 +1,312 @@
+{
+  "bugs": [
+    "42482686",
+    "42496472",
+    "42525070",
+    "42502733",
+    "42523920",
+    "42496381",
+    "42513893",
+    "42520968",
+    "42529262",
+    "42475500",
+    "42497648",
+    "42521256",
+    "42480020",
+    "42507446",
+    "42510351",
+    "42494165",
+    "42523045",
+    "42515627",
+    "42488076",
+    "42483920",
+    "42487846",
+    "42480195",
+    "42479239",
+    "42525012",
+    "42488013",
+    "42521437",
+    "42526031",
+    "42527115",
+    "42504347",
+    "42490511",
+    "42488899",
+    "42486093",
+    "42502186",
+    "42497193",
+    "42488894",
+    "42483290",
+    "42522551",
+    "42526950",
+    "42507667",
+    "42482389",
+    "42528497",
+    "42487339",
+    "42490854",
+    "42500437",
+    "42527470",
+    "42492964",
+    "42497295",
+    "42516415",
+    "42480628",
+    "42477503"
+  ],
+  "params": {
+    "n": 50,
+    "max_per_project": 3,
+    "seed": 0,
+    "eligible_pool": 4669
+  },
+  "meta": [
+    {
+      "id": "42482686",
+      "project": "gnutls",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42496472",
+      "project": "openthread",
+      "sanitizer": "ubsan"
+    },
+    {
+      "id": "42525070",
+      "project": "harfbuzz",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42502733",
+      "project": "libvips",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42523920",
+      "project": "poco",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42496381",
+      "project": "openthread",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42513893",
+      "project": "ghostpdl",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42520968",
+      "project": "ghostpdl",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42529262",
+      "project": "imagemagick",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42475500",
+      "project": "karchive",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42497648",
+      "project": "wpantund",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42521256",
+      "project": "librabbitmq",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42480020",
+      "project": "opensc",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42507446",
+      "project": "imagemagick",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42510351",
+      "project": "gdal",
+      "sanitizer": "ubsan"
+    },
+    {
+      "id": "42494165",
+      "project": "skia",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42523045",
+      "project": "qemu",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42515627",
+      "project": "ghostpdl",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42488076",
+      "project": "openh264",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42483920",
+      "project": "imagemagick",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42487846",
+      "project": "openh264",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42480195",
+      "project": "opensc",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42479239",
+      "project": "gdal",
+      "sanitizer": "ubsan"
+    },
+    {
+      "id": "42525012",
+      "project": "skia",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42488013",
+      "project": "c-blosc2",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42521437",
+      "project": "assimp",
+      "sanitizer": "ubsan"
+    },
+    {
+      "id": "42526031",
+      "project": "PcapPlusPlus",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42527115",
+      "project": "binutils-gdb",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42504347",
+      "project": "dav1d",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42490511",
+      "project": "glib",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42488899",
+      "project": "fluent-bit",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42486093",
+      "project": "gdal",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42502186",
+      "project": "mruby",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42497193",
+      "project": "unicorn",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42488894",
+      "project": "wolfssl",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42483290",
+      "project": "oniguruma",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42522551",
+      "project": "arrow",
+      "sanitizer": "ubsan"
+    },
+    {
+      "id": "42526950",
+      "project": "oss-fuzz-example",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42507667",
+      "project": "ndpi",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42482389",
+      "project": "binutils-gdb",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42528497",
+      "project": "ffmpeg",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42487339",
+      "project": "ffmpeg",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42490854",
+      "project": "kimageformats",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42500437",
+      "project": "espeak-ng",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42527470",
+      "project": "ffmpeg",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42492964",
+      "project": "flatbuffers",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42497295",
+      "project": "mruby",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42516415",
+      "project": "binutils-gdb",
+      "sanitizer": "asan"
+    },
+    {
+      "id": "42480628",
+      "project": "php-src",
+      "sanitizer": "msan"
+    },
+    {
+      "id": "42477503",
+      "project": "libvips",
+      "sanitizer": "asan"
+    }
+  ]
+}

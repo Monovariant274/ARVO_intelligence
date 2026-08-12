@@ -1,0 +1,29 @@
+diff --git a/.github/workflows/cifuzz.yml b/.github/workflows/cifuzz.yml
+index 9f956d5..a32e335 100644
+--- a/.github/workflows/cifuzz.yml
++++ b/.github/workflows/cifuzz.yml
+@@ -8,6 +8,7 @@ on:
+     - 'src/irc/**/*.c'
+     - 'src/fe-common/irc/**/*.c'
+     - 'src/lib-config/**/*.c'
++    - 'src/fe-fuzz*.c'
+     - 'tests/**/*.c'
+     - '.github/workflows/cifuzz.yml'
+ jobs:
+diff --git a/src/fe-fuzz/server.c b/src/fe-fuzz/server.c
+index a2ffb9e..83ce7bf 100644
+--- a/src/fe-fuzz/server.c
++++ b/src/fe-fuzz/server.c
+@@ -186,9 +186,11 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+ 		server_ref(server);
+ 		signal_emit("server incoming", 2, server, prefixedLine);
+ 		disconnected = server->disconnected;
++
+ 		if (disconnected) {
+-			server_connect_unref(server->connrec);
++		        server_connect_unref(server->connrec);
+ 		}
++
+ 		server_unref(server);
+ 		if (disconnected) {
+ 			/* reconnect */

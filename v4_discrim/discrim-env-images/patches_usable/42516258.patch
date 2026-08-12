@@ -1,0 +1,41 @@
+diff --git a/src/imageformats/psd.cpp b/src/imageformats/psd.cpp
+index 7447fa1..80a61b2 100644
+--- a/src/imageformats/psd.cpp
++++ b/src/imageformats/psd.cpp
+@@ -643,7 +643,9 @@ static bool IsValid(const PSDHeader &header)
+         qDebug() << "PSD header: invalid color mode" << header.color_mode;
+         return false;
+     }
+-    if (header.channel_count < 1 || header.channel_count > 56) {
++
++
++    if (header.channel_count < 1 || header.channel_count > 57) {
+         qDebug() << "PSD header: invalid number of channels" << header.channel_count;
+         return false;
+     }
+diff --git a/src/imageformats/raw.cpp b/src/imageformats/raw.cpp
+index 5e92fad..5151489 100644
+--- a/src/imageformats/raw.cpp
++++ b/src/imageformats/raw.cpp
+@@ -138,7 +138,7 @@ public:
+         if (whence == SEEK_END) {
+             pos = size + o;
+         }
+-        if (pos < 0 || pos > size) {
++        if (pos < 0 || pos > size || m_device->isSequential()) {
+             return -1;
+         }
+         return m_device->seek(pos) ? 0 : -1;
+diff --git a/src/imageformats/xcf.cpp b/src/imageformats/xcf.cpp
+index d876cf2..9885452 100644
+--- a/src/imageformats/xcf.cpp
++++ b/src/imageformats/xcf.cpp
+@@ -1270,7 +1270,7 @@ void XCFImageFormat::setImageParasites(const XCFImage &xcf_image, QImage &image)
+ {
+     auto&& p = xcf_image.parasites;
+     auto keys = p.keys();
+-    for (auto&& key : qAsConst(keys)) {
++    for (auto &&key : std::as_const(keys)) {
+         auto value = p.value(key);
+         if(value.isEmpty())
+             continue;

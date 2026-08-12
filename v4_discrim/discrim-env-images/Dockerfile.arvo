@@ -1,0 +1,103 @@
+# ARVO discrimination env images: sysintel-user-arvo-{bugId}-{vul|fix}
+#   vul = crash base (fix_commit^) tree, bug present, unpatched
+#   fix = same fix^ tree + commentless oracle patch (patches/{bugId}.patch) applied
+# Both arms derive from the SAME fix^ tree; every metadata leak channel (README §2) is
+# normalized identically: git history pruned to one pinned commit, mtimes at a content-derived
+# epoch, git index stat-cache zeroed. The patch lives only in a discarded build stage.
+#
+# ARVO deviations from Chenxi's kernel Dockerfile (README §5):
+#   * SOURCE PROVENANCE (§5.1): the kernel pipeline COPY --from's the tree out of a per-bug
+#     source image (kenv-base-<bug>-parent-commit). ARVO has no such image at fix^ -- the ARVO
+#     OSS-Fuzz images sit at ARVO's vuln_commit, not our fix^ base, and carry build-artifact
+#     leaks. So the tree enters via the BUILD CONTEXT: build_shard git-checkouts fix^ into
+#     ./context/tree (no .git) and drops ./context/{BUG}.patch, then `docker build ./context`.
+#   * TREE PATH (§5.2): /linux -> ARG TREE (=/src/<project>), parameterized per bug.
+#   * EPOCH ANCHOR (§5.3): `stat -c %Y COPYING` is a kernel-ism. ARVO passes ARG EPOCH =
+#     fix^ committer timestamp (`git show -s --format=%ct <fix^>`): deterministic per bug,
+#     identical across arms, not build-time-derived.
+#   * Base image (§5.4): python:3.13-bookworm + git -- agents only READ the tree (the verdict
+#     task reasons about code; it does not build/run the target).
+ARG BUG
+ARG TREE=/src/project
+ARG EPOCH
+
+FROM python:3.13-bookworm AS base
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
+# One clean, history-free copy of the fix^ (buggy) tree, shared by both prep stages so both
+# arms derive from the SAME tree object -- never from two different sources (README §5.1).
+FROM base AS pristine
+ARG TREE
+COPY tree ${TREE}
+RUN rm -rf ${TREE}/.git && test -n "$(ls -A ${TREE})"   # guard: tree present & non-empty (§5.6)
+
+# --- vul arm prep: normalize the unpatched tree (discarded stage) ---
+FROM pristine AS vul-prep
+ARG TREE
+ARG EPOCH
+RUN set -e; cd ${TREE}; \
+    git init -q && git config user.email a@a && git config user.name a && \
+    git config gc.auto 0 && git add -A && \
+    GIT_AUTHOR_DATE="@$EPOCH" GIT_COMMITTER_DATE="@$EPOCH" git commit -qm base >/dev/null && \
+    rm -f .git/index && git read-tree HEAD && \
+    for i in 1 2 3 4 5; do \
+      find . -print0 | xargs -0 -r -P 16 touch -h -d @$EPOCH; \
+      [ "$(find . -newermt @$((EPOCH+5)) -not -path './.git/*' | wc -l)" = "0" ] && break; \
+      sleep 1; \
+    done && \
+    [ "$(git rev-list --count HEAD)" = "1" ] && \
+    [ "$(find . -newermt @$((EPOCH+5)) -not -path './.git/*' | wc -l)" = "0" ] && \
+    [ -z "$(git status --porcelain)" ]
+
+# --- fix arm prep: apply the commentless oracle patch FIRST, then identical normalization ---
+FROM pristine AS fix-prep
+ARG BUG
+ARG TREE
+ARG EPOCH
+COPY ${BUG}.patch /tmp/f.patch
+RUN set -e; cd ${TREE}; \
+    git apply --check /tmp/f.patch && \
+    git apply /tmp/f.patch && rm /tmp/f.patch && \
+    git init -q && git config user.email a@a && git config user.name a && \
+    git config gc.auto 0 && git add -A && \
+    GIT_AUTHOR_DATE="@$EPOCH" GIT_COMMITTER_DATE="@$EPOCH" git commit -qm base >/dev/null && \
+    rm -f .git/index && git read-tree HEAD && \
+    for i in 1 2 3 4 5; do \
+      find . -print0 | xargs -0 -r -P 16 touch -h -d @$EPOCH; \
+      [ "$(find . -newermt @$((EPOCH+5)) -not -path './.git/*' | wc -l)" = "0" ] && break; \
+      sleep 1; \
+    done && \
+    [ "$(git rev-list --count HEAD)" = "1" ] && \
+    [ "$(find . -newermt @$((EPOCH+5)) -not -path './.git/*' | wc -l)" = "0" ] && \
+    [ -z "$(git status --porcelain)" ] && \
+    ! test -e /tmp/f.patch
+
+# --- final pushed stages: base + ONE tree layer + identical git index warm (README §4.5) ---
+# Nothing after the COPY may touch the tree (§6.6); the warm is tree-content-neutral and must be
+# character-identical in both arms so the images stay indistinguishable in everything but content.
+# Final RUN order matters: warm the index FIRST (writes .git/index at build time), THEN re-anchor
+# EVERY mtime -- tree root, .git, and .git/index included -- to @EPOCH. Without the re-touch, the
+# `COPY --from` stamps the tree-root dir and the warm stamps .git/.git-index with BUILD-TIME mtimes,
+# which differ by the seconds between the two arms' builds -> a stat()-able channel that tells the
+# arms apart (README §2). checkStat=minimal makes git ignore the index file's OWN mtime (it compares
+# the mtimes RECORDED IN the index against the tracked files, all already @EPOCH), so re-touching
+# .git/index does NOT cost the warm -- the first `git diff HEAD` still returns without re-hashing.
+FROM base AS vul-commit
+ARG TREE
+ARG EPOCH
+COPY --from=vul-prep ${TREE} ${TREE}
+RUN cd ${TREE} && git config core.checkStat minimal && git config core.trustctime false \
+    && git update-index -q --refresh && git diff HEAD >/dev/null \
+    && find . -print0 | xargs -0 -r -P 16 touch -h -d @$EPOCH
+WORKDIR ${TREE}
+
+FROM base AS fix-commit
+ARG TREE
+ARG EPOCH
+COPY --from=fix-prep ${TREE} ${TREE}
+RUN cd ${TREE} && git config core.checkStat minimal && git config core.trustctime false \
+    && git update-index -q --refresh && git diff HEAD >/dev/null \
+    && find . -print0 | xargs -0 -r -P 16 touch -h -d @$EPOCH
+WORKDIR ${TREE}

@@ -1,0 +1,36 @@
+diff --git a/src/benchmark.c b/src/benchmark.c
+index bcc12a9..d6b7cba 100644
+--- a/src/benchmark.c
++++ b/src/benchmark.c
+@@ -47,7 +47,7 @@ static void alarm_handler(int signo)
+ #endif
+ 
+ static void
+-value2human(unsigned long bytes, double time, double *data, double *speed,
++value2human(uint64_t bytes, double time, double *data, double *speed,
+ 	    char *metric)
+ {
+ 	if (bytes > 1000 && bytes < 1000 * 1000) {
+diff --git a/src/benchmark.h b/src/benchmark.h
+index a59e088..77ea44e 100644
+--- a/src/benchmark.h
++++ b/src/benchmark.h
+@@ -24,6 +24,9 @@
+ #include <windows.h>
+ #endif
+ 
++
++# include <stdint.h>
++
+ #if defined(HAVE_CLOCK_GETTIME) && defined(CLOCK_PROCESS_CPUTIME_ID)
+ #undef gettime
+ #define gettime(x) clock_gettime(CLOCK_PROCESS_CPUTIME_ID, x)
+@@ -44,7 +47,7 @@ void benchmark_tls(int debug_level, int ciphers);
+ 
+ struct benchmark_st {
+ 	struct timespec start;
+-	unsigned long size;
++	uint64_t size;
+ 	sighandler_t old_handler;
+ #if defined(_WIN32)
+ 	HANDLE wtimer;

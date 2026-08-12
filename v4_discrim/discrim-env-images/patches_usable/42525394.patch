@@ -1,0 +1,442 @@
+diff --git a/.gitlab-ci.yml b/.gitlab-ci.yml
+index b0e5f97..3b87969 100644
+--- a/.gitlab-ci.yml
++++ b/.gitlab-ci.yml
+@@ -85,6 +85,18 @@ build_ubuntu_20_04:
+     - ninja
+     - ctest --output-on-failure
+ 
++build_mingw64_fedora38:
++  stage: build
++  image: fedora:38
++  before_script:
++    - dnf install -y 'dnf-command(builddep)'
++    - dnf builddep -y mingw64-poppler
++    - dnf -y install glibc-langpack-en make ninja-build mingw64-boost mingw64-curl mingw64-qt6-qtbase mingw64-gcc-c++
++  script:
++    - mkdir -p build && cd build
++    - mingw64-cmake -G Ninja ..
++    - ninja
++
+ build_clazy_clang15:
+   stage: build
+   script:
+diff --git a/poppler/GPGMECryptoSignBackend.cc b/poppler/GPGMECryptoSignBackend.cc
+index 8f83a6a..a00eb23 100644
+--- a/poppler/GPGMECryptoSignBackend.cc
++++ b/poppler/GPGMECryptoSignBackend.cc
+@@ -345,7 +345,7 @@ CertificateValidationStatus GpgSignatureVerification::validateCertificate(std::c
+         return CERTIFICATE_GENERIC_ERROR;
+     }
+     const auto offline = gpgContext->offline();
+-    gpgContext->setOffline(!ocspRevocationCheck);
++    gpgContext->setOffline((!ocspRevocationCheck) || useAIACertFetch);
+     const auto key = signature->key(true, true);
+     gpgContext->setOffline(offline);
+     if (key.isExpired()) {
+diff --git a/poppler/Hints.cc b/poppler/Hints.cc
+index 4707e1c..4933639 100644
+--- a/poppler/Hints.cc
++++ b/poppler/Hints.cc
+@@ -491,47 +491,6 @@ Goffset Hints::getPageOffset(int page)
+     }
+ }
+ 
+-std::vector<ByteRange> *Hints::getPageRanges(int page)
+-{
+-    if ((page < 1) || (page > nPages)) {
+-        return nullptr;
+-    }
+-
+-    int idx;
+-    if (page - 1 > pageFirst) {
+-        idx = page - 1;
+-    } else if (page - 1 < pageFirst) {
+-        idx = page;
+-    } else {
+-        idx = 0;
+-    }
+-
+-    ByteRange pageRange;
+-    std::vector<ByteRange> *v = new std::vector<ByteRange>;
+-
+-    pageRange.offset = pageOffset[idx];
+-    pageRange.length = pageLength[idx];
+-    v->push_back(pageRange);
+-
+-    pageRange.offset = xRefOffset[idx];
+-    pageRange.length = 20 * nObjects[idx];
+-    v->push_back(pageRange);
+-
+-    for (unsigned int j = 0; j < numSharedObject[idx]; j++) {
+-        unsigned int k = sharedObjectId[idx][j];
+-
+-        pageRange.offset = groupOffset[k];
+-        pageRange.length = groupLength[k];
+-        v->push_back(pageRange);
+-
+-        pageRange.offset = groupXRefOffset[k];
+-        pageRange.length = 20 * groupNumObjects[k];
+-        v->push_back(pageRange);
+-    }
+-
+-    return v;
+-}
+-
+ int Hints::getPageObjectNum(int page)
+ {
+     if ((page < 1) || (page > nPages)) {
+diff --git a/poppler/Hints.h b/poppler/Hints.h
+index 6adbddc..5104ca0 100644
+--- a/poppler/Hints.h
++++ b/poppler/Hints.h
+@@ -39,7 +39,6 @@ public:
+ 
+     int getPageObjectNum(int page);
+     Goffset getPageOffset(int page);
+-    std::vector<ByteRange> *getPageRanges(int page);
+ 
+ private:
+     void readTables(BaseStream *str, Linearization *linearization, XRef *xref, SecurityHandler *secHdlr);
+diff --git a/poppler/PSOutputDev.cc b/poppler/PSOutputDev.cc
+index 80212e3..7b264f5 100644
+--- a/poppler/PSOutputDev.cc
++++ b/poppler/PSOutputDev.cc
+@@ -972,18 +972,6 @@ struct PSOutImgClipRect
+     int x0, x1, y0, y1;
+ };
+ 
+-//------------------------------------------------------------------------
+-
+-struct PSOutPaperSize
+-{
+-    PSOutPaperSize(std::unique_ptr<GooString> &&nameA, int wA, int hA) : name(std::move(nameA)), w(wA), h(hA) { }
+-    ~PSOutPaperSize() = default;
+-    PSOutPaperSize(const PSOutPaperSize &) = delete;
+-    PSOutPaperSize &operator=(const PSOutPaperSize &) = delete;
+-    std::unique_ptr<GooString> name;
+-    int w, h;
+-};
+-
+ //------------------------------------------------------------------------
+ // DeviceNRecoder
+ //------------------------------------------------------------------------
+@@ -1097,7 +1085,6 @@ PSOutputDev::PSOutputDev(const char *fileName, PDFDoc *docA, char *psTitleA, con
+     font16Enc = nullptr;
+     imgIDs = nullptr;
+     formIDs = nullptr;
+-    paperSizes = nullptr;
+     embFontList = nullptr;
+     customColors = nullptr;
+     haveTextClip = false;
+@@ -1155,7 +1142,6 @@ PSOutputDev::PSOutputDev(int fdA, PDFDoc *docA, char *psTitleA, const std::vecto
+     font16Enc = nullptr;
+     imgIDs = nullptr;
+     formIDs = nullptr;
+-    paperSizes = nullptr;
+     embFontList = nullptr;
+     customColors = nullptr;
+     haveTextClip = false;
+@@ -1194,7 +1180,6 @@ PSOutputDev::PSOutputDev(FoFiOutputFunc outputFuncA, void *outputStreamA, char *
+     font16Enc = nullptr;
+     imgIDs = nullptr;
+     formIDs = nullptr;
+-    paperSizes = nullptr;
+     embFontList = nullptr;
+     customColors = nullptr;
+     haveTextClip = false;
+@@ -1310,7 +1295,6 @@ void PSOutputDev::postInit()
+ {
+     Catalog *catalog;
+     PDFRectangle *box;
+-    PSOutPaperSize *size;
+     int w, h, i;
+ 
+     if (postInitDone || !ok) {
+@@ -1328,7 +1312,7 @@ void PSOutputDev::postInit()
+         paperMatch = false;
+     }
+ 
+-    paperSizes = new std::vector<PSOutPaperSize *>();
++    paperSizes.clear();
+     for (const int pg : pages) {
+         Page *page = catalog->getPage(pg);
+         if (page == nullptr) {
+@@ -1363,28 +1347,28 @@ void PSOutputDev::postInit()
+         if (h > paperHeight) {
+             paperHeight = h;
+         }
+-        for (i = 0; i < (int)paperSizes->size(); ++i) {
+-            size = (*paperSizes)[i];
+-            if (pageDimensionEqual(w, size->w) && pageDimensionEqual(h, size->h)) {
++        for (i = 0; i < (int)paperSizes.size(); ++i) {
++            const PSOutPaperSize &size = paperSizes[i];
++            if (pageDimensionEqual(w, size.w) && pageDimensionEqual(h, size.h)) {
+                 break;
+             }
+         }
+-        if (i == (int)paperSizes->size()) {
++        if (i == (int)paperSizes.size()) {
+             const StandardMedia *media = standardMedia;
+-            std::unique_ptr<GooString> name;
++            std::string name;
+             while (media->name) {
+                 if (pageDimensionEqual(w, media->width) && pageDimensionEqual(h, media->height)) {
+-                    name = std::make_unique<GooString>(media->name);
++                    name = std::string(media->name);
+                     w = media->width;
+                     h = media->height;
+                     break;
+                 }
+                 media++;
+             }
+-            if (!name) {
+-                name = GooString::format("{0:d}x{1:d}mm", int(w * 25.4 / 72), int(h * 25.4 / 72));
++            if (name.empty()) {
++                name = GooString::format("{0:d}x{1:d}mm", int(w * 25.4 / 72), int(h * 25.4 / 72))->toStr();
+             }
+-            paperSizes->push_back(new PSOutPaperSize(std::move(name), w, h));
++            paperSizes.emplace_back(std::move(name), w, h);
+         }
+         pagePaperSize.insert(std::pair<int, int>(pg, i));
+         if (!paperMatch) {
+@@ -1537,12 +1521,6 @@ PSOutputDev::~PSOutputDev()
+         }
+ #endif
+     }
+-    if (paperSizes) {
+-        for (auto entry : *paperSizes) {
+-            delete entry;
+-        }
+-        delete paperSizes;
+-    }
+     if (embFontList) {
+         delete embFontList;
+     }
+@@ -1579,7 +1557,6 @@ PSOutputDev::~PSOutputDev()
+ 
+ void PSOutputDev::writeHeader(int nPages, const PDFRectangle *mediaBox, const PDFRectangle *cropBox, int pageRotate, const char *title)
+ {
+-    PSOutPaperSize *size;
+     double x1, y1, x2, y2;
+ 
+     switch (mode) {
+@@ -1624,17 +1601,16 @@ void PSOutputDev::writeHeader(int nPages, const PDFRectangle *mediaBox, const PD
+ 
+     switch (mode) {
+     case psModePS:
+-        for (std::size_t i = 0; i < paperSizes->size(); ++i) {
+-            size = (*paperSizes)[i];
+-            writePSFmt("%%{0:s} {1:t} {2:d} {3:d} 0 () ()\n", i == 0 ? "DocumentMedia:" : "+", size->name.get(), size->w, size->h);
++        for (std::size_t i = 0; i < paperSizes.size(); ++i) {
++            const PSOutPaperSize &size = paperSizes[i];
++            writePSFmt("%%{0:s} {1:s} {2:d} {3:d} 0 () ()\n", i == 0 ? "DocumentMedia:" : "+", size.name.c_str(), size.w, size.h);
+         }
+         writePSFmt("%%BoundingBox: 0 0 {0:d} {1:d}\n", paperWidth, paperHeight);
+         writePSFmt("%%Pages: {0:d}\n", nPages);
+         writePS("%%EndComments\n");
+         if (!paperMatch) {
+-            size = (*paperSizes)[0];
+             writePS("%%BeginDefaults\n");
+-            writePSFmt("%%PageMedia: {0:t}\n", size->name.get());
++            writePSFmt("%%PageMedia: {0:s}\n", paperSizes[0].name.c_str());
+             writePS("%%EndDefaults\n");
+         }
+         break;
+@@ -3614,7 +3590,6 @@ void PSOutputDev::startPage(int pageNum, GfxState *state, XRef *xrefA)
+     int imgWidth, imgHeight, imgWidth2, imgHeight2;
+     bool landscape;
+     GooString *s;
+-    PSOutPaperSize *paperSize;
+ 
+     if (!postInitDone) {
+         postInit();
+@@ -3766,8 +3741,8 @@ void PSOutputDev::startPage(int pageNum, GfxState *state, XRef *xrefA)
+         ty += (rotate == 0 || rotate == 180) ? imgLLY : -imgLLX;
+ 
+         if (paperMatch) {
+-            paperSize = (*paperSizes)[pagePaperSize[pageNum]];
+-            writePSFmt("%%PageMedia: {0:t}\n", paperSize->name.get());
++            const PSOutPaperSize &paperSize = paperSizes[pagePaperSize[pageNum]];
++            writePSFmt("%%PageMedia: {0:s}\n", paperSize.name.c_str());
+         }
+ 
+         // Create a matrix with the same transform that will be output to PS
+diff --git a/poppler/PSOutputDev.h b/poppler/PSOutputDev.h
+index 1b6257c..cf6f175 100644
+--- a/poppler/PSOutputDev.h
++++ b/poppler/PSOutputDev.h
+@@ -15,7 +15,7 @@
+ //
+ // Copyright (C) 2005 Martin Kretzschmar <martink@gnome.org>
+ // Copyright (C) 2005 Kristian Høgsberg <krh@redhat.com>
+-// Copyright (C) 2006-2008, 2012, 2013, 2015, 2017-2022 Albert Astals Cid <aacid@kde.org>
++
+ // Copyright (C) 2007 Brad Hards <bradh@kde.org>
+ // Copyright (C) 2009-2013 Thomas Freitag <Thomas.Freitag@alfa.de>
+ // Copyright (C) 2009 Till Kamppeter <till.kamppeter@gmail.com>
+@@ -360,6 +360,16 @@ public:
+     }
+ 
+ private:
++    struct PSOutPaperSize
++    {
++        PSOutPaperSize() = default;
++        PSOutPaperSize(std::string &&nameA, int wA, int hA) : name(nameA), w(wA), h(hA) { }
++        ~PSOutPaperSize() = default;
++        PSOutPaperSize &operator=(const PSOutPaperSize &) = delete;
++        std::string name;
++        int w, h;
++    };
++
+     void init(FoFiOutputFunc outputFuncA, void *outputStreamA, PSFileType fileTypeA, char *psTitleA, PDFDoc *doc, const std::vector<int> &pages, PSOutMode modeA, int imgLLXA, int imgLLYA, int imgURXA, int imgURYA, bool manualCtrlA,
+               int paperWidthA, int paperHeightA, bool noCropA, bool duplexA, PSLevel levelA);
+     void postInit();
+@@ -409,7 +419,7 @@ private:
+     void writePSChar(char c);
+     void writePS(const char *s);
+     void writePSBuf(const char *s, int len);
+-    void writePSFmt(const char *fmt, ...);
++    void writePSFmt(const char *fmt, ...) GOOSTRING_FORMAT;
+     void writePSString(const std::string &s);
+     void writePSName(const char *s);
+     GooString *filterPSLabel(GooString *label, bool *needParens = nullptr);
+@@ -470,8 +480,8 @@ private:
+     int numTilingPatterns; // current number of nested tiling patterns
+     int nextFunc; // next unique number to use for a function
+ 
+-    std::vector<PSOutPaperSize *> *paperSizes; // list of used paper sizes, if paperMatch
+-                                               //   is true
++    std::vector<PSOutPaperSize> paperSizes;
++
+     std::map<int, int> pagePaperSize; // page num to paperSize entry mapping
+     double tx0, ty0; // global translation
+     double xScale0, yScale0; // global scaling
+diff --git a/poppler/UTF.cc b/poppler/UTF.cc
+index 8cf8056..94e39f6 100644
+--- a/poppler/UTF.cc
++++ b/poppler/UTF.cc
+@@ -22,6 +22,7 @@
+ // Copyright (C) 2018, 2020 Nelson Benítez León <nbenitezl@gmail.com>
+ // Copyright (C) 2021 Georgiy Sgibnev <georgiy@sgibnev.com>. Work sponsored by lab50.net.
+ // Copyright (C) 2023 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -365,7 +366,7 @@ uint16_t *utf8ToUtf16(const char *utf8, int *len)
+         *len = n;
+     }
+     uint16_t *utf16 = (uint16_t *)gmallocn(n + 1, sizeof(uint16_t));
+-    utf8ToUtf16(utf8, utf16);
++    utf8ToUtf16(utf8, utf16, n + 1, INT_MAX);
+     return utf16;
+ }
+ 
+diff --git a/poppler/UTF.h b/poppler/UTF.h
+index cdcfb57..99914a2 100644
+--- a/poppler/UTF.h
++++ b/poppler/UTF.h
+@@ -11,6 +11,7 @@
+ // Copyright (C) 2019-2022 Albert Astals Cid <aacid@kde.org>
+ // Copyright (C) 2021 Georgiy Sgibnev <georgiy@sgibnev.com>. Work sponsored by lab50.net.
+ // Copyright (C) 2023 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
++
+ //
+ //========================================================================
+ 
+@@ -69,7 +70,7 @@ int POPPLER_PRIVATE_EXPORT utf8CountUtf16CodeUnits(const char *utf8);
+ //  maxUtf8 - maximum number of UTF-8 bytes to convert. Conversion stops when
+ //            either this count is reached or a null is encountered.
+ // Returns number of UTF-16 code units written (excluding NULL).
+-int POPPLER_PRIVATE_EXPORT utf8ToUtf16(const char *utf8, uint16_t *utf16, int maxUtf16 = INT_MAX, int maxUtf8 = INT_MAX);
++int POPPLER_PRIVATE_EXPORT utf8ToUtf16(const char *utf8, uint16_t *utf16, int maxUtf16, int maxUtf8);
+ 
+ // Allocate utf16 string and convert utf8 into it.
+ uint16_t POPPLER_PRIVATE_EXPORT *utf8ToUtf16(const char *utf8, int *len = nullptr);
+diff --git a/qt5/src/poppler-form.h b/qt5/src/poppler-form.h
+index ae572ea..9599a85 100644
+--- a/qt5/src/poppler-form.h
++++ b/qt5/src/poppler-form.h
+@@ -813,6 +813,12 @@ public:
+       Validate the signature with now as validation time.
+ 
+       Reset signature validatation info of scoped instance.
++
++      \note depending on the backend, some options are only
++      partially respected. In case of the NSS backend, the two options
++      requiring network access, AIAFetch and OCSP,
++      can be toggled individually. In case of the GPG backend, if either
++      OCSP is used or AIAFetch is used, the other one is also used.
+      */
+     SignatureValidationInfo validate(ValidateOptions opt) const;
+ 
+@@ -822,6 +828,12 @@ public:
+       Reset signature validatation info of scoped instance.
+ 
+       \since 0.58
++
++      \note depending on the backend, some options are only
++      partially respected. In case of the NSS backend, the two options
++      requiring network access, AIAFetch and OCSP,
++      can be toggled individually. In case of the GPG backend, if either
++      OCSP is used or AIAFetch is used, the other one is also used.
+      */
+     SignatureValidationInfo validate(int opt, const QDateTime &validationTime) const;
+ 
+diff --git a/qt5/tests/check_utf_conversion.cpp b/qt5/tests/check_utf_conversion.cpp
+index 73c684e..506a2a1 100644
+--- a/qt5/tests/check_utf_conversion.cpp
++++ b/qt5/tests/check_utf_conversion.cpp
+@@ -94,7 +94,7 @@ void TestUTFConversion::testUTF()
+     QCOMPARE(len, s.size()); // QString size() returns number of code units, not code points
+     Q_ASSERT(len < (int)sizeof(utf16Buf)); // if this fails, make utf16Buf larger
+ 
+-    len = utf8ToUtf16(str, utf16Buf);
++    len = utf8ToUtf16(str, utf16Buf, sizeof(utf16Buf), INT_MAX);
+     QVERIFY(compare(utf16Buf, s.utf16()));
+     QCOMPARE(len, s.size());
+ 
+diff --git a/qt6/src/poppler-form.h b/qt6/src/poppler-form.h
+index 3de8b72..2915df6 100644
+--- a/qt6/src/poppler-form.h
++++ b/qt6/src/poppler-form.h
+@@ -764,6 +764,12 @@ public:
+       Validate the signature with now as validation time.
+ 
+       Reset signature validatation info of scoped instance.
++
++      \note depending on the backend, some options are only
++      partially respected. In case of the NSS backend, the two options
++      requiring network access, AIAFetch and OCSP,
++      can be toggled individually. In case of the GPG backend, if either
++      OCSP is used or AIAFetch is used, the other one is also used.
+      */
+     SignatureValidationInfo validate(ValidateOptions opt) const;
+ 
+@@ -771,6 +777,12 @@ public:
+       Validate the signature with @p validationTime as validation time.
+ 
+       Reset signature validatation info of scoped instance.
++
++      \note depending on the backend, some options are only
++      partially respected. In case of the NSS backend, the two options
++      requiring network access, AIAFetch and OCSP,
++      can be toggled individually. In case of the GPG backend, if either
++      OCSP is used or AIAFetch is used, the other one is also used.
+      */
+     SignatureValidationInfo validate(int opt, const QDateTime &validationTime) const;
+ 
+diff --git a/qt6/tests/check_utf_conversion.cpp b/qt6/tests/check_utf_conversion.cpp
+index 2cac758..0636672 100644
+--- a/qt6/tests/check_utf_conversion.cpp
++++ b/qt6/tests/check_utf_conversion.cpp
+@@ -92,7 +92,7 @@ void TestUTFConversion::testUTF()
+     QCOMPARE(len, s.size()); // QString size() returns number of code units, not code points
+     Q_ASSERT(len < (int)sizeof(utf16Buf)); // if this fails, make utf16Buf larger
+ 
+-    len = utf8ToUtf16(str, utf16Buf);
++    len = utf8ToUtf16(str, utf16Buf, sizeof(utf16Buf), INT_MAX);
+     QVERIFY(compare(utf16Buf, s.utf16()));
+     QCOMPARE(len, s.size());
+ 

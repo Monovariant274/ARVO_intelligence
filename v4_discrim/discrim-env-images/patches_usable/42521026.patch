@@ -1,0 +1,13 @@
+diff --git a/lib/utf8_mosq.c b/lib/utf8_mosq.c
+index c10c87e..35db876 100644
+--- a/lib/utf8_mosq.c
++++ b/lib/utf8_mosq.c
+@@ -64,7 +64,7 @@ BROKER_EXPORT int mosquitto_validate_utf8(const char *str, int len)
+ 		}
+ 
+ 		/* Reconstruct full code point */
+-		if(i == len-codelen+1){
++		if(i >= len-codelen+1){
+ 			/* Not enough data */
+ 			return MOSQ_ERR_MALFORMED_UTF8;
+ 		}

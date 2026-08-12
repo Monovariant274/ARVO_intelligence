@@ -1,0 +1,1543 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 860e3d0..2b6822e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -770,6 +770,9 @@ if(PKG_CONFIG_EXECUTABLE)
+   if(ENABLE_QT5)
+     poppler_create_install_pkgconfig(poppler-qt5.pc ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+   endif()
++  if(ENABLE_QT6)
++    poppler_create_install_pkgconfig(poppler-qt6.pc ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
++  endif()
+   if(ENABLE_GLIB)
+     poppler_create_install_pkgconfig(poppler-glib.pc ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+   endif()
+diff --git a/glib/demo/selections.c b/glib/demo/selections.c
+index 0a52572..9c878e5 100644
+--- a/glib/demo/selections.c
++++ b/glib/demo/selections.c
+@@ -133,7 +133,10 @@ static void pgd_selections_update_selected_text(PgdSelectionsDemo *demo)
+ 
+     text = poppler_page_get_selected_text(demo->page, demo->style, &demo->doc_area);
+     if (text) {
+-        demo->selected_text = g_utf8_normalize(text, -1, G_NORMALIZE_NFKC);
++
++
++
++        demo->selected_text = g_utf8_normalize(text, -1, G_NORMALIZE_NFC);
+         g_free(text);
+         gtk_widget_set_sensitive(demo->copy_button, TRUE);
+     }
+diff --git a/poppler-qt6.pc.cmake b/poppler-qt6.pc.cmake
+new file mode 100644
+index 0000000..03169a3
+--- /dev/null
++++ b/poppler-qt6.pc.cmake
+@@ -0,0 +1,12 @@
++prefix=@CMAKE_INSTALL_PREFIX@
++libdir=@CMAKE_INSTALL_FULL_LIBDIR@
++includedir=@CMAKE_INSTALL_FULL_INCLUDEDIR@
++
++Name: poppler-qt6
++Description: Qt6 bindings for poppler
++Version: @POPPLER_VERSION@
++Requires: @PC_REQUIRES@
++@PC_REQUIRES_PRIVATE@
++
++Libs: -L${libdir} -lpoppler-qt6
++Cflags: -I${includedir}/poppler/qt6
+diff --git a/poppler/CurlPDFDocBuilder.cc b/poppler/CurlPDFDocBuilder.cc
+index 3a3f6c5..367a5b4 100644
+--- a/poppler/CurlPDFDocBuilder.cc
++++ b/poppler/CurlPDFDocBuilder.cc
+@@ -6,6 +6,7 @@
+ //
+ // Copyright 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010, 2017 Albert Astals Cid <aacid@kde.org>
++
+ //
+ //========================================================================
+ 
+@@ -21,7 +22,7 @@
+ // CurlPDFDocBuilder
+ //------------------------------------------------------------------------
+ 
+-PDFDoc *CurlPDFDocBuilder::buildPDFDoc(const GooString &uri, GooString *ownerPassword, GooString *userPassword, void *guiDataA)
++std::unique_ptr<PDFDoc> CurlPDFDocBuilder::buildPDFDoc(const GooString &uri, GooString *ownerPassword, GooString *userPassword, void *guiDataA)
+ {
+     CachedFile *cachedFile = new CachedFile(new CurlCachedFileLoader(), uri.copy());
+ 
+@@ -32,7 +33,7 @@ PDFDoc *CurlPDFDocBuilder::buildPDFDoc(const GooString &uri, GooString *ownerPas
+ 
+     BaseStream *str = new CachedFileStream(cachedFile, 0, false, cachedFile->getLength(), Object(objNull));
+ 
+-    return new PDFDoc(str, ownerPassword, userPassword, guiDataA);
++    return std::make_unique<PDFDoc>(str, ownerPassword, userPassword, guiDataA);
+ }
+ 
+ bool CurlPDFDocBuilder::supports(const GooString &uri)
+diff --git a/poppler/CurlPDFDocBuilder.h b/poppler/CurlPDFDocBuilder.h
+index 4a81f9f..601f030 100644
+--- a/poppler/CurlPDFDocBuilder.h
++++ b/poppler/CurlPDFDocBuilder.h
+@@ -6,6 +6,7 @@
+ //
+ // Copyright 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010, 2018 Albert Astals Cid <aacid@kde.org>
++
+ //
+ //========================================================================
+ 
+@@ -24,7 +25,7 @@ class CurlPDFDocBuilder : public PDFDocBuilder
+ {
+ 
+ public:
+-    PDFDoc *buildPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr) override;
++    std::unique_ptr<PDFDoc> buildPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr) override;
+     bool supports(const GooString &uri) override;
+ };
+ 
+diff --git a/poppler/GfxState.cc b/poppler/GfxState.cc
+index a67c7ff..05ce3a8 100644
+--- a/poppler/GfxState.cc
++++ b/poppler/GfxState.cc
+@@ -3663,6 +3663,45 @@ GfxFunctionShading *GfxFunctionShading::parse(GfxResources *res, Dict *dict, Out
+     return shading;
+ }
+ 
++bool GfxFunctionShading::init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state)
++{
++    const bool parentInit = GfxShading::init(res, dict, out, state);
++    if (!parentInit) {
++        return false;
++    }
++
++
++
++
++    const int nComps = colorSpace->getNComps();
++    const int nFuncs = funcs.size();
++    if (nFuncs == 1) {
++        if (funcs[0]->getInputSize() != 2) {
++            error(errSyntaxWarning, -1, "GfxFunctionShading: function with input size != 2");
++            return false;
++        }
++        if (funcs[0]->getOutputSize() != nComps) {
++            error(errSyntaxWarning, -1, "GfxFunctionShading: function with wrong output size");
++            return false;
++        }
++    } else if (nFuncs == nComps) {
++        for (const std::unique_ptr<Function> &f : funcs) {
++            if (f->getInputSize() != 2) {
++                error(errSyntaxWarning, -1, "GfxFunctionShading: function with input size != 2");
++                return false;
++            }
++            if (f->getOutputSize() != 1) {
++                error(errSyntaxWarning, -1, "GfxFunctionShading: function with wrong output size");
++                return false;
++            }
++        }
++    } else {
++        return false;
++    }
++
++    return true;
++}
++
+ GfxShading *GfxFunctionShading::copy() const
+ {
+     return new GfxFunctionShading(this);
+@@ -3680,11 +3719,7 @@ void GfxFunctionShading::getColor(double x, double y, GfxColor *color) const
+     in[0] = x;
+     in[1] = y;
+     for (int i = 0; i < getNFuncs(); ++i) {
+-        if (likely(funcs[i]->getInputSize() <= 2)) {
+-            funcs[i]->transform(in, &out[i]);
+-        } else {
+-            error(errSyntaxWarning, -1, "GfxFunctionShading::getColor: function with input size > 2");
+-        }
++        funcs[i]->transform(in, &out[i]);
+     }
+     for (int i = 0; i < gfxColorMaxComps; ++i) {
+         color->c[i] = dblToCol(out[i]);
+@@ -3734,18 +3769,10 @@ GfxUnivariateShading::~GfxUnivariateShading()
+ int GfxUnivariateShading::getColor(double t, GfxColor *color)
+ {
+     double out[gfxColorMaxComps];
+-    int nComps;
+-
+-    if (likely(getNFuncs() >= 1)) {
+-        // NB: there can be one function with n outputs or n functions with
+-        // one output each (where n = number of color components)
+-        nComps = getNFuncs() * funcs[0]->getOutputSize();
+-    }
+ 
+-    if (unlikely(getNFuncs() < 1 || nComps > gfxColorMaxComps)) {
+-        clearGfxColor(color);
+-        return gfxColorMaxComps;
+-    }
++
++
++    const int nComps = getNFuncs() * funcs[0]->getOutputSize();
+ 
+     if (cacheSize > 0) {
+         double x, ix, *l, *u, *upper;
+@@ -3773,10 +3800,6 @@ int GfxUnivariateShading::getColor(double t, GfxColor *color)
+             out[i] = 0;
+         }
+         for (int i = 0; i < getNFuncs(); ++i) {
+-            if (funcs[i]->getInputSize() != 1) {
+-                error(errSyntaxWarning, -1, "Invalid shading function (input != 1)");
+-                break;
+-            }
+             funcs[i]->transform(&t, &out[i]);
+         }
+     }
+@@ -3870,6 +3893,45 @@ void GfxUnivariateShading::setupCache(const Matrix *ctm, double xMin, double yMi
+     lastMatch = 1;
+ }
+ 
++bool GfxUnivariateShading::init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state)
++{
++    const bool parentInit = GfxShading::init(res, dict, out, state);
++    if (!parentInit) {
++        return false;
++    }
++
++
++
++
++    const int nComps = colorSpace->getNComps();
++    const int nFuncs = funcs.size();
++    if (nFuncs == 1) {
++        if (funcs[0]->getInputSize() != 1) {
++            error(errSyntaxWarning, -1, "GfxUnivariateShading: function with input size != 2");
++            return false;
++        }
++        if (funcs[0]->getOutputSize() != nComps) {
++            error(errSyntaxWarning, -1, "GfxUnivariateShading: function with wrong output size");
++            return false;
++        }
++    } else if (nFuncs == nComps) {
++        for (const std::unique_ptr<Function> &f : funcs) {
++            if (f->getInputSize() != 1) {
++                error(errSyntaxWarning, -1, "GfxUnivariateShading: function with input size != 2");
++                return false;
++            }
++            if (f->getOutputSize() != 1) {
++                error(errSyntaxWarning, -1, "GfxUnivariateShading: function with wrong output size");
++                return false;
++            }
++        }
++    } else {
++        return false;
++    }
++
++    return true;
++}
++
+ //------------------------------------------------------------------------
+ // GfxAxialShading
+ //------------------------------------------------------------------------
+@@ -4762,6 +4824,46 @@ GfxGouraudTriangleShading *GfxGouraudTriangleShading::parse(GfxResources *res, i
+     return shading;
+ }
+ 
++bool GfxGouraudTriangleShading::init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state)
++{
++    const bool parentInit = GfxShading::init(res, dict, out, state);
++    if (!parentInit) {
++        return false;
++    }
++
++
++
++
++
++    const int nComps = colorSpace->getNComps();
++    const int nFuncs = funcs.size();
++    if (nFuncs == 1) {
++        if (funcs[0]->getInputSize() != 1) {
++            error(errSyntaxWarning, -1, "GfxGouraudTriangleShading: function with input size != 2");
++            return false;
++        }
++        if (funcs[0]->getOutputSize() != nComps) {
++            error(errSyntaxWarning, -1, "GfxGouraudTriangleShading: function with wrong output size");
++            return false;
++        }
++    } else if (nFuncs == nComps) {
++        for (const std::unique_ptr<Function> &f : funcs) {
++            if (f->getInputSize() != 1) {
++                error(errSyntaxWarning, -1, "GfxGouraudTriangleShading: function with input size != 2");
++                return false;
++            }
++            if (f->getOutputSize() != 1) {
++                error(errSyntaxWarning, -1, "GfxGouraudTriangleShading: function with wrong output size");
++                return false;
++            }
++        }
++    } else if (nFuncs != 0) {
++        return false;
++    }
++
++    return true;
++}
++
+ GfxShading *GfxGouraudTriangleShading::copy() const
+ {
+     return new GfxGouraudTriangleShading(this);
+@@ -4948,15 +5050,6 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(GfxResources *res, int typeA, Di
+         }
+     }
+ 
+-    for (unsigned int k = 0; k < funcsA.size(); ++k) {
+-        if (funcsA[k]->getInputSize() > 1) {
+-            return nullptr;
+-        }
+-        if (funcsA[k]->getOutputSize() > static_cast<int>(gfxColorMaxComps - k)) {
+-            return nullptr;
+-        }
+-    }
+-
+     nPatchesA = 0;
+     patchesA = nullptr;
+     patchesSize = 0;
+@@ -5378,6 +5471,46 @@ GfxPatchMeshShading *GfxPatchMeshShading::parse(GfxResources *res, int typeA, Di
+     return shading;
+ }
+ 
++bool GfxPatchMeshShading::init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state)
++{
++    const bool parentInit = GfxShading::init(res, dict, out, state);
++    if (!parentInit) {
++        return false;
++    }
++
++
++
++
++
++    const int nComps = colorSpace->getNComps();
++    const int nFuncs = funcs.size();
++    if (nFuncs == 1) {
++        if (funcs[0]->getInputSize() != 1) {
++            error(errSyntaxWarning, -1, "GfxPatchMeshShading: function with input size != 2");
++            return false;
++        }
++        if (funcs[0]->getOutputSize() != nComps) {
++            error(errSyntaxWarning, -1, "GfxPatchMeshShading: function with wrong output size");
++            return false;
++        }
++    } else if (nFuncs == nComps) {
++        for (const std::unique_ptr<Function> &f : funcs) {
++            if (f->getInputSize() != 1) {
++                error(errSyntaxWarning, -1, "GfxPatchMeshShading: function with input size != 2");
++                return false;
++            }
++            if (f->getOutputSize() != 1) {
++                error(errSyntaxWarning, -1, "GfxPatchMeshShading: function with wrong output size");
++                return false;
++            }
++        }
++    } else if (nFuncs != 0) {
++        return false;
++    }
++
++    return true;
++}
++
+ void GfxPatchMeshShading::getParameterizedColor(double t, GfxColor *color) const
+ {
+     double out[gfxColorMaxComps] = {};
+diff --git a/poppler/GfxState.h b/poppler/GfxState.h
+index 10953b0..aec5c6c 100644
+--- a/poppler/GfxState.h
++++ b/poppler/GfxState.h
+@@ -17,7 +17,7 @@
+ // Copyright (C) 2006, 2007 Jeff Muizelaar <jeff@infidigm.net>
+ // Copyright (C) 2006 Carlos Garcia Campos <carlosgc@gnome.org>
+ // Copyright (C) 2009 Koji Otani <sho@bbr.jp>
+-// Copyright (C) 2009-2011, 2013, 2016-2020 Albert Astals Cid <aacid@kde.org>
++
+ // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
+ // Copyright (C) 2011 Andrea Canciani <ranma42@gmail.com>
+ // Copyright (C) 2011-2014, 2016, 2020 Thomas Freitag <Thomas.Freitag@alfa.de>
+@@ -878,7 +878,7 @@ public:
+     bool getHasBBox() const { return hasBBox; }
+ 
+ protected:
+-    bool init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state);
++    virtual bool init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state);
+ 
+     // 1: Function-based shading
+     // 2: Axial shading
+@@ -922,6 +922,9 @@ public:
+ 
+     virtual double getDistance(double sMin, double sMax) const = 0;
+ 
++protected:
++    bool init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state) override;
++
+ private:
+     double t0, t1;
+     std::vector<std::unique_ptr<Function>> funcs;
+@@ -960,6 +963,9 @@ public:
+     const Function *getFunc(int i) const { return funcs[i].get(); }
+     void getColor(double x, double y, GfxColor *color) const;
+ 
++protected:
++    bool init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state) override;
++
+ private:
+     double x0, y0, x1, y1;
+     double matrix[6];
+@@ -1087,6 +1093,9 @@ public:
+ 
+     void getParameterizedColor(double t, GfxColor *color) const;
+ 
++protected:
++    bool init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state) override;
++
+ private:
+     GfxGouraudVertex *vertices;
+     int nVertices;
+@@ -1165,6 +1174,9 @@ public:
+ 
+     void getParameterizedColor(double t, GfxColor *color) const;
+ 
++protected:
++    bool init(GfxResources *res, Dict *dict, OutputDev *out, GfxState *state) override;
++
+ private:
+     GfxPatch *patches;
+     int nPatches;
+diff --git a/poppler/LocalPDFDocBuilder.cc b/poppler/LocalPDFDocBuilder.cc
+index b76a83c..9aab08e 100644
+--- a/poppler/LocalPDFDocBuilder.cc
++++ b/poppler/LocalPDFDocBuilder.cc
+@@ -6,6 +6,7 @@
+ //
+ // Copyright 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010 Albert Astals Cid <aacid@kde.org>
++
+ //
+ //========================================================================
+ 
+@@ -17,15 +18,15 @@
+ // LocalPDFDocBuilder
+ //------------------------------------------------------------------------
+ 
+-PDFDoc *LocalPDFDocBuilder::buildPDFDoc(const GooString &uri, GooString *ownerPassword, GooString *userPassword, void *guiDataA)
++std::unique_ptr<PDFDoc> LocalPDFDocBuilder::buildPDFDoc(const GooString &uri, GooString *ownerPassword, GooString *userPassword, void *guiDataA)
+ {
+     if (uri.cmpN("file://", 7) == 0) {
+         GooString *fileName = uri.copy();
+         fileName->del(0, 7);
+-        return new PDFDoc(fileName, ownerPassword, userPassword, guiDataA);
++        return std::make_unique<PDFDoc>(fileName, ownerPassword, userPassword, guiDataA);
+     } else {
+         GooString *fileName = uri.copy();
+-        return new PDFDoc(fileName, ownerPassword, userPassword, guiDataA);
++        return std::make_unique<PDFDoc>(fileName, ownerPassword, userPassword, guiDataA);
+     }
+ }
+ 
+diff --git a/poppler/LocalPDFDocBuilder.h b/poppler/LocalPDFDocBuilder.h
+index ec3f664..f82bdf6 100644
+--- a/poppler/LocalPDFDocBuilder.h
++++ b/poppler/LocalPDFDocBuilder.h
+@@ -6,6 +6,7 @@
+ //
+ // Copyright 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010, 2018 Albert Astals Cid <aacid@kde.org>
++
+ //
+ //========================================================================
+ 
+@@ -24,7 +25,7 @@ class LocalPDFDocBuilder : public PDFDocBuilder
+ {
+ 
+ public:
+-    PDFDoc *buildPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr) override;
++    std::unique_ptr<PDFDoc> buildPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr) override;
+     bool supports(const GooString &uri) override;
+ };
+ 
+diff --git a/poppler/PDFDoc.cc b/poppler/PDFDoc.cc
+index 6f7b805..ca440ca 100644
+--- a/poppler/PDFDoc.cc
++++ b/poppler/PDFDoc.cc
+@@ -46,6 +46,7 @@
+ // Copyright (C) 2020 Nelson Benítez León <nbenitezl@gmail.com>
+ // Copyright (C) 2020 Thorsten Behrens <Thorsten.Behrens@CIB.de>
+ // Copyright (C) 2020 Adam Sampson <ats@offog.org>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -1937,13 +1938,14 @@ Outline *PDFDoc::getOutline()
+     return outline;
+ }
+ 
+-PDFDoc *PDFDoc::ErrorPDFDoc(int errorCode, const GooString *fileNameA)
++std::unique_ptr<PDFDoc> PDFDoc::ErrorPDFDoc(int errorCode, const GooString *fileNameA)
+ {
++
+     PDFDoc *doc = new PDFDoc();
+     doc->errCode = errorCode;
+     doc->fileName = fileNameA;
+ 
+-    return doc;
++    return std::unique_ptr<PDFDoc>(doc);
+ }
+ 
+ long long PDFDoc::strToLongLong(const char *s)
+diff --git a/poppler/PDFDoc.h b/poppler/PDFDoc.h
+index 0faef01..5ab1fb2 100644
+--- a/poppler/PDFDoc.h
++++ b/poppler/PDFDoc.h
+@@ -32,7 +32,7 @@
+ // Copyright (C) 2016 Jakub Alba <jakubalba@gmail.com>
+ // Copyright (C) 2018 Klarälvdalens Datakonsult AB, a KDAB Group company, <info@kdab.com>. Work sponsored by the LiMux project of the city of Munich
+ // Copyright (C) 2018 Evangelos Rigas <erigas@rnd2.org>
+-// Copyright (C) 2020 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2020 Nelson Benítez León <nbenitezl@gmail.com>
+ //
+ // To see a description of the changes please see the Changelog file that
+@@ -132,7 +132,7 @@ public:
+     PDFDoc(const PDFDoc &) = delete;
+     PDFDoc &operator=(const PDFDoc &) = delete;
+ 
+-    static PDFDoc *ErrorPDFDoc(int errorCode, const GooString *fileNameA = nullptr);
++    static std::unique_ptr<PDFDoc> ErrorPDFDoc(int errorCode, const GooString *fileNameA = nullptr);
+ 
+     // Was PDF document successfully opened?
+     bool isOk() const { return ok; }
+diff --git a/poppler/PDFDocBuilder.h b/poppler/PDFDocBuilder.h
+index a0c19fc..a9231f0 100644
+--- a/poppler/PDFDocBuilder.h
++++ b/poppler/PDFDocBuilder.h
+@@ -6,12 +6,15 @@
+ //
+ // Copyright 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010, 2018, 2020 Albert Astals Cid <aacid@kde.org>
++
+ //
+ //========================================================================
+ 
+ #ifndef PDFDOCBUILDER_H
+ #define PDFDOCBUILDER_H
+ 
++#include <memory>
++
+ #include "PDFDoc.h"
+ class GooString;
+ 
+@@ -35,7 +38,7 @@ public:
+     // Builds a new PDFDoc. Returns a PDFDoc. You should check this PDFDoc
+     // with PDFDoc::isOk() for failures.
+     // The caller is responsible for deleting ownerPassword, userPassWord and guiData.
+-    virtual PDFDoc *buildPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr) = 0;
++    virtual std::unique_ptr<PDFDoc> buildPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr) = 0;
+ 
+     // Returns true if the builder supports building a PDFDoc from the URI.
+     virtual bool supports(const GooString &uri) = 0;
+diff --git a/poppler/PDFDocFactory.cc b/poppler/PDFDocFactory.cc
+index 51440c9..e479707 100644
+--- a/poppler/PDFDocFactory.cc
++++ b/poppler/PDFDocFactory.cc
+@@ -8,7 +8,7 @@
+ // Copyright 2010 Albert Astals Cid <aacid@kde.org>
+ // Copyright 2017 Adrian Johnson <ajohnson@redneon.com>
+ // Copyright 2018 Adam Reichold <adam.reichold@t-online.de>
+-// Copyright 2019 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ //
+ //========================================================================
+ 
+@@ -53,7 +53,7 @@ PDFDocFactory::~PDFDocFactory()
+     }
+ }
+ 
+-PDFDoc *PDFDocFactory::createPDFDoc(const GooString &uri, GooString *ownerPassword, GooString *userPassword, void *guiDataA)
++std::unique_ptr<PDFDoc> PDFDocFactory::createPDFDoc(const GooString &uri, GooString *ownerPassword, GooString *userPassword, void *guiDataA)
+ {
+     for (int i = builders->size() - 1; i >= 0; i--) {
+         PDFDocBuilder *builder = (*builders)[i];
+diff --git a/poppler/PDFDocFactory.h b/poppler/PDFDocFactory.h
+index 3dd9239..92a66d7 100644
+--- a/poppler/PDFDocFactory.h
++++ b/poppler/PDFDocFactory.h
+@@ -6,13 +6,15 @@
+ //
+ // Copyright 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010, 2018 Albert Astals Cid <aacid@kde.org>
+-// Copyright 2019 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ //
+ //========================================================================
+ 
+ #ifndef PDFDOCFACTORY_H
+ #define PDFDOCFACTORY_H
+ 
++#include <memory>
++
+ #include "PDFDoc.h"
+ 
+ class GooString;
+@@ -43,7 +45,7 @@ public:
+     // Create a PDFDoc. Returns a PDFDoc. You should check this PDFDoc
+     // with PDFDoc::isOk() for failures.
+     // The caller is responsible for deleting ownerPassword, userPassWord and guiData.
+-    PDFDoc *createPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr);
++    std::unique_ptr<PDFDoc> createPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr);
+ 
+     // Extend supported URIs with the ones from the PDFDocBuilder.
+     void registerPDFDocBuilder(PDFDocBuilder *pdfDocBuilder);
+diff --git a/poppler/StdinPDFDocBuilder.cc b/poppler/StdinPDFDocBuilder.cc
+index 9d7142b..b84420b 100644
+--- a/poppler/StdinPDFDocBuilder.cc
++++ b/poppler/StdinPDFDocBuilder.cc
+@@ -6,6 +6,7 @@
+ //
+ // Copyright 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010, 2017 Albert Astals Cid <aacid@kde.org>
++
+ //
+ //========================================================================
+ 
+@@ -19,10 +20,10 @@
+ // StdinPDFDocBuilder
+ //------------------------------------------------------------------------
+ 
+-PDFDoc *StdinPDFDocBuilder::buildPDFDoc(const GooString &uri, GooString *ownerPassword, GooString *userPassword, void *guiDataA)
++std::unique_ptr<PDFDoc> StdinPDFDocBuilder::buildPDFDoc(const GooString &uri, GooString *ownerPassword, GooString *userPassword, void *guiDataA)
+ {
+     CachedFile *cachedFile = new CachedFile(new StdinCacheLoader(), nullptr);
+-    return new PDFDoc(new CachedFileStream(cachedFile, 0, false, cachedFile->getLength(), Object(objNull)), ownerPassword, userPassword);
++    return std::make_unique<PDFDoc>(new CachedFileStream(cachedFile, 0, false, cachedFile->getLength(), Object(objNull)), ownerPassword, userPassword);
+ }
+ 
+ bool StdinPDFDocBuilder::supports(const GooString &uri)
+diff --git a/poppler/StdinPDFDocBuilder.h b/poppler/StdinPDFDocBuilder.h
+index 33fbcf0..a4bbf8e 100644
+--- a/poppler/StdinPDFDocBuilder.h
++++ b/poppler/StdinPDFDocBuilder.h
+@@ -6,6 +6,7 @@
+ //
+ // Copyright 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010, 2018 Albert Astals Cid <aacid@kde.org>
++
+ //
+ //========================================================================
+ 
+@@ -24,7 +25,7 @@ class StdinPDFDocBuilder : public PDFDocBuilder
+ {
+ 
+ public:
+-    PDFDoc *buildPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr) override;
++    std::unique_ptr<PDFDoc> buildPDFDoc(const GooString &uri, GooString *ownerPassword = nullptr, GooString *userPassword = nullptr, void *guiDataA = nullptr) override;
+     bool supports(const GooString &uri) override;
+ };
+ 
+diff --git a/utils/pdfdetach.cc b/utils/pdfdetach.cc
+index 78846ea..f5576b3 100644
+--- a/utils/pdfdetach.cc
++++ b/utils/pdfdetach.cc
+@@ -18,7 +18,7 @@
+ // Copyright (C) 2014, 2017 Adrian Johnson <ajohnson@redneon.com>
+ // Copyright (C) 2018, 2020 Albert Astals Cid <aacid@kde.org>
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+-// Copyright (C) 2019 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2020 <r.coeffier@bee-buzziness.com>
+ //
+ // To see a description of the changes please see the Changelog file that
+@@ -72,10 +72,10 @@ static const ArgDesc argDesc[] = { { "-list", argFlag, &doList, 0, "list all emb
+ 
+ int main(int argc, char *argv[])
+ {
++    std::unique_ptr<PDFDoc> doc;
+     GooString *fileName;
+     const UnicodeMap *uMap;
+     GooString *ownerPW, *userPW;
+-    PDFDoc *doc;
+     char uBuf[8];
+     char path[1024];
+     char *p;
+@@ -329,7 +329,6 @@ int main(int argc, char *argv[])
+ err2:
+     for (auto &file : embeddedFiles)
+         delete file;
+-    delete doc;
+ err0:
+ 
+     return exitCode;
+diff --git a/utils/pdfimages.cc b/utils/pdfimages.cc
+index 46cebf9..2a524fa 100644
+--- a/utils/pdfimages.cc
++++ b/utils/pdfimages.cc
+@@ -21,7 +21,7 @@
+ // Copyright (C) 2012, 2013, 2017 Adrian Johnson <ajohnson@redneon.com>
+ // Copyright (C) 2013 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+-// Copyright (C) 2019 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2019 Hartmut Goebel <h.goebel@crazy-compilers.com>
+ //
+ // To see a description of the changes please see the Changelog file that
+@@ -96,16 +96,13 @@ static const ArgDesc argDesc[] = { { "-f", argInt, &firstPage, 0, "first page to
+ 
+ int main(int argc, char *argv[])
+ {
+-    PDFDoc *doc;
+     GooString *fileName;
+     char *imgRoot = nullptr;
+     GooString *ownerPW, *userPW;
+     ImageOutputDev *imgOut;
+     bool ok;
+-    int exitCode;
+ 
+     Win32Console win32Console(&argc, &argv);
+-    exitCode = 99;
+ 
+     // parse args
+     ok = parseArgs(argDesc, &argc, argv);
+@@ -117,8 +114,8 @@ int main(int argc, char *argv[])
+             printUsage("pdfimages", "<PDF-file> <image-root>", argDesc);
+         }
+         if (printVersion || printHelp)
+-            exitCode = 0;
+-        goto err0;
++            return 0;
++        return 99;
+     }
+     fileName = new GooString(argv[1]);
+     if (!listImages)
+@@ -146,7 +143,7 @@ int main(int argc, char *argv[])
+         fileName = new GooString("fd://0");
+     }
+ 
+-    doc = PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW);
++    std::unique_ptr<PDFDoc> doc = PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW);
+     delete fileName;
+ 
+     if (userPW) {
+@@ -156,16 +153,14 @@ int main(int argc, char *argv[])
+         delete ownerPW;
+     }
+     if (!doc->isOk()) {
+-        exitCode = 1;
+-        goto err1;
++        return 1;
+     }
+ 
+     // check for copy permission
+ #ifdef ENFORCE_PERMISSIONS
+     if (!doc->okToCopy()) {
+         error(errNotAllowed, -1, "Copying of images from this document is not allowed.");
+-        exitCode = 3;
+-        goto err1;
++        return 3;
+     }
+ #endif
+ 
+@@ -174,13 +169,13 @@ int main(int argc, char *argv[])
+         firstPage = 1;
+     if (firstPage > doc->getNumPages()) {
+         error(errCommandLine, -1, "Wrong page range given: the first page ({0:d}) can not be larger then the number of pages in the document ({1:d}).", firstPage, doc->getNumPages());
+-        goto err1;
++        return 99;
+     }
+     if (lastPage < 1 || lastPage > doc->getNumPages())
+         lastPage = doc->getNumPages();
+     if (lastPage < firstPage) {
+         error(errCommandLine, -1, "Wrong page range given: the first page ({0:d}) can not be after the last page ({1:d}).", firstPage, lastPage);
+-        goto err1;
++        return 99;
+     }
+ 
+     // write image files
+@@ -205,12 +200,5 @@ int main(int argc, char *argv[])
+     }
+     delete imgOut;
+ 
+-    exitCode = 0;
+-
+-    // clean up
+-err1:
+-    delete doc;
+-err0:
+-
+-    return exitCode;
++    return 0;
+ }
+diff --git a/utils/pdfinfo.cc b/utils/pdfinfo.cc
+index 6180dbe..cdc88d3 100644
+--- a/utils/pdfinfo.cc
++++ b/utils/pdfinfo.cc
+@@ -26,7 +26,7 @@
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+ // Copyright (C) 2018 Evangelos Rigas <erigas@rnd2.org>
+ // Copyright (C) 2019 Christian Persch <chpe@src.gnome.org>
+-// Copyright (C) 2019, 2020 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2019 Thomas Fischer <fischer@unix-ag.uni-kl.de>
+ //
+ // To see a description of the changes please see the Changelog file that
+@@ -807,7 +807,7 @@ static void printInfo(PDFDoc *doc, const UnicodeMap *uMap, long long filesize, b
+ 
+ int main(int argc, char *argv[])
+ {
+-    PDFDoc *doc;
++    std::unique_ptr<PDFDoc> doc;
+     GooString *fileName;
+     GooString *ownerPW, *userPW;
+     const UnicodeMap *uMap;
+@@ -915,7 +915,7 @@ int main(int argc, char *argv[])
+         }
+     } else if (printJS) {
+         // print javascript
+-        JSInfo jsInfo(doc, firstPage - 1);
++        JSInfo jsInfo(doc.get(), firstPage - 1);
+         jsInfo.scanJS(lastPage - firstPage + 1, stdout, uMap);
+     } else if (printStructure || printStructureText) {
+         // print structure
+@@ -926,7 +926,7 @@ int main(int argc, char *argv[])
+             }
+         }
+     } else if (printDests) {
+-        printDestinations(doc, uMap);
++        printDestinations(doc.get(), uMap);
+     } else {
+         // print info
+         long long filesize = 0;
+@@ -941,13 +941,12 @@ int main(int argc, char *argv[])
+         if (multiPage == false)
+             lastPage = 1;
+ 
+-        printInfo(doc, uMap, filesize, multiPage);
++        printInfo(doc.get(), uMap, filesize, multiPage);
+     }
+     exitCode = 0;
+ 
+     // clean up
+ err2:
+-    delete doc;
+     delete fileName;
+ err1:
+ err0:
+diff --git a/utils/pdfseparate.cc b/utils/pdfseparate.cc
+index 7fc5d02..afe29ce 100644
+--- a/utils/pdfseparate.cc
++++ b/utils/pdfseparate.cc
+@@ -5,7 +5,7 @@
+ // This file is licensed under the GPLv2 or later
+ //
+ // Copyright (C) 2011, 2012, 2015 Thomas Freitag <Thomas.Freitag@alfa.de>
+-// Copyright (C) 2012-2014, 2017, 2018 Albert Astals Cid <aacid@kde.org>
++
+ // Copyright (C) 2013, 2016 Pino Toscano <pino@kde.org>
+ // Copyright (C) 2013 Daniel Kahn Gillmor <dkg@fifthhorseman.net>
+ // Copyright (C) 2013 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+@@ -134,34 +134,27 @@ static bool extractPages(const char *srcFileName, const char *destFileName)
+     return true;
+ }
+ 
++static constexpr int kOtherError = 99;
++
+ int main(int argc, char *argv[])
+ {
+-    bool ok;
+-    int exitCode;
+-
+-    exitCode = 99;
+-
+     // parse args
+     Win32Console win32console(&argc, &argv);
+-    ok = parseArgs(argDesc, &argc, argv);
+-    if (!ok || argc != 3 || printVersion || printHelp) {
++    const bool parseOK = parseArgs(argDesc, &argc, argv);
++    if (!parseOK || argc != 3 || printVersion || printHelp) {
+         fprintf(stderr, "pdfseparate version %s\n", PACKAGE_VERSION);
+         fprintf(stderr, "%s\n", popplerCopyright);
+         fprintf(stderr, "%s\n", xpdfCopyright);
+         if (!printVersion) {
+             printUsage("pdfseparate", "<PDF-sourcefile> <PDF-pattern-destfile>", argDesc);
+         }
+-        if (printVersion || printHelp)
+-            exitCode = 0;
+-        goto err0;
++        if (printVersion || printHelp) {
++            return 0;
++        } else {
++            return kOtherError;
++        }
+     }
+     globalParams = std::make_unique<GlobalParams>();
+-    ok = extractPages(argv[1], argv[2]);
+-    if (ok) {
+-        exitCode = 0;
+-    }
+-
+-err0:
+-
+-    return exitCode;
++    const bool extractOK = extractPages(argv[1], argv[2]);
++    return extractOK ? 0 : kOtherError;
+ }
+diff --git a/utils/pdftocairo.cc b/utils/pdftocairo.cc
+index 1a0785d..8cdb13d 100644
+--- a/utils/pdftocairo.cc
++++ b/utils/pdftocairo.cc
+@@ -34,7 +34,7 @@
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+ // Copyright (C) 2019, 2020 Oliver Sander <oliver.sander@tu-dresden.de>
+ // Copyright (C) 2019 Kris Jurka <jurka@ejurka.com>
+-// Copyright (C) 2020 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2020 Philipp Knechtges <philipp-dev@knechtges.com>
+ // Copyright (C) 2020 Salvo Miosi <salvo.ilmiosi@gmail.com>
+ //
+@@ -855,7 +855,6 @@ static void checkInvalidImageOption(bool option, const char *option_name)
+ 
+ int main(int argc, char *argv[])
+ {
+-    PDFDoc *doc;
+     GooString *fileName = nullptr;
+     GooString *outputName = nullptr;
+     GooString *outputFileName = nullptr;
+@@ -1061,7 +1060,7 @@ int main(int argc, char *argv[])
+     }
+ #endif
+ 
+-    doc = PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW);
++    std::unique_ptr<PDFDoc> doc = PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW);
+     if (!doc->isOk()) {
+         fprintf(stderr, "Error opening PDF file.\n");
+         exit(1);
+@@ -1126,7 +1125,7 @@ int main(int argc, char *argv[])
+ #ifdef USE_CMS
+     cairoOut->setDisplayProfile(profile);
+ #endif
+-    cairoOut->startDoc(doc);
++    cairoOut->startDoc(doc.get());
+     if (sz != 0)
+         crop_w = crop_h = sz;
+     pg_num_len = numberOfCharacters(doc->getNumPages());
+@@ -1181,14 +1180,13 @@ int main(int argc, char *argv[])
+         if (pg == firstPage)
+             beginDocument(fileName, outputFileName, output_w, output_h);
+         beginPage(&output_w, &output_h);
+-        renderPage(doc, cairoOut, pg, pg_w, pg_h, output_w, output_h);
++        renderPage(doc.get(), cairoOut, pg, pg_w, pg_h, output_w, output_h);
+         endPage(imageFileName);
+     }
+     endDocument();
+ 
+     // clean up
+     delete cairoOut;
+-    delete doc;
+     if (fileName)
+         delete fileName;
+     if (outputName)
+diff --git a/utils/pdftohtml.cc b/utils/pdftohtml.cc
+index 23e8cef..483b211 100644
+--- a/utils/pdftohtml.cc
++++ b/utils/pdftohtml.cc
+@@ -28,7 +28,7 @@
+ // Copyright (C) 2018 Klarälvdalens Datakonsult AB, a KDAB Group company, <info@kdab.com>. Work sponsored by the LiMux project of the city of Munich
+ // Copyright (C) 2018 Thibaut Brard <thibaut.brard@gmail.com>
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+-// Copyright (C) 2019 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -160,7 +160,7 @@ SplashOutputDevNoText::~SplashOutputDevNoText() = default;
+ 
+ int main(int argc, char *argv[])
+ {
+-    PDFDoc *doc = nullptr;
++    std::unique_ptr<PDFDoc> doc;
+     GooString *fileName = nullptr;
+     GooString *docTitle = nullptr;
+     GooString *author = nullptr, *keywords = nullptr, *subject = nullptr, *date = nullptr;
+@@ -362,7 +362,7 @@ int main(int argc, char *argv[])
+         SplashImageFileFormat format = strcmp(extension, "jpg") ? splashFormatPng : splashFormatJpeg;
+ 
+         splashOut = new SplashOutputDevNoText(splashModeRGB8, 4, false, color);
+-        splashOut->startDoc(doc);
++        splashOut->startDoc(doc.get());
+ 
+         for (int pg = firstPage; pg <= lastPage; ++pg) {
+             InMemoryFile imf;
+@@ -392,14 +392,13 @@ int main(int argc, char *argv[])
+         delete htmlOut;
+         delete htmlFileName;
+         delete fileName;
+-        delete doc;
+         return -1;
+ #endif
+     }
+ 
+     if (htmlOut->isOk()) {
+         doc->displayPages(htmlOut, firstPage, lastPage, 72 * scale, 72 * scale, 0, true, false, false);
+-        htmlOut->dumpDocOutline(doc);
++        htmlOut->dumpDocOutline(doc.get());
+     }
+ 
+     delete htmlOut;
+@@ -408,8 +407,6 @@ int main(int argc, char *argv[])
+ 
+     // clean up
+ error:
+-    if (doc)
+-        delete doc;
+     delete fileName;
+ 
+     if (htmlFileName)
+diff --git a/utils/pdftoppm.1 b/utils/pdftoppm.1
+index 2cd52b1..ddbe4d7 100644
+--- a/utils/pdftoppm.1
++++ b/utils/pdftoppm.1
+@@ -159,6 +159,12 @@ Specify the user password for the PDF file.
+ .B \-q
+ Don't print any messages or errors.
+ .TP
++.B \-progress
++Print progress info as each page is generated.  Three space-separated
++fields are printed to STDERR: the number of the current page, the number
++of the last page that will be generated, and the path to the file
++written to.
++.TP
+ .BI \-sep " char"
+ Specify single character separator between name and page number, default - .
+ .TP
+diff --git a/utils/pdftoppm.cc b/utils/pdftoppm.cc
+index 5d7c538..97fdbea 100644
+--- a/utils/pdftoppm.cc
++++ b/utils/pdftoppm.cc
+@@ -18,7 +18,7 @@
+ // Copyright (C) 2009 Michael K. Johnson <a1237@danlj.org>
+ // Copyright (C) 2009 Shen Liang <shenzhuxi@gmail.com>
+ // Copyright (C) 2009 Stefan Thomas <thomas@eload24.com>
+-// Copyright (C) 2009-2011, 2015, 2018-2020 Albert Astals Cid <aacid@kde.org>
++
+ // Copyright (C) 2010, 2012, 2017 Adrian Johnson <ajohnson@redneon.com>
+ // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright (C) 2010 Jonathan Liu <net147@gmail.com>
+@@ -29,12 +29,13 @@
+ // Copyright (C) 2015 William Bader <williambader@hotmail.com>
+ // Copyright (C) 2018 Martin Packman <gzlist@googlemail.com>
+ // Copyright (C) 2019 Yves-Gaël Chény <gitlab@r0b0t.fr>
+-// Copyright (C) 2019, 2020 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2019 <corentinf@free.fr>
+ // Copyright (C) 2019 Kris Jurka <jurka@ejurka.com>
+ // Copyright (C) 2019 Sébastien Berthier <s.berthier@bee-buzziness.com>
+ // Copyright (C) 2020 Stéfan van der Walt <sjvdwalt@gmail.com>
+ // Copyright (C) 2020 Philipp Knechtges <philipp-dev@knechtges.com>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -137,6 +138,7 @@ static SplashThinLineMode thinLineMode = splashThinLineDefault;
+ static int numberOfJobs = 1;
+ #endif // UTILS_USE_PTHREADS
+ static bool quiet = false;
++static bool progress = false;
+ static bool printVersion = false;
+ static bool printHelp = false;
+ 
+@@ -199,6 +201,7 @@ static const ArgDesc argDesc[] = { { "-f", argInt, &firstPage, 0, "first page to
+ #endif // UTILS_USE_PTHREADS
+ 
+                                    { "-q", argFlag, &quiet, 0, "don't print any messages or errors" },
++                                   { "-progress", argFlag, &progress, 0, "print progress info" },
+                                    { "-v", argFlag, &printVersion, 0, "print copyright and version info" },
+                                    { "-h", argFlag, &printHelp, 0, "print usage information" },
+                                    { "-help", argFlag, &printHelp, 0, "print usage information" },
+@@ -206,6 +209,8 @@ static const ArgDesc argDesc[] = { { "-f", argInt, &firstPage, 0, "first page to
+                                    { "-?", argFlag, &printHelp, 0, "print usage information" },
+                                    {} };
+ 
++static constexpr int kOtherError = 99;
++
+ static bool needToRotate(int angle)
+ {
+     return (angle == 90) || (angle == 270);
+@@ -323,6 +328,10 @@ static void savePageSlice(PDFDoc *doc, SplashOutputDev *splashOut, int pg, int x
+             bitmap->writePNMFile(stdout);
+         }
+     }
++
++    if (progress) {
++        fprintf(stderr, "%d %d %s\n", pg, lastPage, ppmFile != nullptr ? ppmFile : "");
++    }
+ }
+ 
+ #ifdef UTILS_USE_PTHREADS
+@@ -381,7 +390,6 @@ static void processPageJobs()
+ 
+ int main(int argc, char *argv[])
+ {
+-    PDFDoc *doc;
+     GooString *fileName = nullptr;
+     char *ppmRoot = nullptr;
+     char *ppmFile;
+@@ -393,7 +401,6 @@ int main(int argc, char *argv[])
+     pthread_t *jobs;
+ #endif // UTILS_USE_PTHREADS
+     bool ok;
+-    int exitCode;
+     int pg, pg_num_len;
+     double pg_w, pg_h;
+ #ifdef USE_CMS
+@@ -401,7 +408,6 @@ int main(int argc, char *argv[])
+ #endif
+ 
+     Win32Console win32Console(&argc, &argv);
+-    exitCode = 99;
+ 
+     // parse args
+     ok = parseArgs(argDesc, &argc, argv);
+@@ -419,9 +425,11 @@ int main(int argc, char *argv[])
+         if (!printVersion) {
+             printUsage("pdftoppm", "[PDF-file [PPM-file-prefix]]", argDesc);
+         }
+-        if (printVersion || printHelp)
+-            exitCode = 0;
+-        goto err0;
++        if (printVersion || printHelp) {
++            return 0;
++        } else {
++            return kOtherError;
++        }
+     }
+     if (argc > 1)
+         fileName = new GooString(argv[1]);
+@@ -484,7 +492,7 @@ int main(int argc, char *argv[])
+         delete fileName;
+         fileName = new GooString("fd://0");
+     }
+-    doc = PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW);
++    std::unique_ptr<PDFDoc> doc(PDFDocFactory().createPDFDoc(*fileName, ownerPW, userPW));
+     delete fileName;
+ 
+     if (userPW) {
+@@ -494,8 +502,7 @@ int main(int argc, char *argv[])
+         delete ownerPW;
+     }
+     if (!doc->isOk()) {
+-        exitCode = 1;
+-        goto err1;
++        return 1;
+     }
+ 
+     // get page range
+@@ -507,7 +514,7 @@ int main(int argc, char *argv[])
+         lastPage = doc->getNumPages();
+     if (lastPage < firstPage) {
+         fprintf(stderr, "Wrong page range given: the first page (%d) can not be after the last page (%d).\n", firstPage, lastPage);
+-        goto err1;
++        return kOtherError;
+     }
+ 
+     // If our page range selection and document size indicate we're only
+@@ -515,7 +522,7 @@ int main(int argc, char *argv[])
+     // filter out that single page.
+     if (firstPage == lastPage && ((printOnlyEven && firstPage % 2 == 1) || (printOnlyOdd && firstPage % 2 == 0))) {
+         fprintf(stderr, "Invalid even/odd page selection, no pages match criteria.\n");
+-        goto err1;
++        return kOtherError;
+     }
+ 
+     if (singleFile && firstPage < lastPage) {
+@@ -540,12 +547,12 @@ int main(int argc, char *argv[])
+         displayprofile = make_GfxLCMSProfilePtr(cmsOpenProfileFromFile(displayprofilename.c_str(), "r"));
+         if (!displayprofile) {
+             fprintf(stderr, "Could not open the ICC profile \"%s\".\n", displayprofilename.c_str());
+-            goto err1;
++            return kOtherError;
+         }
+         if (!cmsIsIntentSupported(displayprofile.get(), INTENT_RELATIVE_COLORIMETRIC, LCMS_USED_AS_OUTPUT) && !cmsIsIntentSupported(displayprofile.get(), INTENT_ABSOLUTE_COLORIMETRIC, LCMS_USED_AS_OUTPUT)
+             && !cmsIsIntentSupported(displayprofile.get(), INTENT_SATURATION, LCMS_USED_AS_OUTPUT) && !cmsIsIntentSupported(displayprofile.get(), INTENT_PERCEPTUAL, LCMS_USED_AS_OUTPUT)) {
+             fprintf(stderr, "ICC profile \"%s\" is not an output profile.\n", displayprofilename.c_str());
+-            goto err1;
++            return kOtherError;
+         }
+         profilecolorspace = cmsGetColorSpace(displayprofile.get());
+         // Note: In contrast to pdftops we do not fail if a non-matching ICC profile is supplied.
+@@ -568,19 +575,19 @@ int main(int argc, char *argv[])
+     if (!defaultgrayprofilename.toStr().empty()) {
+         defaultgrayprofile = make_GfxLCMSProfilePtr(cmsOpenProfileFromFile(defaultgrayprofilename.c_str(), "r"));
+         if (!checkICCProfile(defaultgrayprofile, defaultgrayprofilename.c_str(), LCMS_USED_AS_INPUT, cmsSigGrayData)) {
+-            goto err1;
++            return kOtherError;
+         }
+     }
+     if (!defaultrgbprofilename.toStr().empty()) {
+         defaultrgbprofile = make_GfxLCMSProfilePtr(cmsOpenProfileFromFile(defaultrgbprofilename.c_str(), "r"));
+         if (!checkICCProfile(defaultrgbprofile, defaultrgbprofilename.c_str(), LCMS_USED_AS_INPUT, cmsSigRgbData)) {
+-            goto err1;
++            return kOtherError;
+         }
+     }
+     if (!defaultcmykprofilename.toStr().empty()) {
+         defaultcmykprofile = make_GfxLCMSProfilePtr(cmsOpenProfileFromFile(defaultcmykprofilename.c_str(), "r"));
+         if (!checkICCProfile(defaultcmykprofile, defaultcmykprofilename.c_str(), LCMS_USED_AS_INPUT, cmsSigCmykData)) {
+-            goto err1;
++            return kOtherError;
+         }
+     }
+ #endif
+@@ -598,7 +605,7 @@ int main(int argc, char *argv[])
+     splashOut->setDefaultRGBProfile(defaultrgbprofile);
+     splashOut->setDefaultCMYKProfile(defaultcmykprofile);
+ #    endif
+-    splashOut->startDoc(doc);
++    splashOut->startDoc(doc.get());
+ 
+ #endif // UTILS_USE_PTHREADS
+ 
+@@ -621,23 +628,34 @@ int main(int argc, char *argv[])
+         if (scaleDimensionBeforeRotation && needToRotate(doc->getPageRotate(pg)))
+             std::swap(pg_w, pg_h);
+ 
++
+         if (scaleTo != 0) {
+             resolution = (72.0 * scaleTo) / (pg_w > pg_h ? pg_w : pg_h);
+             x_resolution = y_resolution = resolution;
++            pg_w = pg_h = scaleTo;
+         } else {
+             if (x_scaleTo > 0) {
+                 x_resolution = (72.0 * x_scaleTo) / pg_w;
++                pg_w = x_scaleTo;
+                 if (y_scaleTo == -1)
+                     y_resolution = x_resolution;
+             }
++
+             if (y_scaleTo > 0) {
+                 y_resolution = (72.0 * y_scaleTo) / pg_h;
++                pg_h = y_scaleTo;
+                 if (x_scaleTo == -1)
+                     x_resolution = y_resolution;
+             }
++
++
++            if (x_scaleTo <= 0) {
++                pg_w = pg_w * (x_resolution / 72.0);
++            }
++            if (y_scaleTo <= 0) {
++                pg_h = pg_h * (y_resolution / 72.0);
++            }
+         }
+-        pg_w = pg_w * (x_resolution / 72.0);
+-        pg_h = pg_h * (y_resolution / 72.0);
+ 
+         if (!scaleDimensionBeforeRotation && needToRotate(doc->getPageRotate(pg)))
+             std::swap(pg_w, pg_h);
+@@ -656,13 +674,13 @@ int main(int argc, char *argv[])
+         }
+ #ifndef UTILS_USE_PTHREADS
+         // process job in main thread
+-        savePageSlice(doc, splashOut, pg, param_x, param_y, param_w, param_h, pg_w, pg_h, ppmFile);
++        savePageSlice(doc.get(), splashOut, pg, param_x, param_y, param_w, param_h, pg_w, pg_h, ppmFile);
+ 
+         delete[] ppmFile;
+ #else
+ 
+         // queue job for worker threads
+-        PageJob pageJob = { .doc = doc,
++        PageJob pageJob = { .doc = doc.get(),
+                             .pg = pg,
+ 
+                             .pg_w = pg_w,
+@@ -701,12 +719,5 @@ int main(int argc, char *argv[])
+ 
+ #endif // UTILS_USE_PTHREADS
+ 
+-    exitCode = 0;
+-
+-    // clean up
+-err1:
+-    delete doc;
+-err0:
+-
+-    return exitCode;
++    return 0;
+ }
+diff --git a/utils/pdftops.cc b/utils/pdftops.cc
+index 597a793..e77edde 100644
+--- a/utils/pdftops.cc
++++ b/utils/pdftops.cc
+@@ -25,7 +25,7 @@
+ // Copyright (C) 2013 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+ // Copyright (C) 2014, 2017 Adrian Johnson <ajohnson@redneon.com>
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+-// Copyright (C) 2019 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2020 Philipp Knechtges <philipp-dev@knechtges.com>
+ //
+ // To see a description of the changes please see the Changelog file that
+@@ -199,7 +199,7 @@ static const ArgDesc argDesc[] = { { "-f", argInt, &firstPage, 0, "first page to
+ 
+ int main(int argc, char *argv[])
+ {
+-    PDFDoc *doc;
++    std::unique_ptr<PDFDoc> doc;
+     GooString *fileName;
+     GooString *psFileName;
+     PSLevel level;
+@@ -301,7 +301,7 @@ int main(int argc, char *argv[])
+             processcolorformatspecified = true;
+         } else {
+             fprintf(stderr, "Error: Unknown process color format \"%s\".\n", processcolorformatname.c_str());
+-            goto err05;
++            goto err1;
+         }
+     }
+ 
+@@ -310,12 +310,12 @@ int main(int argc, char *argv[])
+         processcolorprofile = make_GfxLCMSProfilePtr(cmsOpenProfileFromFile(processcolorprofilename.c_str(), "r"));
+         if (!processcolorprofile) {
+             fprintf(stderr, "Error: Could not open the ICC profile \"%s\".\n", processcolorprofilename.c_str());
+-            goto err05;
++            goto err1;
+         }
+         if (!cmsIsIntentSupported(processcolorprofile.get(), INTENT_RELATIVE_COLORIMETRIC, LCMS_USED_AS_OUTPUT) && !cmsIsIntentSupported(processcolorprofile.get(), INTENT_ABSOLUTE_COLORIMETRIC, LCMS_USED_AS_OUTPUT)
+             && !cmsIsIntentSupported(processcolorprofile.get(), INTENT_SATURATION, LCMS_USED_AS_OUTPUT) && !cmsIsIntentSupported(processcolorprofile.get(), INTENT_PERCEPTUAL, LCMS_USED_AS_OUTPUT)) {
+             fprintf(stderr, "Error: ICC profile \"%s\" is not an output profile.\n", processcolorprofilename.c_str());
+-            goto err05;
++            goto err1;
+         }
+         profilecolorspace = cmsGetColorSpace(processcolorprofile.get());
+         if (profilecolorspace == cmsSigCmykData) {
+@@ -324,7 +324,7 @@ int main(int argc, char *argv[])
+                 processcolorformatspecified = true;
+             } else if (processcolorformat != splashModeCMYK8) {
+                 fprintf(stderr, "Error: Supplied ICC profile \"%s\" is a CMYK profile, but process color format is not CMYK8.\n", processcolorprofilename.c_str());
+-                goto err05;
++                goto err1;
+             }
+         } else if (profilecolorspace == cmsSigGrayData) {
+             if (!processcolorformatspecified) {
+@@ -332,7 +332,7 @@ int main(int argc, char *argv[])
+                 processcolorformatspecified = true;
+             } else if (processcolorformat != splashModeMono8) {
+                 fprintf(stderr, "Error: Supplied ICC profile \"%s\" is a monochrome profile, but process color format is not monochrome.\n", processcolorprofilename.c_str());
+-                goto err05;
++                goto err1;
+             }
+         } else if (profilecolorspace == cmsSigRgbData) {
+             if (!processcolorformatspecified) {
+@@ -340,7 +340,7 @@ int main(int argc, char *argv[])
+                 processcolorformatspecified = true;
+             } else if (processcolorformat != splashModeRGB8) {
+                 fprintf(stderr, "Error: Supplied ICC profile \"%s\" is a RGB profile, but process color format is not RGB.\n", processcolorprofilename.c_str());
+-                goto err05;
++                goto err1;
+             }
+         }
+     }
+@@ -349,10 +349,10 @@ int main(int argc, char *argv[])
+     if (processcolorformatspecified) {
+         if (level1 && processcolorformat != splashModeMono8) {
+             fprintf(stderr, "Error: Setting -level1 requires -processcolorformat MONO8");
+-            goto err05;
++            goto err1;
+         } else if ((level1Sep || level2Sep || level3Sep || overprint) && processcolorformat != splashModeCMYK8) {
+             fprintf(stderr, "Error: Setting -level1sep/-level2sep/-level3sep/-overprint requires -processcolorformat CMYK8");
+-            goto err05;
++            goto err1;
+         }
+     }
+ #endif
+@@ -361,19 +361,19 @@ int main(int argc, char *argv[])
+     if (!defaultgrayprofilename.toStr().empty()) {
+         defaultgrayprofile = make_GfxLCMSProfilePtr(cmsOpenProfileFromFile(defaultgrayprofilename.c_str(), "r"));
+         if (!checkICCProfile(defaultgrayprofile, defaultgrayprofilename.c_str(), LCMS_USED_AS_INPUT, cmsSigGrayData)) {
+-            goto err05;
++            goto err1;
+         }
+     }
+     if (!defaultrgbprofilename.toStr().empty()) {
+         defaultrgbprofile = make_GfxLCMSProfilePtr(cmsOpenProfileFromFile(defaultrgbprofilename.c_str(), "r"));
+         if (!checkICCProfile(defaultrgbprofile, defaultrgbprofilename.c_str(), LCMS_USED_AS_INPUT, cmsSigRgbData)) {
+-            goto err05;
++            goto err1;
+         }
+     }
+     if (!defaultcmykprofilename.toStr().empty()) {
+         defaultcmykprofile = make_GfxLCMSProfilePtr(cmsOpenProfileFromFile(defaultcmykprofilename.c_str(), "r"));
+         if (!checkICCProfile(defaultcmykprofile, defaultcmykprofilename.c_str(), LCMS_USED_AS_INPUT, cmsSigCmykData)) {
+-            goto err05;
++            goto err1;
+         }
+     }
+ #endif
+@@ -455,7 +455,7 @@ int main(int argc, char *argv[])
+     }
+ 
+     // write PostScript file
+-    psOut = new PSOutputDev(psFileName->c_str(), doc, nullptr, pages, mode, paperWidth, paperHeight, noCrop, duplex, /*imgLLXA*/ 0, /*imgLLYA*/ 0,
++    psOut = new PSOutputDev(psFileName->c_str(), doc.get(), nullptr, pages, mode, paperWidth, paperHeight, noCrop, duplex,  0,  0,
+                             /*imgURXA*/ 0, /*imgURYA*/ 0, psRasterizeWhenNeeded, /*manualCtrlA*/ false, /*customCodeCbkA*/ nullptr, /*customCodeCbkDataA*/ nullptr, level);
+     if (noCenter) {
+         psOut->setPSCenter(false);
+@@ -527,8 +527,6 @@ int main(int argc, char *argv[])
+ err2:
+     delete psFileName;
+ err1:
+-    delete doc;
+-err05:
+     delete fileName;
+ err0:
+ 
+diff --git a/utils/pdftotext.1 b/utils/pdftotext.1
+index ea2874f..3ae217b 100644
+--- a/utils/pdftotext.1
++++ b/utils/pdftotext.1
+@@ -82,6 +82,9 @@ word in the file.
+ Generate an XHTML file containing bounding box information for each
+ block, line, and word in the file.
+ .TP
++.B \-cropbox
++Use the crop box rather than the media box with \-bbox and \-bbox-layout.
++.TP
+ .BI \-enc " encoding-name"
+ Sets the encoding to use for text output. This defaults to "UTF-8".
+ .TP
+diff --git a/utils/pdftotext.cc b/utils/pdftotext.cc
+index f17cfd5..71ebcc2 100644
+--- a/utils/pdftotext.cc
++++ b/utils/pdftotext.cc
+@@ -30,7 +30,8 @@
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+ // Copyright (C) 2018 Sanchit Anand <sanxchit@gmail.com>
+ // Copyright (C) 2019 Dan Shea <dan.shea@logical-innovations.com>
+-// Copyright (C) 2019 Oliver Sander <oliver.sander@tu-dresden.de>
++
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -82,6 +83,7 @@ static int h = 0;
+ static bool bbox = false;
+ static bool bboxLayout = false;
+ static bool physLayout = false;
++static bool useCropBox = false;
+ static double fixedPitch = 0;
+ static bool rawOrder = false;
+ static bool discardDiag = false;
+@@ -114,6 +116,7 @@ static const ArgDesc argDesc[] = { { "-f", argInt, &firstPage, 0, "first page to
+                                    { "-nopgbrk", argFlag, &noPageBreaks, 0, "don't insert page breaks between pages" },
+                                    { "-bbox", argFlag, &bbox, 0, "output bounding box for each word and page size to html.  Sets -htmlmeta" },
+                                    { "-bbox-layout", argFlag, &bboxLayout, 0, "like -bbox but with extra layout bounding box data.  Sets -htmlmeta" },
++                                   { "-cropbox", argFlag, &useCropBox, 0, "use the crop box rather than media box" },
+                                    { "-opw", argString, ownerPassword, sizeof(ownerPassword), "owner password (for encrypted files)" },
+                                    { "-upw", argString, userPassword, sizeof(userPassword), "user password (for encrypted files)" },
+                                    { "-q", argFlag, &quiet, 0, "don't print any messages or errors" },
+@@ -152,7 +155,7 @@ static std::string myXmlTokenReplace(const char *inString)
+ 
+ int main(int argc, char *argv[])
+ {
+-    PDFDoc *doc;
++    std::unique_ptr<PDFDoc> doc;
+     GooString *fileName;
+     GooString *textFileName;
+     GooString *ownerPW, *userPW;
+@@ -343,9 +346,9 @@ int main(int argc, char *argv[])
+                 textOut->setTextPageBreaks(false);
+             }
+             if (bboxLayout) {
+-                printDocBBox(f, doc, textOut, firstPage, lastPage);
++                printDocBBox(f, doc.get(), textOut, firstPage, lastPage);
+             } else {
+-                printWordBBox(f, doc, textOut, firstPage, lastPage);
++                printWordBBox(f, doc.get(), textOut, firstPage, lastPage);
+             }
+         }
+         if (f != stdout) {
+@@ -401,7 +404,6 @@ int main(int argc, char *argv[])
+ err3:
+     delete textFileName;
+ err2:
+-    delete doc;
+     delete fileName;
+ err1:
+ err0:
+@@ -496,8 +498,10 @@ void printDocBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int l
+ 
+     fprintf(f, "<doc>\n");
+     for (int page = first; page <= last; ++page) {
+-        fprintf(f, "  <page width=\"%f\" height=\"%f\">\n", doc->getPageMediaWidth(page), doc->getPageMediaHeight(page));
+-        doc->displayPage(textOut, page, resolution, resolution, 0, true, false, false);
++        const double wid = useCropBox ? doc->getPageCropWidth(page) : doc->getPageMediaWidth(page);
++        const double hgt = useCropBox ? doc->getPageCropHeight(page) : doc->getPageMediaHeight(page);
++        fprintf(f, "  <page width=\"%f\" height=\"%f\">\n", wid, hgt);
++        doc->displayPage(textOut, page, resolution, resolution, 0, !useCropBox, useCropBox, false);
+         for (flow = textOut->getFlows(); flow; flow = flow->getNext()) {
+             fprintf(f, "    <flow>\n");
+             for (blk = flow->getBlocks(); blk; blk = blk->getNext()) {
+@@ -519,8 +523,10 @@ void printWordBBox(FILE *f, PDFDoc *doc, TextOutputDev *textOut, int first, int
+ {
+     fprintf(f, "<doc>\n");
+     for (int page = first; page <= last; ++page) {
+-        fprintf(f, "  <page width=\"%f\" height=\"%f\">\n", doc->getPageMediaWidth(page), doc->getPageMediaHeight(page));
+-        doc->displayPage(textOut, page, resolution, resolution, 0, true, false, false);
++        double wid = useCropBox ? doc->getPageCropWidth(page) : doc->getPageMediaWidth(page);
++        double hgt = useCropBox ? doc->getPageCropHeight(page) : doc->getPageMediaHeight(page);
++        fprintf(f, "  <page width=\"%f\" height=\"%f\">\n", wid, hgt);
++        doc->displayPage(textOut, page, resolution, resolution, 0, !useCropBox, useCropBox, false);
+         TextWordList *wordlist = textOut->makeWordList();
+         const int word_length = wordlist != nullptr ? wordlist->getLength() : 0;
+         TextWord *word;
+diff --git a/utils/pdfunite.cc b/utils/pdfunite.cc
+index 1ea1a34..1203de0 100644
+--- a/utils/pdfunite.cc
++++ b/utils/pdfunite.cc
+@@ -7,7 +7,7 @@
+ // Copyright (C) 2011-2015, 2017 Thomas Freitag <Thomas.Freitag@alfa.de>
+ // Copyright (C) 2012 Arseny Solokha <asolokha@gmx.com>
+ // Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
+-// Copyright (C) 2012, 2014, 2017-2019 Albert Astals Cid <aacid@kde.org>
++
+ // Copyright (C) 2013 Adrian Johnson <ajohnson@redneon.com>
+ // Copyright (C) 2013 Hib Eris <hib@hiberis.nl>
+ // Copyright (C) 2015 Arthur Stavisky <vovodroid@gmail.com>
+@@ -137,9 +137,7 @@ int main(int argc, char *argv[])
+     int majorVersion = 0;
+     int minorVersion = 0;
+     char *fileName = argv[argc - 1];
+-    int exitCode;
+ 
+-    exitCode = 99;
+     const bool ok = parseArgs(argDesc, &argc, argv);
+     if (!ok || argc < 3 || printVersion || printHelp) {
+         fprintf(stderr, "pdfunite version %s\n", PACKAGE_VERSION);
+@@ -148,11 +146,11 @@ int main(int argc, char *argv[])
+         if (!printVersion) {
+             printUsage("pdfunite", "<PDF-sourcefile-1>..<PDF-sourcefile-n> <PDF-destfile>", argDesc);
+         }
+-        if (printVersion || printHelp)
+-            exitCode = 0;
+-        return exitCode;
++        if (printVersion || printHelp) {
++            return 0;
++        }
++        return 99;
+     }
+-    exitCode = 0;
+     globalParams = std::make_unique<GlobalParams>();
+ 
+     for (i = 1; i < argc - 1; i++) {
+@@ -394,5 +392,5 @@ int main(int argc, char *argv[])
+     delete countRef;
+     for (i = 0; i < (int)docs.size(); i++)
+         delete docs[i];
+-    return exitCode;
++    return 0;
+ }

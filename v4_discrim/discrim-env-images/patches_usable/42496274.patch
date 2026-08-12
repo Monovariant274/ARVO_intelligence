@@ -1,0 +1,16 @@
+diff --git a/platforms/app_fuzz/fuzzer.c b/platforms/app_fuzz/fuzzer.c
+index 76e236b..b97d649 100644
+--- a/platforms/app_fuzz/fuzzer.c
++++ b/platforms/app_fuzz/fuzzer.c
+@@ -31,9 +31,10 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+                 if (result == 0) {
+                     IM3Function f = NULL;
+                     result = m3_FindFunction (&f, runtime, "fib");
++
+                     if (f) {
+                         m3_CallV (f, 10);
+-                    }
++                    }*/
+                 } else {
+                     m3_FreeModule (module);
+                 }

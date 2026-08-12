@@ -1,0 +1,91 @@
+diff --git a/autotests/kcompressiondevicetest.cpp b/autotests/kcompressiondevicetest.cpp
+index 794de26..e161264 100644
+--- a/autotests/kcompressiondevicetest.cpp
++++ b/autotests/kcompressiondevicetest.cpp
+@@ -192,14 +192,24 @@ void KCompressionDeviceTest::testWriteErrorOnClose()
+     QCOMPARE(int(dev.error()), int(QFileDevice::WriteError));
+ }
+ 
++void KCompressionDeviceTest::testSeekReadUncompressedBuffer_data()
++{
++    QTest::addColumn<int>("dataSize");
++    QTest::addColumn<int>("realDataPos");
++    QTest::newRow("1.5buffer") << BUFFER_SIZE + BUFFER_SIZE / 2 << BUFFER_SIZE;
++    QTest::newRow("5seekbuffer") << 5 * SEEK_BUFFER_SIZE << 4 * SEEK_BUFFER_SIZE;
++}
++
+ void KCompressionDeviceTest::testSeekReadUncompressedBuffer()
+ {
+-    const int dataSize = BUFFER_SIZE + BUFFER_SIZE / 2;
++    QFETCH(int, dataSize);
++    QFETCH(int, realDataPos);
++
+     QByteArray ba(dataSize, 0);
+ 
+-    // all data is zero except after BUFFER_SIZE that it's 0 to 9
++
+     for (int i = 0; i < 10; ++i) {
+-        ba[BUFFER_SIZE + i] = i;
++        ba[realDataPos + i] = i;
+     }
+ 
+     QBuffer b;
+@@ -208,9 +218,9 @@ void KCompressionDeviceTest::testSeekReadUncompressedBuffer()
+ 
+     KCompressionDevice kcd(&b, false, KCompressionDevice::GZip);
+     QVERIFY(kcd.open(QIODevice::ReadOnly));
+-    QVERIFY(kcd.seek(BUFFER_SIZE));
++    QVERIFY(kcd.seek(realDataPos));
+ 
+-    // the 10 bytes after BUFFER_SIZE should be 0 to 9
++
+     const QByteArray kcdData = kcd.read(10);
+     QCOMPARE(kcdData.size(), 10);
+     for (int i = 0; i < kcdData.size(); ++i) {
+diff --git a/autotests/kcompressiondevicetest.h b/autotests/kcompressiondevicetest.h
+index 64f9f6b..1ceed47 100644
+--- a/autotests/kcompressiondevicetest.h
++++ b/autotests/kcompressiondevicetest.h
+@@ -58,6 +58,7 @@ private Q_SLOTS:
+     void testWriteErrorOnOpen();
+     void testWriteErrorOnClose();
+ 
++    void testSeekReadUncompressedBuffer_data();
+     void testSeekReadUncompressedBuffer();
+ };
+ 
+diff --git a/src/kcompressiondevice.cpp b/src/kcompressiondevice.cpp
+index 2138fb8..0bc7590 100644
+--- a/src/kcompressiondevice.cpp
++++ b/src/kcompressiondevice.cpp
+@@ -246,9 +246,16 @@ bool KCompressionDevice::seek(qint64 pos)
+     }
+ 
+     //qCDebug(KArchiveLog) << "reading " << bytesToRead << " dummy bytes";
+-    QByteArray dummy(qMin(bytesToRead, qint64(3 * BUFFER_SIZE)), 0);
+-    const bool result = (read(dummy.data(), bytesToRead) == bytesToRead);
+-    return result;
++    QByteArray dummy(qMin(bytesToRead, qint64(SEEK_BUFFER_SIZE)), 0);
++    while (bytesToRead > 0) {
++        const qint64 bytesToReadThisTime = qMin(bytesToRead, qint64(dummy.size()));
++        const bool result = (read(dummy.data(), bytesToReadThisTime) == bytesToReadThisTime);
++        if (!result) {
++            return false;
++        }
++        bytesToRead -= bytesToReadThisTime;
++    }
++    return true;
+ }
+ 
+ bool KCompressionDevice::atEnd() const
+diff --git a/src/kcompressiondevice_p.h b/src/kcompressiondevice_p.h
+index 3048480..2d7aa29 100644
+--- a/src/kcompressiondevice_p.h
++++ b/src/kcompressiondevice_p.h
+@@ -20,5 +20,6 @@
+ #define __kcompressiondevice_p_h
+ 
+ #define BUFFER_SIZE 8*1024
++#define SEEK_BUFFER_SIZE 3*BUFFER_SIZE
+ 
+ #endif

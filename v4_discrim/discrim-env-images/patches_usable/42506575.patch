@@ -1,0 +1,4906 @@
+diff --git a/Changelog b/Changelog
+index a613e2c..edb4152 100644
+--- a/Changelog
++++ b/Changelog
+@@ -43,6 +43,7 @@ version <next>:
+ - adynamicequalizer audio filter
+ - yadif_videotoolbox filter
+ - VideoToolbox ProRes encoder
++- anlmf audio filter
+ 
+ 
+ version 4.4:
+diff --git a/configure b/configure
+index 23ef2ab..07fb792 100755
+--- a/configure
++++ b/configure
+@@ -298,7 +298,7 @@ External library support:
+   --enable-libxvid         enable Xvid encoding via xvidcore,
+                            native MPEG-4/Xvid encoder exists [no]
+   --enable-libxml2         enable XML parsing using the C library libxml2, needed
+-                           for dash demuxing support [no]
++                           for dash and imf demuxing support [no]
+   --enable-libzimg         enable z.lib, needed for zscale filter [no]
+   --enable-libzmq          enable message passing via libzmq [no]
+   --enable-libzvbi         enable teletext support via libzvbi [no]
+@@ -3415,6 +3415,7 @@ hls_muxer_select="mpegts_muxer"
+ hls_muxer_suggest="gcrypt openssl"
+ image2_alias_pix_demuxer_select="image2_demuxer"
+ image2_brender_pix_demuxer_select="image2_demuxer"
++imf_demuxer_deps="libxml2"
+ ipod_muxer_select="mov_muxer"
+ ismv_muxer_select="mov_muxer"
+ ivf_muxer_select="av1_metadata_bsf vp9_superframe_bsf"
+diff --git a/doc/demuxers.texi b/doc/demuxers.texi
+index cab8a70..26ae768 100644
+--- a/doc/demuxers.texi
++++ b/doc/demuxers.texi
+@@ -25,6 +25,13 @@ Audible Format 2, 3, and 4 demuxer.
+ 
+ This demuxer is used to demux Audible Format 2, 3, and 4 (.aa) files.
+ 
++@section aac
++
++Raw Audio Data Transport Stream AAC demuxer.
++
++This demuxer is used to demux an ADTS input containing a single AAC stream
++alongwith any ID3v1/2 or APE tags in it.
++
+ @section apng
+ 
+ Animated Portable Network Graphics demuxer.
+@@ -267,6 +274,12 @@ which streams to actually receive.
+ Each stream mirrors the @code{id} and @code{bandwidth} properties from the
+ @code{<Representation>} as metadata keys named "id" and "variant_bitrate" respectively.
+ 
++@section imf
++
++Interoperable Master Format demuxer.
++
++This demuxer presents audio and video streams found in an IMF Composition.
++
+ @section flv, live_flv, kux
+ 
+ Adobe Flash Video Format demuxer.
+@@ -713,6 +726,15 @@ specify.
+ 
+ @item decryption_key
+ 16-byte key, in hex, to decrypt files encrypted using ISO Common Encryption (CENC/AES-128 CTR; ISO/IEC 23001-7).
++
++@item max_stts_delta
++Very high sample deltas written in a trak's stts box may occasionally be intended but usually they are written in
++error or used to store a negative value for dts correction when treated as signed 32-bit integers. This option lets
++the user set an upper limit, beyond which the delta is clamped to 1. Values greater than the limit if negative when
++cast to int32 are used to adjust onward dts.
++
++Unit is the track time scale. Range is 0 to UINT_MAX. Default is @code{UINT_MAX - 48000*10} which allows upto
++a 10 second dts correction for 48 kHz audio streams while accommodating 99.9% of @code{uint32} range.
+ @end table
+ 
+ @subsection Audible AAX
+diff --git a/doc/encoders.texi b/doc/encoders.texi
+index 8a7589c..e3b61de 100644
+--- a/doc/encoders.texi
++++ b/doc/encoders.texi
+@@ -2660,6 +2660,9 @@ ffmpeg -i foo.mpg -c:v libx264 -x264opts keyint=123:min-keyint=20 -an out.mkv
+ Import closed captions (which must be ATSC compatible format) into output.
+ Only the mpeg2 and h264 decoders provide these. Default is 1 (on).
+ 
++@item udu_sei @var{boolean}
++Import user data unregistered SEI if available into output. Default is 0 (off).
++
+ @item x264-params (N.A.)
+ Override the x264 configuration using a :-separated list of key=value
+ parameters.
+@@ -2741,6 +2744,9 @@ Quantizer curve compression factor
+ Normally, when forcing a I-frame type, the encoder can select any type
+ of I-frame. This option forces it to choose an IDR-frame.
+ 
++@item udu_sei @var{boolean}
++Import user data unregistered SEI if available into output. Default is 0 (off).
++
+ @item x265-params
+ Set x265 options using a list of @var{key}=@var{value} couples separated
+ by ":". See @command{x265 --help} for a list of options.
+diff --git a/doc/filters.texi b/doc/filters.texi
+index da95688..05d4b1a 100644
+--- a/doc/filters.texi
++++ b/doc/filters.texi
+@@ -2301,8 +2301,8 @@ Set smooth factor. Default value is @var{11}. Allowed range is from @var{1} to @
+ 
+ This filter supports the all above options as @ref{commands}.
+ 
+-@section anlms
+-Apply Normalized Least-Mean-Squares algorithm to the first audio stream using the second audio stream.
++@section anlmf, anlms
++Apply Normalized Least-Mean-(Squares|Fourth) algorithm to the first audio stream using the second audio stream.
+ 
+ This adaptive filter is used to mimic a desired filter by finding the filter coefficients that
+ relate to producing the least mean square of the error signal (difference between the desired,
+diff --git a/doc/indevs.texi b/doc/indevs.texi
+index 5be647f..9d80203 100644
+--- a/doc/indevs.texi
++++ b/doc/indevs.texi
+@@ -625,6 +625,12 @@ Save the currently used video capture filter device and its
+ parameters (if the filter supports it) to a file.
+ If a file with the same name exists it will be overwritten.
+ 
++@item use_video_device_timestamps
++If set to @option{false}, the timestamp for video frames will be
++derived from the wallclock instead of the timestamp provided by
++the capture device. This allows working around devices that
++provide unreliable timestamps.
++
+ @end table
+ 
+ @subsection Examples
+diff --git a/fftools/cmdutils.c b/fftools/cmdutils.c
+index 882584e..1444ea2 100644
+--- a/fftools/cmdutils.c
++++ b/fftools/cmdutils.c
+@@ -2244,9 +2244,29 @@ double get_rotation(int32_t *displaymatrix)
+ }
+ 
+ #if CONFIG_AVDEVICE
++static void print_device_list(const AVDeviceInfoList *device_list)
++{
++
++    for (int i = 0; i < device_list->nb_devices; i++) {
++        const AVDeviceInfo *device = device_list->devices[i];
++        printf("%c %s [%s] (", device_list->default_device == i ? '*' : ' ',
++            device->device_name, device->device_description);
++        if (device->nb_media_types > 0) {
++            for (int j = 0; j < device->nb_media_types; ++j) {
++                const char* media_type = av_get_media_type_string(device->media_types[j]);
++                if (j > 0)
++                    printf(", ");
++                printf("%s", media_type ? media_type : "unknown");
++            }
++        } else {
++            printf("none");
++        }
++        printf(")\n");
++    }
++}
+ static int print_device_sources(const AVInputFormat *fmt, AVDictionary *opts)
+ {
+-    int ret, i;
++    int ret;
+     AVDeviceInfoList *device_list = NULL;
+ 
+     if (!fmt || !fmt->priv_class  || !AV_IS_INPUT_DEVICE(fmt->priv_class->category))
+@@ -2258,10 +2278,7 @@ static int print_device_sources(const AVInputFormat *fmt, AVDictionary *opts)
+         goto fail;
+     }
+ 
+-    for (i = 0; i < device_list->nb_devices; i++) {
+-        printf("%c %s [%s]\n", device_list->default_device == i ? '*' : ' ',
+-               device_list->devices[i]->device_name, device_list->devices[i]->device_description);
+-    }
++    print_device_list(device_list);
+ 
+   fail:
+     avdevice_free_list_devices(&device_list);
+@@ -2270,7 +2287,7 @@ static int print_device_sources(const AVInputFormat *fmt, AVDictionary *opts)
+ 
+ static int print_device_sinks(const AVOutputFormat *fmt, AVDictionary *opts)
+ {
+-    int ret, i;
++    int ret;
+     AVDeviceInfoList *device_list = NULL;
+ 
+     if (!fmt || !fmt->priv_class  || !AV_IS_OUTPUT_DEVICE(fmt->priv_class->category))
+@@ -2282,10 +2299,7 @@ static int print_device_sinks(const AVOutputFormat *fmt, AVDictionary *opts)
+         goto fail;
+     }
+ 
+-    for (i = 0; i < device_list->nb_devices; i++) {
+-        printf("%c %s [%s]\n", device_list->default_device == i ? '*' : ' ',
+-               device_list->devices[i]->device_name, device_list->devices[i]->device_description);
+-    }
++    print_device_list(device_list);
+ 
+   fail:
+     avdevice_free_list_devices(&device_list);
+diff --git a/libavcodec/apedec.c b/libavcodec/apedec.c
+index 35a2e61..b932263 100644
+--- a/libavcodec/apedec.c
++++ b/libavcodec/apedec.c
+@@ -1587,7 +1587,7 @@ static int ape_decode_frame(AVCodecContext *avctx, void *data,
+         for (ch = 0; ch < s->channels; ch++) {
+             sample8 = (uint8_t *)frame->data[ch];
+             for (i = 0; i < blockstodecode; i++)
+-                *sample8++ = (s->decoded[ch][i] + 0x80) & 0xff;
++
+         }
+         break;
+     case 16:
+diff --git a/libavcodec/cdgraphics.c b/libavcodec/cdgraphics.c
+index 06f8392..a83babd 100644
+--- a/libavcodec/cdgraphics.c
++++ b/libavcodec/cdgraphics.c
+@@ -122,7 +122,7 @@ static void cdg_load_palette(CDGraphicsContext *cc, uint8_t *data, int low)
+         r = ((color >> 8) & 0x000F) * 17;
+         g = ((color >> 4) & 0x000F) * 17;
+         b = ((color     ) & 0x000F) * 17;
+-        palette[i + array_offset] = cc->alpha[i + array_offset] << 24 | r << 16 | g << 8 | b;
++        palette[i + array_offset] = (uint32_t)cc->alpha[i + array_offset] << 24 | r << 16 | g << 8 | b;
+     }
+     cc->frame->palette_has_changed = 1;
+ }
+diff --git a/libavcodec/libx264.c b/libavcodec/libx264.c
+index 2b680ab..c5e0231 100644
+--- a/libavcodec/libx264.c
++++ b/libavcodec/libx264.c
+@@ -104,6 +104,7 @@ typedef struct X264Context {
+     int chroma_offset;
+     int scenechange_threshold;
+     int noise_reduction;
++    int udu_sei;
+ 
+     AVDictionary *x264_params;
+ 
+@@ -464,28 +465,30 @@ static int X264_frame(AVCodecContext *ctx, AVPacket *pkt, const AVFrame *frame,
+             }
+         }
+ 
+-        for (int j = 0; j < frame->nb_side_data; j++) {
+-            AVFrameSideData *side_data = frame->side_data[j];
+-            void *tmp;
+-            x264_sei_payload_t *sei_payload;
+-            if (side_data->type != AV_FRAME_DATA_SEI_UNREGISTERED)
+-                continue;
+-            tmp = av_fast_realloc(sei->payloads, &sei_data_size, (sei->num_payloads + 1) * sizeof(*sei_payload));
+-            if (!tmp) {
+-                free_picture(ctx);
+-                return AVERROR(ENOMEM);
+-            }
+-            sei->payloads = tmp;
+-            sei->sei_free = av_free;
+-            sei_payload = &sei->payloads[sei->num_payloads];
+-            sei_payload->payload = av_memdup(side_data->data, side_data->size);
+-            if (!sei_payload->payload) {
+-                free_picture(ctx);
+-                return AVERROR(ENOMEM);
++        if (x4->udu_sei) {
++            for (int j = 0; j < frame->nb_side_data; j++) {
++                AVFrameSideData *side_data = frame->side_data[j];
++                void *tmp;
++                x264_sei_payload_t *sei_payload;
++                if (side_data->type != AV_FRAME_DATA_SEI_UNREGISTERED)
++                    continue;
++                tmp = av_fast_realloc(sei->payloads, &sei_data_size, (sei->num_payloads + 1) * sizeof(*sei_payload));
++                if (!tmp) {
++                    free_picture(ctx);
++                    return AVERROR(ENOMEM);
++                }
++                sei->payloads = tmp;
++                sei->sei_free = av_free;
++                sei_payload = &sei->payloads[sei->num_payloads];
++                sei_payload->payload = av_memdup(side_data->data, side_data->size);
++                if (!sei_payload->payload) {
++                    free_picture(ctx);
++                    return AVERROR(ENOMEM);
++                }
++                sei_payload->payload_size = side_data->size;
++                sei_payload->payload_type = SEI_TYPE_USER_DATA_UNREGISTERED;
++                sei->num_payloads++;
+             }
+-            sei_payload->payload_size = side_data->size;
+-            sei_payload->payload_type = SEI_TYPE_USER_DATA_UNREGISTERED;
+-            sei->num_payloads++;
+         }
+     }
+ 
+@@ -1168,7 +1171,7 @@ static const AVOption options[] = {
+     { "chromaoffset", "QP difference between chroma and luma",            OFFSET(chroma_offset), AV_OPT_TYPE_INT, { .i64 = 0 }, INT_MIN, INT_MAX, VE },
+     { "sc_threshold", "Scene change threshold",                           OFFSET(scenechange_threshold), AV_OPT_TYPE_INT, { .i64 = -1 }, INT_MIN, INT_MAX, VE },
+     { "noise_reduction", "Noise reduction",                               OFFSET(noise_reduction), AV_OPT_TYPE_INT, { .i64 = -1 }, INT_MIN, INT_MAX, VE },
+-
++    { "udu_sei",      "Use user data unregistered SEI if available",      OFFSET(udu_sei),  AV_OPT_TYPE_BOOL,   { .i64 = 0 }, 0, 1, VE },
+     { "x264-params",  "Override the x264 configuration using a :-separated list of key=value parameters", OFFSET(x264_params), AV_OPT_TYPE_DICT, { 0 }, 0, 0, VE },
+     { NULL },
+ };
+diff --git a/libavcodec/libx265.c b/libavcodec/libx265.c
+index 7dd70a3..851f099 100644
+--- a/libavcodec/libx265.c
++++ b/libavcodec/libx265.c
+@@ -54,6 +54,7 @@ typedef struct libx265Context {
+ 
+     void *sei_data;
+     int sei_data_size;
++    int udu_sei;
+ 
+     /**
+      * If the encoder does not support ROI then warn the first time we
+@@ -543,30 +544,32 @@ static int libx265_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
+             memcpy(x265pic.userData, &pic->reordered_opaque, sizeof(pic->reordered_opaque));
+         }
+ 
+-        for (i = 0; i < pic->nb_side_data; i++) {
+-            AVFrameSideData *side_data = pic->side_data[i];
+-            void *tmp;
+-            x265_sei_payload *sei_payload;
+-
+-            if (side_data->type != AV_FRAME_DATA_SEI_UNREGISTERED)
+-                continue;
+-
+-            tmp = av_fast_realloc(ctx->sei_data,
+-                                  &ctx->sei_data_size,
+-                                  (sei->numPayloads + 1) * sizeof(*sei_payload));
+-            if (!tmp) {
+-                av_freep(&x265pic.userData);
+-                av_freep(&x265pic.quantOffsets);
+-                return AVERROR(ENOMEM);
++        if (ctx->udu_sei) {
++            for (i = 0; i < pic->nb_side_data; i++) {
++                AVFrameSideData *side_data = pic->side_data[i];
++                void *tmp;
++                x265_sei_payload *sei_payload;
++
++                if (side_data->type != AV_FRAME_DATA_SEI_UNREGISTERED)
++                    continue;
++
++                tmp = av_fast_realloc(ctx->sei_data,
++                        &ctx->sei_data_size,
++                        (sei->numPayloads + 1) * sizeof(*sei_payload));
++                if (!tmp) {
++                    av_freep(&x265pic.userData);
++                    av_freep(&x265pic.quantOffsets);
++                    return AVERROR(ENOMEM);
++                }
++                ctx->sei_data = tmp;
++                sei->payloads = ctx->sei_data;
++                sei_payload = &sei->payloads[sei->numPayloads];
++                sei_payload->payload = side_data->data;
++                sei_payload->payloadSize = side_data->size;
++
++                sei_payload->payloadType = SEI_TYPE_USER_DATA_UNREGISTERED;
++                sei->numPayloads++;
+             }
+-            ctx->sei_data = tmp;
+-            sei->payloads = ctx->sei_data;
+-            sei_payload = &sei->payloads[sei->numPayloads];
+-            sei_payload->payload = side_data->data;
+-            sei_payload->payloadSize = side_data->size;
+-            /* Equal to libx265 USER_DATA_UNREGISTERED */
+-            sei_payload->payloadType = SEI_TYPE_USER_DATA_UNREGISTERED;
+-            sei->numPayloads++;
+         }
+     }
+ 
+@@ -708,6 +711,7 @@ static const AVOption options[] = {
+     { "preset",      "set the x265 preset",                                                         OFFSET(preset),    AV_OPT_TYPE_STRING, { 0 }, 0, 0, VE },
+     { "tune",        "set the x265 tune parameter",                                                 OFFSET(tune),      AV_OPT_TYPE_STRING, { 0 }, 0, 0, VE },
+     { "profile",     "set the x265 profile",                                                        OFFSET(profile),   AV_OPT_TYPE_STRING, { 0 }, 0, 0, VE },
++    { "udu_sei",      "Use user data unregistered SEI if available",                                OFFSET(udu_sei),   AV_OPT_TYPE_BOOL,   { .i64 = 0 }, 0, 1, VE },
+     { "x265-params", "set the x265 configuration using a :-separated list of key=value parameters", OFFSET(x265_opts), AV_OPT_TYPE_DICT,   { 0 }, 0, 0, VE },
+     { NULL }
+ };
+diff --git a/libavcodec/mediacodecdec.c b/libavcodec/mediacodecdec.c
+index 1cebb3d..04d5026 100644
+--- a/libavcodec/mediacodecdec.c
++++ b/libavcodec/mediacodecdec.c
+@@ -155,6 +155,9 @@ static int h264_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+         uint8_t *data = NULL;
+         int data_size = 0;
+ 
++        avctx->profile = ff_h264_get_profile(sps);
++        avctx->level = sps->level_idc;
++
+         if ((ret = h2645_ps_to_nalu(sps->data, sps->data_size, &data, &data_size)) < 0) {
+             goto done;
+         }
+@@ -236,6 +239,9 @@ static int hevc_set_extradata(AVCodecContext *avctx, FFAMediaFormat *format)
+         uint8_t *data;
+         int data_size;
+ 
++        avctx->profile = sps->ptl.general_ptl.profile_idc;
++        avctx->level   = sps->ptl.general_ptl.level_idc;
++
+         if ((ret = h2645_ps_to_nalu(vps->data, vps->data_size, &vps_data, &vps_data_size)) < 0 ||
+             (ret = h2645_ps_to_nalu(sps->data, sps->data_size, &sps_data, &sps_data_size)) < 0 ||
+             (ret = h2645_ps_to_nalu(pps->data, pps->data_size, &pps_data, &pps_data_size)) < 0) {
+diff --git a/libavcodec/nvenc.c b/libavcodec/nvenc.c
+index edc46ed..31dfed9 100644
+--- a/libavcodec/nvenc.c
++++ b/libavcodec/nvenc.c
+@@ -2217,6 +2217,9 @@ static int prepare_sei_data_array(AVCodecContext *avctx, const AVFrame *frame)
+         }
+     }
+ 
++    if (!ctx->udu_sei)
++        return sei_count;
++
+     for (i = 0; i < frame->nb_side_data; i++) {
+         AVFrameSideData *side_data = frame->side_data[i];
+         void *tmp;
+diff --git a/libavcodec/nvenc.h b/libavcodec/nvenc.h
+index 08531e1..b42a156 100644
+--- a/libavcodec/nvenc.h
++++ b/libavcodec/nvenc.h
+@@ -235,6 +235,7 @@ typedef struct NvencContext
+     int intra_refresh;
+     int single_slice_intra_refresh;
+     int constrained_encoding;
++    int udu_sei;
+ } NvencContext;
+ 
+ int ff_nvenc_encode_init(AVCodecContext *avctx);
+diff --git a/libavcodec/nvenc_h264.c b/libavcodec/nvenc_h264.c
+index 7d78aa0..89e9a04 100644
+--- a/libavcodec/nvenc_h264.c
++++ b/libavcodec/nvenc_h264.c
+@@ -188,6 +188,8 @@ static const AVOption options[] = {
+ #endif
+     { "extra_sei",    "Pass on extra SEI data (e.g. a53 cc) to be included in the bitstream",
+                                                             OFFSET(extra_sei),    AV_OPT_TYPE_BOOL,  { .i64 = 1 }, 0, 1, VE },
++    { "udu_sei",      "Pass on user data unregistered SEI if available",
++                                                            OFFSET(udu_sei),      AV_OPT_TYPE_BOOL,  { .i64 = 0 }, 0, 1, VE },
+     { "intra-refresh","Use Periodic Intra Refresh instead of IDR frames",
+                                                             OFFSET(intra_refresh),AV_OPT_TYPE_BOOL,  { .i64 = 0 }, 0, 1, VE },
+     { "single-slice-intra-refresh", "Use single slice intra refresh",
+diff --git a/libavcodec/nvenc_hevc.c b/libavcodec/nvenc_hevc.c
+index a13ac5a..c2c13bb 100644
+--- a/libavcodec/nvenc_hevc.c
++++ b/libavcodec/nvenc_hevc.c
+@@ -169,6 +169,8 @@ static const AVOption options[] = {
+ #endif
+     { "extra_sei",    "Pass on extra SEI data (e.g. a53 cc) to be included in the bitstream",
+                                                             OFFSET(extra_sei),    AV_OPT_TYPE_BOOL,  { .i64 = 1 }, 0, 1, VE },
++    { "udu_sei",      "Pass on user data unregistered SEI if available",
++                                                            OFFSET(udu_sei),      AV_OPT_TYPE_BOOL,  { .i64 = 0 }, 0, 1, VE },
+     { "intra-refresh","Use Periodic Intra Refresh instead of IDR frames",
+                                                             OFFSET(intra_refresh),AV_OPT_TYPE_BOOL,  { .i64 = 0 }, 0, 1, VE },
+     { "single-slice-intra-refresh", "Use single slice intra refresh",
+diff --git a/libavcodec/qsvenc_h264.c b/libavcodec/qsvenc_h264.c
+index 80fe3cc..9f12760 100644
+--- a/libavcodec/qsvenc_h264.c
++++ b/libavcodec/qsvenc_h264.c
+@@ -103,17 +103,17 @@ static av_cold int qsv_enc_close(AVCodecContext *avctx)
+ static const AVOption options[] = {
+     QSV_COMMON_OPTS
+ 
+-    { "cavlc",          "Enable CAVLC",                           OFFSET(qsv.cavlc),          AV_OPT_TYPE_INT, { .i64 = 0 },   0,          1, VE },
++    { "cavlc",          "Enable CAVLC",                           OFFSET(qsv.cavlc),          AV_OPT_TYPE_BOOL, { .i64 = 0 },   0,          1, VE },
+ #if QSV_HAVE_VCM
+-    { "vcm",      "Use the video conferencing mode ratecontrol",  OFFSET(qsv.vcm),      AV_OPT_TYPE_INT, { .i64 = 0  },  0, 1,         VE },
++    { "vcm",      "Use the video conferencing mode ratecontrol",  OFFSET(qsv.vcm),      AV_OPT_TYPE_BOOL, { .i64 = 0  },  0, 1,         VE },
+ #endif
+     { "idr_interval", "Distance (in I-frames) between IDR frames", OFFSET(qsv.idr_interval), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, VE },
+-    { "pic_timing_sei",    "Insert picture timing SEI with pic_struct_syntax element", OFFSET(qsv.pic_timing_sei), AV_OPT_TYPE_INT, { .i64 = 1 }, 0, 1, VE },
++    { "pic_timing_sei",    "Insert picture timing SEI with pic_struct_syntax element", OFFSET(qsv.pic_timing_sei), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, VE },
+     { "single_sei_nal_unit",    "Put all the SEI messages into one NALU",        OFFSET(qsv.single_sei_nal_unit),     AV_OPT_TYPE_INT, { .i64 = -1 }, -1,          1, VE },
+     { "max_dec_frame_buffering", "Maximum number of frames buffered in the DPB", OFFSET(qsv.max_dec_frame_buffering), AV_OPT_TYPE_INT, { .i64 = 0 },   0, UINT16_MAX, VE },
+ 
+ #if QSV_HAVE_LA
+-    { "look_ahead",       "Use VBR algorithm with look ahead",    OFFSET(qsv.look_ahead),       AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE },
++    { "look_ahead",       "Use VBR algorithm with look ahead",    OFFSET(qsv.look_ahead),       AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
+     { "look_ahead_depth", "Depth of look ahead in number frames", OFFSET(qsv.look_ahead_depth), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 100, VE },
+ #endif
+ #if QSV_HAVE_LA_DS
+@@ -139,9 +139,9 @@ static const AVOption options[] = {
+     { "main"    , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_AVC_MAIN     }, INT_MIN, INT_MAX,     VE, "profile" },
+     { "high"    , NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MFX_PROFILE_AVC_HIGH     }, INT_MIN, INT_MAX,     VE, "profile" },
+ 
+-    { "a53cc" , "Use A53 Closed Captions (if available)", OFFSET(qsv.a53_cc), AV_OPT_TYPE_INT, {.i64 = 1}, 0, 1, VE},
++    { "a53cc" , "Use A53 Closed Captions (if available)", OFFSET(qsv.a53_cc), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, VE},
+ 
+-    { "aud", "Insert the Access Unit Delimiter NAL", OFFSET(qsv.aud), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE},
++    { "aud", "Insert the Access Unit Delimiter NAL", OFFSET(qsv.aud), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE},
+ 
+ #if QSV_HAVE_MF
+     { "mfmode", "Multi-Frame Mode", OFFSET(qsv.mfmode), AV_OPT_TYPE_INT, { .i64 = MFX_MF_AUTO }, MFX_MF_DEFAULT, MFX_MF_AUTO, VE, "mfmode"},
+diff --git a/libavcodec/qsvenc_hevc.c b/libavcodec/qsvenc_hevc.c
+index 5847ea2..08aba30 100644
+--- a/libavcodec/qsvenc_hevc.c
++++ b/libavcodec/qsvenc_hevc.c
+@@ -250,7 +250,7 @@ static const AVOption options[] = {
+     { "tile_cols",  "Number of columns for tiled encoding",   OFFSET(qsv.tile_cols),    AV_OPT_TYPE_INT, { .i64 = 0 }, 0, UINT16_MAX, VE },
+     { "tile_rows",  "Number of rows for tiled encoding",      OFFSET(qsv.tile_rows),    AV_OPT_TYPE_INT, { .i64 = 0 }, 0, UINT16_MAX, VE },
+     { "recovery_point_sei", "Insert recovery point SEI messages",       OFFSET(qsv.recovery_point_sei),      AV_OPT_TYPE_INT, { .i64 = -1 },               -1,          1, VE },
+-    { "aud", "Insert the Access Unit Delimiter NAL", OFFSET(qsv.aud), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 1, VE},
++    { "aud", "Insert the Access Unit Delimiter NAL", OFFSET(qsv.aud), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE},
+ 
+     { NULL },
+ };
+diff --git a/libavcodec/targa.c b/libavcodec/targa.c
+index 221fcc9..b004862 100644
+--- a/libavcodec/targa.c
++++ b/libavcodec/targa.c
+@@ -117,6 +117,7 @@ static int decode_frame(AVCodecContext *avctx,
+     int idlen, pal, compr, y, w, h, bpp, flags, ret;
+     int first_clr, colors, csize;
+     int interleave;
++    size_t img_size;
+ 
+     bytestream2_init(&s->gb, avpkt->data, avpkt->size);
+ 
+@@ -180,6 +181,15 @@ static int decode_frame(AVCodecContext *avctx,
+         return avpkt->size;
+     }
+ 
++    if (!(compr & TGA_RLE)) {
++        img_size = w * ((bpp + 1) >> 3);
++        if (bytestream2_get_bytes_left(&s->gb) < img_size * h) {
++            av_log(avctx, AV_LOG_ERROR,
++                    "Not enough data available for image\n");
++            return AVERROR_INVALIDDATA;
++        }
++    }
++
+     if ((ret = ff_get_buffer(avctx, p, 0)) < 0)
+         return ret;
+     p->pict_type = AV_PICTURE_TYPE_I;
+@@ -251,7 +261,6 @@ static int decode_frame(AVCodecContext *avctx,
+             if (res < 0)
+                 return res;
+         } else {
+-            size_t img_size = w * ((bpp + 1) >> 3);
+             uint8_t *line;
+             if (bytestream2_get_bytes_left(&s->gb) < img_size * h) {
+                 av_log(avctx, AV_LOG_ERROR,
+diff --git a/libavcodec/tiff.c b/libavcodec/tiff.c
+index 60773d5..fd85d10 100644
+--- a/libavcodec/tiff.c
++++ b/libavcodec/tiff.c
+@@ -721,20 +721,6 @@ static int dng_decode_jpeg(AVCodecContext *avctx, AVFrame *frame,
+     return 0;
+ }
+ 
+-static int dng_decode_strip(AVCodecContext *avctx, AVFrame *frame)
+-{
+-    TiffContext *s = avctx->priv_data;
+-    int ret = ff_set_dimensions(s->avctx_mjpeg, s->width, s->height);
+-
+-    if (ret < 0)
+-        return ret;
+-
+-    s->jpgframe->width  = s->width;
+-    s->jpgframe->height = s->height;
+-
+-    return dng_decode_jpeg(avctx, frame, s->stripsize, 0, 0, s->width, s->height);
+-}
+-
+ static int tiff_unpack_strip(TiffContext *s, AVFrame *p, uint8_t *dst, int stride,
+                              const uint8_t *src, int size, int strip_start, int lines)
+ {
+@@ -856,7 +842,7 @@ static int tiff_unpack_strip(TiffContext *s, AVFrame *p, uint8_t *dst, int strid
+             av_log(s->avctx, AV_LOG_ERROR, "More than one DNG JPEG strips unsupported\n");
+             return AVERROR_PATCHWELCOME;
+         }
+-        if ((ret = dng_decode_strip(s->avctx, p)) < 0)
++        if ((ret = dng_decode_jpeg(s->avctx, p, s->stripsize, 0, 0, s->width, s->height)) < 0)
+             return ret;
+         return 0;
+     }
+@@ -972,13 +958,7 @@ static int dng_decode_tiles(AVCodecContext *avctx, AVFrame *frame,
+     int has_width_leftover, has_height_leftover;
+     int tile_x = 0, tile_y = 0;
+     int pos_x = 0, pos_y = 0;
+-    int ret = ff_set_dimensions(s->avctx_mjpeg, s->tile_width, s->tile_length);
+-
+-    if (ret < 0)
+-        return ret;
+-
+-    s->jpgframe->width  = s->tile_width;
+-    s->jpgframe->height = s->tile_length;
++    int ret;
+ 
+     has_width_leftover = (s->width % s->tile_width != 0);
+     has_height_leftover = (s->height % s->tile_length != 0);
+diff --git a/libavcodec/v4l2_m2m_dec.c b/libavcodec/v4l2_m2m_dec.c
+index 224eb3d..b0c3d30 100644
+--- a/libavcodec/v4l2_m2m_dec.c
++++ b/libavcodec/v4l2_m2m_dec.c
+@@ -142,8 +142,12 @@ static int v4l2_receive_frame(AVCodecContext *avctx, AVFrame *frame)
+ 
+     if (!s->buf_pkt.size) {
+         ret = ff_decode_get_packet(avctx, &s->buf_pkt);
+-        if (ret < 0 && ret != AVERROR_EOF)
+-            return ret;
++        if (ret < 0) {
++            if (ret == AVERROR(EAGAIN))
++                return ff_v4l2_context_dequeue_frame(capture, frame, 0);
++            else if (ret != AVERROR_EOF)
++                return ret;
++        }
+     }
+ 
+     if (s->draining)
+diff --git a/libavcodec/vaapi_encode_vp9.c b/libavcodec/vaapi_encode_vp9.c
+index b3f45fb..be706e3 100644
+--- a/libavcodec/vaapi_encode_vp9.c
++++ b/libavcodec/vaapi_encode_vp9.c
+@@ -31,6 +31,7 @@
+ 
+ #define VP9_MAX_QUANT 255
+ 
++#define VP9_MAX_TILE_WIDTH 4096
+ 
+ typedef struct VAAPIEncodeVP9Picture {
+     int slot;
+@@ -82,10 +83,17 @@ static int vaapi_encode_vp9_init_picture_params(AVCodecContext *avctx,
+     VAAPIEncodeVP9Picture          *hpic = pic->priv_data;
+     VAEncPictureParameterBufferVP9 *vpic = pic->codec_picture_params;
+     int i;
++    int num_tile_columns;
+ 
+     vpic->reconstructed_frame = pic->recon_surface;
+     vpic->coded_buf = pic->output_buffer;
+ 
++
++
++
++    num_tile_columns = (vpic->frame_width_src + VP9_MAX_TILE_WIDTH - 1) / VP9_MAX_TILE_WIDTH;
++    vpic->log2_tile_columns = num_tile_columns == 1 ? 0 : av_log2(num_tile_columns - 1) + 1;
++
+     switch (pic->type) {
+     case PICTURE_TYPE_IDR:
+         av_assert0(pic->nb_refs == 0);
+diff --git a/libavcodec/version.h b/libavcodec/version.h
+index db71fb1..45c6d13 100644
+--- a/libavcodec/version.h
++++ b/libavcodec/version.h
+@@ -29,7 +29,7 @@
+ 
+ #define LIBAVCODEC_VERSION_MAJOR  59
+ #define LIBAVCODEC_VERSION_MINOR  15
+-#define LIBAVCODEC_VERSION_MICRO 100
++#define LIBAVCODEC_VERSION_MICRO 102
+ 
+ #define LIBAVCODEC_VERSION_INT  AV_VERSION_INT(LIBAVCODEC_VERSION_MAJOR, \
+                                                LIBAVCODEC_VERSION_MINOR, \
+diff --git a/libavdevice/avdevice.c b/libavdevice/avdevice.c
+index 2ae26ab..8f460c7 100644
+--- a/libavdevice/avdevice.c
++++ b/libavdevice/avdevice.c
+@@ -157,6 +157,7 @@ void avdevice_free_list_devices(AVDeviceInfoList **device_list)
+         if (dev) {
+             av_freep(&dev->device_name);
+             av_freep(&dev->device_description);
++            av_freep(&dev->media_types);
+             av_free(dev);
+         }
+     }
+diff --git a/libavdevice/avdevice.h b/libavdevice/avdevice.h
+index 8370bbc..6f24976 100644
+--- a/libavdevice/avdevice.h
++++ b/libavdevice/avdevice.h
+@@ -457,6 +457,8 @@ void avdevice_capabilities_free(AVDeviceCapabilitiesQuery **caps, AVFormatContex
+ typedef struct AVDeviceInfo {
+     char *device_name;                   /**< device name, format depends on device */
+     char *device_description;            /**< human friendly name */
++    enum AVMediaType *media_types;
++    int nb_media_types;
+ } AVDeviceInfo;
+ 
+ /**
+diff --git a/libavdevice/dshow.c b/libavdevice/dshow.c
+index ef78781..30f1be1 100644
+--- a/libavdevice/dshow.c
++++ b/libavdevice/dshow.c
+@@ -23,12 +23,37 @@
+ #include "libavutil/parseutils.h"
+ #include "libavutil/pixdesc.h"
+ #include "libavutil/opt.h"
++#include "libavutil/mem.h"
+ #include "libavformat/internal.h"
+ #include "libavformat/riff.h"
+ #include "avdevice.h"
+ #include "libavcodec/raw.h"
+ #include "objidl.h"
+ #include "shlwapi.h"
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#include "d3d9types.h"
++#include "dxva2api.h"
++
++#ifndef AMCONTROL_COLORINFO_PRESENT
++
++#   define AMCONTROL_COLORINFO_PRESENT 0x00000080
++#endif
+ 
+ 
+ static enum AVPixelFormat dshow_pixfmt(DWORD biCompression, WORD biBitCount)
+@@ -54,6 +79,161 @@ static enum AVPixelFormat dshow_pixfmt(DWORD biCompression, WORD biBitCount)
+     return avpriv_find_pix_fmt(avpriv_get_raw_pix_fmt_tags(), biCompression); // all others
+ }
+ 
++static enum AVColorRange dshow_color_range(DXVA2_ExtendedFormat *fmt_info)
++{
++    switch (fmt_info->NominalRange)
++    {
++    case DXVA2_NominalRange_Unknown:
++        return AVCOL_RANGE_UNSPECIFIED;
++    case DXVA2_NominalRange_Normal:
++        return AVCOL_RANGE_JPEG;
++    case DXVA2_NominalRange_Wide:
++        return AVCOL_RANGE_MPEG;
++    case DXVA2_NominalRange_48_208:
++
++        return AVCOL_RANGE_UNSPECIFIED;
++
++
++    case 4:
++
++        return AVCOL_RANGE_UNSPECIFIED;
++
++    default:
++        return AVCOL_RANGE_UNSPECIFIED;
++    }
++}
++
++static enum AVColorSpace dshow_color_space(DXVA2_ExtendedFormat *fmt_info)
++{
++    switch (fmt_info->VideoTransferMatrix)
++    {
++    case DXVA2_VideoTransferMatrix_BT709:
++        return AVCOL_SPC_BT709;
++    case DXVA2_VideoTransferMatrix_BT601:
++        return AVCOL_SPC_BT470BG;
++    case DXVA2_VideoTransferMatrix_SMPTE240M:
++        return AVCOL_SPC_SMPTE240M;
++
++
++    case 4:
++    case 5:
++        if (fmt_info->VideoTransferFunction == 12)
++            return AVCOL_SPC_BT2020_CL;
++        else
++            return AVCOL_SPC_BT2020_NCL;
++
++    default:
++        return AVCOL_SPC_UNSPECIFIED;
++    }
++}
++
++static enum AVColorPrimaries dshow_color_primaries(DXVA2_ExtendedFormat *fmt_info)
++{
++    switch (fmt_info->VideoPrimaries)
++    {
++    case DXVA2_VideoPrimaries_Unknown:
++        return AVCOL_PRI_UNSPECIFIED;
++    case DXVA2_VideoPrimaries_reserved:
++        return AVCOL_PRI_RESERVED;
++    case DXVA2_VideoPrimaries_BT709:
++        return AVCOL_PRI_BT709;
++    case DXVA2_VideoPrimaries_BT470_2_SysM:
++        return AVCOL_PRI_BT470M;
++    case DXVA2_VideoPrimaries_BT470_2_SysBG:
++    case DXVA2_VideoPrimaries_EBU3213:
++        return AVCOL_PRI_BT470BG;
++    case DXVA2_VideoPrimaries_SMPTE170M:
++    case DXVA2_VideoPrimaries_SMPTE_C:
++        return AVCOL_PRI_SMPTE170M;
++    case DXVA2_VideoPrimaries_SMPTE240M:
++        return AVCOL_PRI_SMPTE240M;
++
++
++    case 9:
++        return AVCOL_PRI_BT2020;
++    case 10:
++        return AVCOL_PRI_SMPTE428;
++    case 11:
++        return AVCOL_PRI_SMPTE431;
++    case 12:
++
++        return AVCOL_PRI_UNSPECIFIED;
++
++    default:
++        return AVCOL_PRI_UNSPECIFIED;
++    }
++}
++
++static enum AVColorTransferCharacteristic dshow_color_trc(DXVA2_ExtendedFormat *fmt_info)
++{
++    switch (fmt_info->VideoTransferFunction)
++    {
++    case DXVA2_VideoTransFunc_Unknown:
++        return AVCOL_TRC_UNSPECIFIED;
++    case DXVA2_VideoTransFunc_10:
++        return AVCOL_TRC_LINEAR;
++    case DXVA2_VideoTransFunc_18:
++
++        return AVCOL_TRC_UNSPECIFIED;
++    case DXVA2_VideoTransFunc_20:
++
++        return AVCOL_TRC_UNSPECIFIED;
++    case DXVA2_VideoTransFunc_22:
++        return AVCOL_TRC_GAMMA22;
++    case DXVA2_VideoTransFunc_709:
++        return AVCOL_TRC_BT709;
++    case DXVA2_VideoTransFunc_240M:
++        return AVCOL_TRC_SMPTE240M;
++    case DXVA2_VideoTransFunc_sRGB:
++        return AVCOL_TRC_IEC61966_2_1;
++    case DXVA2_VideoTransFunc_28:
++        return AVCOL_TRC_GAMMA28;
++
++
++    case 9:
++        return AVCOL_TRC_LOG;
++    case 10:
++        return AVCOL_TRC_LOG_SQRT;
++    case 11:
++
++        return AVCOL_TRC_UNSPECIFIED;
++    case 12:
++    case 13:
++        if (fmt_info->VideoTransferMatrix == 5)
++            return AVCOL_TRC_BT2020_12;
++        else
++            return AVCOL_TRC_BT2020_10;
++    case 14:
++
++        return AVCOL_TRC_UNSPECIFIED;
++    case 15:
++        return AVCOL_TRC_SMPTEST2084;
++    case 16:
++        return AVCOL_TRC_ARIB_STD_B67;
++    case 17:
++
++        return AVCOL_TRC_UNSPECIFIED;
++
++    default:
++        return AVCOL_TRC_UNSPECIFIED;
++    }
++}
++
++static enum AVChromaLocation dshow_chroma_loc(DXVA2_ExtendedFormat *fmt_info)
++{
++    if (fmt_info->VideoChromaSubsampling == DXVA2_VideoChromaSubsampling_Cosited)
++        return AVCHROMA_LOC_TOPLEFT;
++    else if (fmt_info->VideoChromaSubsampling == DXVA2_VideoChromaSubsampling_MPEG1)
++        return AVCHROMA_LOC_CENTER;
++    else if (fmt_info->VideoChromaSubsampling == DXVA2_VideoChromaSubsampling_MPEG2)
++        return AVCHROMA_LOC_LEFT;
++    else if (fmt_info->VideoChromaSubsampling == DXVA2_VideoChromaSubsampling_DV_PAL)
++        return AVCHROMA_LOC_TOPLEFT;
++    else
++
++        return AVCHROMA_LOC_UNSPECIFIED;
++}
++
+ static int
+ dshow_read_close(AVFormatContext *s)
+ {
+@@ -197,16 +377,92 @@ fail:
+     return;
+ }
+ 
++static void
++dshow_get_device_media_types(AVFormatContext *avctx, enum dshowDeviceType devtype,
++                                         enum dshowSourceFilterType sourcetype, IBaseFilter *device_filter,
++                                         enum AVMediaType **media_types, int *nb_media_types)
++{
++    IEnumPins *pins = 0;
++    IPin *pin;
++    int has_audio = 0, has_video = 0;
++
++    if (IBaseFilter_EnumPins(device_filter, &pins) != S_OK)
++        return;
++
++    while (IEnumPins_Next(pins, 1, &pin, NULL) == S_OK) {
++        IKsPropertySet *p = NULL;
++        PIN_INFO info = { 0 };
++        GUID category;
++        DWORD r2;
++        IEnumMediaTypes *types = NULL;
++        AM_MEDIA_TYPE *type;
++
++        if (IPin_QueryPinInfo(pin, &info) != S_OK)
++            goto next;
++        IBaseFilter_Release(info.pFilter);
++
++        if (info.dir != PINDIR_OUTPUT)
++            goto next;
++        if (IPin_QueryInterface(pin, &IID_IKsPropertySet, (void **) &p) != S_OK)
++            goto next;
++        if (IKsPropertySet_Get(p, &AMPROPSETID_Pin, AMPROPERTY_PIN_CATEGORY,
++                               NULL, 0, &category, sizeof(GUID), &r2) != S_OK)
++            goto next;
++        if (!IsEqualGUID(&category, &PIN_CATEGORY_CAPTURE))
++            goto next;
++
++        if (IPin_EnumMediaTypes(pin, &types) != S_OK)
++            goto next;
++
++
++
++        IEnumMediaTypes_Reset(types);
++        while (IEnumMediaTypes_Next(types, 1, &type, NULL) == S_OK) {
++            if (IsEqualGUID(&type->majortype, &MEDIATYPE_Video)) {
++                has_video = 1;
++            } else if (IsEqualGUID(&type->majortype, &MEDIATYPE_Audio)) {
++                has_audio = 1;
++            }
++            CoTaskMemFree(type);
++        }
++
++    next:
++        if (types)
++            IEnumMediaTypes_Release(types);
++        if (p)
++            IKsPropertySet_Release(p);
++        if (pin)
++            IPin_Release(pin);
++    }
++
++    IEnumPins_Release(pins);
++
++    if (has_audio || has_video) {
++        int nb_types = has_audio + has_video;
++
++        if (*media_types) {
++            if (has_audio)
++                (*media_types)[0] = AVMEDIA_TYPE_AUDIO;
++            if (has_video)
++                (*media_types)[0 + has_audio] = AVMEDIA_TYPE_VIDEO;
++
++        }
++    }
++}
++
+ /**
+  * Cycle through available devices using the device enumerator devenum,
+  * retrieve the device with type specified by devtype and return the
+  * pointer to the object found in *pfilter.
+  * If pfilter is NULL, list all device names.
++
++
+  */
+ static int
+ dshow_cycle_devices(AVFormatContext *avctx, ICreateDevEnum *devenum,
+                     enum dshowDeviceType devtype, enum dshowSourceFilterType sourcetype,
+-                    IBaseFilter **pfilter, char **device_unique_name)
++                    IBaseFilter **pfilter, char **device_unique_name,
++                    AVDeviceInfoList **device_list)
+ {
+     struct dshow_ctx *ctx = avctx->priv_data;
+     IBaseFilter *device_filter = NULL;
+@@ -238,18 +494,21 @@ dshow_cycle_devices(AVFormatContext *avctx, ICreateDevEnum *devenum,
+         IBindCtx *bind_ctx = NULL;
+         LPOLESTR olestr = NULL;
+         LPMALLOC co_malloc = NULL;
++        AVDeviceInfo *device = NULL;
++        enum AVMediaType *media_types = NULL;
++        int nb_media_types = 0;
+         int i;
+ 
+         r = CoGetMalloc(1, &co_malloc);
+         if (r != S_OK)
+-            goto fail1;
++            goto fail;
+         r = CreateBindCtx(0, &bind_ctx);
+         if (r != S_OK)
+-            goto fail1;
++            goto fail;
+         /* GetDisplayname works for both video and audio, DevicePath doesn't */
+         r = IMoniker_GetDisplayName(m, bind_ctx, NULL, &olestr);
+         if (r != S_OK)
+-            goto fail1;
++            goto fail;
+         unique_name = dup_wchar_to_utf8(olestr);
+         /* replace ':' with '_' since we use : to delineate between sources */
+         for (i = 0; i < strlen(unique_name); i++) {
+@@ -259,34 +518,88 @@ dshow_cycle_devices(AVFormatContext *avctx, ICreateDevEnum *devenum,
+ 
+         r = IMoniker_BindToStorage(m, 0, 0, &IID_IPropertyBag, (void *) &bag);
+         if (r != S_OK)
+-            goto fail1;
++            goto fail;
+ 
+         var.vt = VT_BSTR;
+         r = IPropertyBag_Read(bag, L"FriendlyName", &var, NULL);
+         if (r != S_OK)
+-            goto fail1;
++            goto fail;
+         friendly_name = dup_wchar_to_utf8(var.bstrVal);
+ 
+         if (pfilter) {
+             if (strcmp(device_name, friendly_name) && strcmp(device_name, unique_name))
+-                goto fail1;
++                goto fail;
+ 
+             if (!skip--) {
+                 r = IMoniker_BindToObject(m, 0, 0, &IID_IBaseFilter, (void *) &device_filter);
+                 if (r != S_OK) {
+                     av_log(avctx, AV_LOG_ERROR, "Unable to BindToObject for %s\n", device_name);
+-                    goto fail1;
++                    goto fail;
+                 }
+                 *device_unique_name = unique_name;
+                 unique_name = NULL;
+                 // success, loop will end now
+             }
+         } else {
+-            av_log(avctx, AV_LOG_INFO, " \"%s\"\n", friendly_name);
+-            av_log(avctx, AV_LOG_INFO, "    Alternative name \"%s\"\n", unique_name);
++
++            if (IMoniker_BindToObject(m, 0, 0, &IID_IBaseFilter, (void* ) &device_filter) == S_OK) {
++                dshow_get_device_media_types(avctx, devtype, sourcetype, device_filter, &media_types, &nb_media_types);
++                IBaseFilter_Release(device_filter);
++                device_filter = NULL;
++            }
++            if (device_list) {
++                device = av_mallocz(sizeof(AVDeviceInfo));
++                if (!device)
++                    goto fail;
++
++                device->device_name = av_strdup(friendly_name);
++                device->device_description = av_strdup(unique_name);
++                if (!device->device_name || !device->device_description)
++                    goto fail;
++
++
++                if (av_reallocp_array(&(*device_list)->devices,
++                                     (*device_list)->nb_devices + 1,
++                                     sizeof(*(*device_list)->devices)) < 0)
++                    goto fail;
++
++
++                device->nb_media_types = nb_media_types;
++                device->media_types = media_types;
++                nb_media_types = 0;
++                media_types = NULL;
++
++
++                (*device_list)->devices[(*device_list)->nb_devices] = device;
++                (*device_list)->nb_devices++;
++                device = NULL;
++            }
++            else {
++                av_log(avctx, AV_LOG_INFO, "\"%s\"", friendly_name);
++                if (nb_media_types > 0) {
++                    const char* media_type = av_get_media_type_string(media_types[0]);
++                    av_log(avctx, AV_LOG_INFO, " (%s", media_type ? media_type : "unknown");
++                    for (int i = 1; i < nb_media_types; ++i) {
++                        media_type = av_get_media_type_string(media_types[i]);
++                        av_log(avctx, AV_LOG_INFO, ", %s", media_type ? media_type : "unknown");
++                    }
++                    av_log(avctx, AV_LOG_INFO, ")");
++                } else {
++                    av_log(avctx, AV_LOG_INFO, " (none)");
++                }
++                av_log(avctx, AV_LOG_INFO, "\n");
++                av_log(avctx, AV_LOG_INFO, "  Alternative name \"%s\"\n", unique_name);
++            }
+         }
+ 
+-fail1:
++    fail:
++        av_freep(&media_types);
++        if (device) {
++            av_freep(&device->device_name);
++            av_freep(&device->device_description);
++
++            av_free(device);
++        }
+         if (olestr && co_malloc)
+             IMalloc_Free(co_malloc, olestr);
+         if (bind_ctx)
+@@ -312,9 +625,143 @@ fail1:
+     return 0;
+ }
+ 
++static int dshow_get_device_list(AVFormatContext *avctx, AVDeviceInfoList *device_list)
++{
++    ICreateDevEnum *devenum = NULL;
++    int r;
++    int ret = AVERROR(EIO);
++
++    if (!device_list)
++        return AVERROR(EINVAL);
++
++    CoInitialize(0);
++
++    r = CoCreateInstance(&CLSID_SystemDeviceEnum, NULL, CLSCTX_INPROC_SERVER,
++        &IID_ICreateDevEnum, (void**)&devenum);
++    if (r != S_OK) {
++        av_log(avctx, AV_LOG_ERROR, "Could not enumerate system devices.\n");
++        goto error;
++    }
++
++    ret = dshow_cycle_devices(avctx, devenum, VideoDevice, VideoSourceDevice, NULL, NULL, &device_list);
++    if (ret < S_OK)
++        goto error;
++    ret = dshow_cycle_devices(avctx, devenum, AudioDevice, AudioSourceDevice, NULL, NULL, &device_list);
++
++error:
++    if (devenum)
++        ICreateDevEnum_Release(devenum);
++
++    CoUninitialize();
++
++    return ret;
++}
++
++static int dshow_should_set_format(AVFormatContext *avctx, enum dshowDeviceType devtype)
++{
++    struct dshow_ctx *ctx = avctx->priv_data;
++
++    return (devtype == VideoDevice && (ctx->framerate ||
++                                      (ctx->requested_width && ctx->requested_height) ||
++                                       ctx->pixel_format != AV_PIX_FMT_NONE ||
++                                       ctx->video_codec_id != AV_CODEC_ID_RAWVIDEO))
++        || (devtype == AudioDevice && (ctx->channels || ctx->sample_size || ctx->sample_rate));
++}
++
++
++struct dshow_format_info {
++    enum dshowDeviceType devtype;
++
++    int64_t framerate;
++    enum AVPixelFormat pix_fmt;
++    enum AVCodecID codec_id;
++    enum AVColorRange col_range;
++    enum AVColorSpace col_space;
++    enum AVColorPrimaries col_prim;
++    enum AVColorTransferCharacteristic col_trc;
++    enum AVChromaLocation chroma_loc;
++    int width;
++    int height;
++
++    int sample_rate;
++    int sample_size;
++    int channels;
++};
++
++
++static struct dshow_format_info *dshow_get_format_info(AM_MEDIA_TYPE *type)
++{
++    struct dshow_format_info *fmt_info = NULL;
++    BITMAPINFOHEADER *bih;
++    DXVA2_ExtendedFormat *extended_format_info = NULL;
++    WAVEFORMATEX *fx;
++    enum dshowDeviceType devtype;
++    int64_t framerate;
++
++    if (!type)
++        return NULL;
++
++    if (IsEqualGUID(&type->formattype, &FORMAT_VideoInfo)) {
++        VIDEOINFOHEADER *v = (void *) type->pbFormat;
++        framerate = v->AvgTimePerFrame;
++        bih       = &v->bmiHeader;
++        devtype   = VideoDevice;
++    } else if (IsEqualGUID(&type->formattype, &FORMAT_VideoInfo2)) {
++        VIDEOINFOHEADER2 *v = (void *) type->pbFormat;
++        devtype   = VideoDevice;
++        framerate = v->AvgTimePerFrame;
++        bih       = &v->bmiHeader;
++        if (v->dwControlFlags & AMCONTROL_COLORINFO_PRESENT)
++            extended_format_info = (DXVA2_ExtendedFormat *) &v->dwControlFlags;
++    } else if (IsEqualGUID(&type->formattype, &FORMAT_WaveFormatEx)) {
++        fx = (void *) type->pbFormat;
++        devtype = AudioDevice;
++    } else {
++        return NULL;
++    }
++
++    fmt_info = av_mallocz(sizeof(struct dshow_format_info));
++    if (!fmt_info)
++        return NULL;
++
++    fmt_info->pix_fmt = AV_PIX_FMT_NONE;
++    fmt_info->col_space = AVCOL_SPC_UNSPECIFIED;
++    fmt_info->col_prim = AVCOL_PRI_UNSPECIFIED;
++    fmt_info->col_trc = AVCOL_TRC_UNSPECIFIED;
++
++    fmt_info->devtype = devtype;
++    if (devtype == VideoDevice) {
++        fmt_info->width = bih->biWidth;
++        fmt_info->height = bih->biHeight;
++        fmt_info->framerate = framerate;
++        fmt_info->pix_fmt = dshow_pixfmt(bih->biCompression, bih->biBitCount);
++        if (fmt_info->pix_fmt == AV_PIX_FMT_NONE) {
++            const AVCodecTag *const tags[] = { avformat_get_riff_video_tags(), NULL };
++            fmt_info->codec_id = av_codec_get_id(tags, bih->biCompression);
++        }
++        else
++            fmt_info->codec_id = AV_CODEC_ID_RAWVIDEO;
++
++        if (extended_format_info) {
++            fmt_info->col_range = dshow_color_range(extended_format_info);
++            fmt_info->col_space = dshow_color_space(extended_format_info);
++            fmt_info->col_prim = dshow_color_primaries(extended_format_info);
++            fmt_info->col_trc = dshow_color_trc(extended_format_info);
++            fmt_info->chroma_loc = dshow_chroma_loc(extended_format_info);
++        }
++    } else {
++        fmt_info->sample_rate = fx->nSamplesPerSec;
++        fmt_info->sample_size = fx->wBitsPerSample;
++        fmt_info->channels = fx->nChannels;
++    }
++
++    return fmt_info;
++}
++
+ /**
+- * Cycle through available formats using the specified pin,
+- * try to set parameters specified through AVOptions and if successful
++
++
++
+  * return 1 in *pformat_set.
+  * If pformat_set is NULL, list all pin capabilities.
+  */
+@@ -325,9 +772,27 @@ dshow_cycle_formats(AVFormatContext *avctx, enum dshowDeviceType devtype,
+     struct dshow_ctx *ctx = avctx->priv_data;
+     IAMStreamConfig *config = NULL;
+     AM_MEDIA_TYPE *type = NULL;
++    AM_MEDIA_TYPE *previous_match_type = NULL;
+     int format_set = 0;
+     void *caps = NULL;
+     int i, n, size, r;
++    int wait_for_better = 0;
++    int use_default;
++
++
++
++
++
++    enum AVCodecID requested_video_codec_id   = ctx->video_codec_id;
++    enum AVPixelFormat requested_pixel_format = ctx->pixel_format;
++    int64_t requested_framerate               = ctx->framerate ? ((int64_t)ctx->requested_framerate.den * 10000000)
++                                                                    / ctx->requested_framerate.num : 0;
++    int requested_width                       = ctx->requested_width;
++    int requested_height                      = ctx->requested_height;
++
++    int requested_sample_rate                 = ctx->sample_rate;
++    int requested_sample_size                 = ctx->sample_size;
++    int requested_channels                    = ctx->channels;
+ 
+     if (IPin_QueryInterface(pin, &IID_IAMStreamConfig, (void **) &config) != S_OK)
+         return;
+@@ -338,7 +803,83 @@ dshow_cycle_formats(AVFormatContext *avctx, enum dshowDeviceType devtype,
+     if (!caps)
+         goto end;
+ 
++
++
++
++
++
++
++
++    use_default = !dshow_should_set_format(avctx, devtype);
++    if (use_default && pformat_set)
++    {
++        HRESULT hr;
++
++
++        if ((hr = IAMStreamConfig_GetFormat(config, &type)) != S_OK) {
++            if (hr == E_NOTIMPL || !IsEqualGUID(&type->majortype, devtype==VideoDevice ? &MEDIATYPE_Video : &MEDIATYPE_Audio)) {
++
++
++
++                IEnumMediaTypes *types = NULL;
++                if (IPin_EnumMediaTypes(pin, &types) != S_OK)
++                    goto end;
++                IEnumMediaTypes_Reset(types);
++                while (IEnumMediaTypes_Next(types, 1, &type, NULL) == S_OK) {
++                    if (IsEqualGUID(&type->majortype, devtype==VideoDevice ? &MEDIATYPE_Video : &MEDIATYPE_Audio)) {
++                        break;
++                    }
++                    CoTaskMemFree(type);
++                    type = NULL;
++                }
++                IEnumMediaTypes_Release(types);
++            }
++
++            if (!type)
++
++                goto end;
++        }
++
++        if (type) {
++
++            struct dshow_format_info *fmt_info = dshow_get_format_info(type);
++            if (fmt_info) {
++                if (fmt_info->devtype == VideoDevice) {
++                    requested_video_codec_id = fmt_info->codec_id;
++                    requested_pixel_format   = fmt_info->pix_fmt;
++                    requested_framerate      = fmt_info->framerate;
++                    requested_width          = fmt_info->width;
++                    requested_height         = fmt_info->height;
++                } else {
++                    requested_sample_rate = fmt_info->sample_rate;
++                    requested_sample_size = fmt_info->sample_size;
++                    requested_channels    = fmt_info->channels;
++                }
++                av_free(fmt_info);
++            }
++
++            if (type && type->pbFormat)
++                CoTaskMemFree(type->pbFormat);
++            CoTaskMemFree(type);
++            type = NULL;
++            if (!fmt_info)
++
++                goto end;
++            fmt_info = NULL;
++        }
++    }
++
++
++
++
++
++
++
++
++
++
+     for (i = 0; i < n && !format_set; i++) {
++        struct dshow_format_info *fmt_info = NULL;
+         r = IAMStreamConfig_GetStreamCaps(config, i, &type, (void *) caps);
+         if (r != S_OK)
+             goto next;
+@@ -346,74 +887,101 @@ dshow_cycle_formats(AVFormatContext *avctx, enum dshowDeviceType devtype,
+         ff_print_AM_MEDIA_TYPE(type);
+ #endif
+ 
++        fmt_info = dshow_get_format_info(type);
++        if (!fmt_info)
++            goto next;
++
+         if (devtype == VideoDevice) {
+             VIDEO_STREAM_CONFIG_CAPS *vcaps = caps;
+             BITMAPINFOHEADER *bih;
+             int64_t *fr;
+-            const AVCodecTag *const tags[] = { avformat_get_riff_video_tags(), NULL };
+ #if DSHOWDEBUG
+             ff_print_VIDEO_STREAM_CONFIG_CAPS(vcaps);
+ #endif
++
++            if (fmt_info->devtype != VideoDevice)
++                goto next;
++
+             if (IsEqualGUID(&type->formattype, &FORMAT_VideoInfo)) {
+                 VIDEOINFOHEADER *v = (void *) type->pbFormat;
+-                fr = &v->AvgTimePerFrame;
++                fr  = &v->AvgTimePerFrame;
+                 bih = &v->bmiHeader;
++                wait_for_better = 1;
+             } else if (IsEqualGUID(&type->formattype, &FORMAT_VideoInfo2)) {
+                 VIDEOINFOHEADER2 *v = (void *) type->pbFormat;
+-                fr = &v->AvgTimePerFrame;
++                fr  = &v->AvgTimePerFrame;
+                 bih = &v->bmiHeader;
+-            } else {
+-                goto next;
++                wait_for_better = 0;
+             }
++
+             if (!pformat_set) {
+-                enum AVPixelFormat pix_fmt = dshow_pixfmt(bih->biCompression, bih->biBitCount);
+-                if (pix_fmt == AV_PIX_FMT_NONE) {
+-                    enum AVCodecID codec_id = av_codec_get_id(tags, bih->biCompression);
+-                    const AVCodec *codec = avcodec_find_decoder(codec_id);
+-                    if (codec_id == AV_CODEC_ID_NONE || !codec) {
++                const char *chroma = av_chroma_location_name(fmt_info->chroma_loc);
++                if (fmt_info->pix_fmt == AV_PIX_FMT_NONE) {
++                    const AVCodec *codec = avcodec_find_decoder(fmt_info->codec_id);
++                    if (fmt_info->codec_id == AV_CODEC_ID_NONE || !codec) {
+                         av_log(avctx, AV_LOG_INFO, "  unknown compression type 0x%X", (int) bih->biCompression);
+                     } else {
+                         av_log(avctx, AV_LOG_INFO, "  vcodec=%s", codec->name);
+                     }
+                 } else {
+-                    av_log(avctx, AV_LOG_INFO, "  pixel_format=%s", av_get_pix_fmt_name(pix_fmt));
++                    av_log(avctx, AV_LOG_INFO, "  pixel_format=%s", av_get_pix_fmt_name(fmt_info->pix_fmt));
+                 }
+-                av_log(avctx, AV_LOG_INFO, "  min s=%ldx%ld fps=%g max s=%ldx%ld fps=%g\n",
++                av_log(avctx, AV_LOG_INFO, "  min s=%ldx%ld fps=%g max s=%ldx%ld fps=%g",
+                        vcaps->MinOutputSize.cx, vcaps->MinOutputSize.cy,
+                        1e7 / vcaps->MaxFrameInterval,
+                        vcaps->MaxOutputSize.cx, vcaps->MaxOutputSize.cy,
+                        1e7 / vcaps->MinFrameInterval);
++
++                if (fmt_info->col_range != AVCOL_RANGE_UNSPECIFIED ||
++                    fmt_info->col_space != AVCOL_SPC_UNSPECIFIED ||
++                    fmt_info->col_prim != AVCOL_PRI_UNSPECIFIED ||
++                    fmt_info->col_trc != AVCOL_TRC_UNSPECIFIED) {
++                    const char *range = av_color_range_name(fmt_info->col_range);
++                    const char *space = av_color_space_name(fmt_info->col_space);
++                    const char *prim = av_color_primaries_name(fmt_info->col_prim);
++                    const char *trc = av_color_transfer_name(fmt_info->col_trc);
++                    av_log(avctx, AV_LOG_INFO, " (%s, %s/%s/%s",
++                        range ? range : "unknown",
++                        space ? space : "unknown",
++                        prim  ? prim  : "unknown",
++                        trc   ? trc   : "unknown");
++                    if (fmt_info->chroma_loc != AVCHROMA_LOC_UNSPECIFIED)
++                        av_log(avctx, AV_LOG_INFO, ", %s", chroma ? chroma : "unknown");
++                    av_log(avctx, AV_LOG_INFO, ")");
++                }
++                else if (fmt_info->chroma_loc != AVCHROMA_LOC_UNSPECIFIED)
++                    av_log(avctx, AV_LOG_INFO, "(%s)", chroma ? chroma : "unknown");
++
++                av_log(avctx, AV_LOG_INFO, "\n");
+                 continue;
+             }
+-            if (ctx->video_codec_id != AV_CODEC_ID_RAWVIDEO) {
+-                if (ctx->video_codec_id != av_codec_get_id(tags, bih->biCompression))
++            if (requested_video_codec_id != AV_CODEC_ID_RAWVIDEO) {
++                if (requested_video_codec_id != fmt_info->codec_id)
+                     goto next;
+             }
+-            if (ctx->pixel_format != AV_PIX_FMT_NONE &&
+-                ctx->pixel_format != dshow_pixfmt(bih->biCompression, bih->biBitCount)) {
++            if (requested_pixel_format != AV_PIX_FMT_NONE &&
++                requested_pixel_format != fmt_info->pix_fmt) {
+                 goto next;
+             }
+-            if (ctx->framerate) {
+-                int64_t framerate = ((int64_t) ctx->requested_framerate.den*10000000)
+-                                            /  ctx->requested_framerate.num;
+-                if (framerate > vcaps->MaxFrameInterval ||
+-                    framerate < vcaps->MinFrameInterval)
++            if (requested_framerate) {
++                if (requested_framerate > vcaps->MaxFrameInterval ||
++                    requested_framerate < vcaps->MinFrameInterval)
+                     goto next;
+-                *fr = framerate;
++
+             }
+-            if (ctx->requested_width && ctx->requested_height) {
+-                if (ctx->requested_width  > vcaps->MaxOutputSize.cx ||
+-                    ctx->requested_width  < vcaps->MinOutputSize.cx ||
+-                    ctx->requested_height > vcaps->MaxOutputSize.cy ||
+-                    ctx->requested_height < vcaps->MinOutputSize.cy)
++            if (requested_width && requested_height) {
++                if (requested_width  > vcaps->MaxOutputSize.cx ||
++                    requested_width  < vcaps->MinOutputSize.cx ||
++                    requested_height > vcaps->MaxOutputSize.cy ||
++                    requested_height < vcaps->MinOutputSize.cy)
+                     goto next;
+-                bih->biWidth  = ctx->requested_width;
+-                bih->biHeight = ctx->requested_height;
++                bih->biWidth  = requested_width;
++                bih->biHeight = requested_height;
+             }
+         } else {
+             WAVEFORMATEX *fx;
+-#if DSHOWDEBUG
+             AUDIO_STREAM_CONFIG_CAPS *acaps = caps;
++#if DSHOWDEBUG
+             ff_print_AUDIO_STREAM_CONFIG_CAPS(acaps);
+ #endif
+             if (IsEqualGUID(&type->formattype, &FORMAT_WaveFormatEx)) {
+@@ -430,23 +998,62 @@ dshow_cycle_formats(AVFormatContext *avctx, enum dshowDeviceType devtype,
+                 );
+                 continue;
+             }
+-            if (
+-                (ctx->sample_rate && ctx->sample_rate != fx->nSamplesPerSec) ||
+-                (ctx->sample_size && ctx->sample_size != fx->wBitsPerSample) ||
+-                (ctx->channels    && ctx->channels    != fx->nChannels     )
+-            ) {
+-                goto next;
++            if (requested_sample_rate) {
++                if (requested_sample_rate > acaps->MaximumSampleFrequency ||
++                    requested_sample_rate < acaps->MinimumSampleFrequency)
++                    goto next;
++                fx->nSamplesPerSec = requested_sample_rate;
++            }
++            if (requested_sample_size) {
++                if (requested_sample_size > acaps->MaximumBitsPerSample ||
++                    requested_sample_size < acaps->MinimumBitsPerSample)
++                    goto next;
++                fx->wBitsPerSample = requested_sample_size;
++            }
++            if (requested_channels) {
++                if (requested_channels > acaps->MaximumChannels ||
++                    requested_channels < acaps->MinimumChannels)
++                    goto next;
++                fx->nChannels = requested_channels;
+             }
+         }
+-        if (IAMStreamConfig_SetFormat(config, type) != S_OK)
+-            goto next;
+-        format_set = 1;
++
++
++
++
++
++        if (!wait_for_better) {
++            if (IAMStreamConfig_SetFormat(config, type) != S_OK)
++                goto next;
++            format_set = 1;
++        }
++        else if (!previous_match_type) {
++
++
++            previous_match_type = type;
++            type = NULL;
++        }
+ next:
+-        if (type->pbFormat)
++        av_freep(&fmt_info);
++        if (type && type->pbFormat)
+             CoTaskMemFree(type->pbFormat);
+         CoTaskMemFree(type);
+     }
++
++
++
++
++
++
++    if (!format_set && previous_match_type) {
++        if (IAMStreamConfig_SetFormat(config, previous_match_type) == S_OK)
++            format_set = 1;
++    }
++
+ end:
++    if (previous_match_type && previous_match_type->pbFormat)
++        CoTaskMemFree(previous_match_type->pbFormat);
++    CoTaskMemFree(previous_match_type);
+     IAMStreamConfig_Release(config);
+     av_free(caps);
+     if (pformat_set)
+@@ -561,15 +1168,10 @@ dshow_cycle_pins(AVFormatContext *avctx, enum dshowDeviceType devtype,
+     IPin *pin;
+     int r;
+ 
+-    const GUID *mediatype[2] = { &MEDIATYPE_Video, &MEDIATYPE_Audio };
+     const char *devtypename = (devtype == VideoDevice) ? "video" : "audio only";
+     const char *sourcetypename = (sourcetype == VideoSourceDevice) ? "video" : "audio";
+ 
+-    int set_format = (devtype == VideoDevice && (ctx->framerate ||
+-                                                (ctx->requested_width && ctx->requested_height) ||
+-                                                 ctx->pixel_format != AV_PIX_FMT_NONE ||
+-                                                 ctx->video_codec_id != AV_CODEC_ID_RAWVIDEO))
+-                  || (devtype == AudioDevice && (ctx->channels || ctx->sample_rate || ctx->sample_size));
++    int set_format = dshow_should_set_format(avctx, devtype);
+     int format_set = 0;
+     int should_show_properties = (devtype == VideoDevice) ? ctx->show_video_device_dialog : ctx->show_audio_device_dialog;
+ 
+@@ -589,9 +1191,7 @@ dshow_cycle_pins(AVFormatContext *avctx, enum dshowDeviceType devtype,
+ 
+     while (!device_pin && IEnumPins_Next(pins, 1, &pin, NULL) == S_OK) {
+         IKsPropertySet *p = NULL;
+-        IEnumMediaTypes *types = NULL;
+         PIN_INFO info = {0};
+-        AM_MEDIA_TYPE *type;
+         GUID category;
+         DWORD r2;
+         char *name_buf = NULL;
+@@ -634,35 +1234,24 @@ dshow_cycle_pins(AVFormatContext *avctx, enum dshowDeviceType devtype,
+             }
+         }
+ 
+-        if (set_format) {
+-            dshow_cycle_formats(avctx, devtype, pin, &format_set);
+-            if (!format_set) {
+-                goto next;
+-            }
++
++
++        dshow_cycle_formats(avctx, devtype, pin, &format_set);
++        if (!format_set) {
++            goto next;
+         }
++
+         if (devtype == AudioDevice && ctx->audio_buffer_size) {
+             if (dshow_set_audio_buffer_size(avctx, pin) < 0) {
+                 av_log(avctx, AV_LOG_ERROR, "unable to set audio buffer size %d to pin, using pin anyway...", ctx->audio_buffer_size);
+             }
+         }
+ 
+-        if (IPin_EnumMediaTypes(pin, &types) != S_OK)
+-            goto next;
+-
+-        IEnumMediaTypes_Reset(types);
+-        /* in case format_set was not called, just verify the majortype */
+-        while (!device_pin && IEnumMediaTypes_Next(types, 1, &type, NULL) == S_OK) {
+-            if (IsEqualGUID(&type->majortype, mediatype[devtype])) {
+-                device_pin = pin;
+-                av_log(avctx, AV_LOG_DEBUG, "Selecting pin %s on %s\n", name_buf, devtypename);
+-                goto next;
+-            }
+-            CoTaskMemFree(type);
++        if (format_set) {
++            device_pin = pin;
++            av_log(avctx, AV_LOG_DEBUG, "Selecting pin %s on %s\n", name_buf, devtypename);
+         }
+-
+ next:
+-        if (types)
+-            IEnumMediaTypes_Release(types);
+         if (p)
+             IKsPropertySet_Release(p);
+         if (device_pin != pin)
+@@ -705,12 +1294,12 @@ dshow_list_device_options(AVFormatContext *avctx, ICreateDevEnum *devenum,
+     char *device_unique_name = NULL;
+     int r;
+ 
+-    if ((r = dshow_cycle_devices(avctx, devenum, devtype, sourcetype, &device_filter, &device_unique_name)) < 0)
++    if ((r = dshow_cycle_devices(avctx, devenum, devtype, sourcetype, &device_filter, &device_unique_name, NULL)) < 0)
+         return r;
+     ctx->device_filter[devtype] = device_filter;
++    ctx->device_unique_name[devtype] = device_unique_name;
+     if ((r = dshow_cycle_pins(avctx, devtype, sourcetype, device_filter, NULL)) < 0)
+         return r;
+-    av_freep(&device_unique_name);
+     return 0;
+ }
+ 
+@@ -765,7 +1354,7 @@ dshow_open_device(AVFormatContext *avctx, ICreateDevEnum *devenum,
+         av_log(avctx, AV_LOG_INFO, "Capture filter loaded successfully from file \"%s\".\n", filename);
+     } else {
+ 
+-        if ((r = dshow_cycle_devices(avctx, devenum, devtype, sourcetype, &device_filter, &device_filter_unique_name)) < 0) {
++        if ((r = dshow_cycle_devices(avctx, devenum, devtype, sourcetype, &device_filter, &device_filter_unique_name, NULL)) < 0) {
+             ret = r;
+             goto error;
+         }
+@@ -932,6 +1521,7 @@ dshow_add_device(AVFormatContext *avctx,
+     AM_MEDIA_TYPE type;
+     AVCodecParameters *par;
+     AVStream *st;
++    struct dshow_format_info *fmt_info = NULL;
+     int ret = AVERROR(EIO);
+ 
+     type.pbFormat = NULL;
+@@ -946,6 +1536,11 @@ dshow_add_device(AVFormatContext *avctx,
+     ctx->capture_filter[devtype]->stream_index = st->index;
+ 
+     ff_dshow_pin_ConnectionMediaType(ctx->capture_pin[devtype], &type);
++    fmt_info = dshow_get_format_info(&type);
++    if (!fmt_info) {
++        ret = AVERROR(EIO);
++        goto error;
++    }
+ 
+     par = st->codecpar;
+     if (devtype == VideoDevice) {
+@@ -970,26 +1565,21 @@ dshow_add_device(AVFormatContext *avctx,
+         st->r_frame_rate = av_inv_q(time_base);
+ 
+         par->codec_type = AVMEDIA_TYPE_VIDEO;
+-        par->width      = bih->biWidth;
+-        par->height     = bih->biHeight;
++        par->width      = fmt_info->width;
++        par->height     = fmt_info->height;
+         par->codec_tag  = bih->biCompression;
+-        par->format     = dshow_pixfmt(bih->biCompression, bih->biBitCount);
++        par->format     = fmt_info->pix_fmt;
+         if (bih->biCompression == MKTAG('H', 'D', 'Y', 'C')) {
+             av_log(avctx, AV_LOG_DEBUG, "attempt to use full range for HDYC...\n");
+             par->color_range = AVCOL_RANGE_MPEG; // just in case it needs this...
+         }
+-        if (par->format == AV_PIX_FMT_NONE) {
+-            const AVCodecTag *const tags[] = { avformat_get_riff_video_tags(), NULL };
+-            par->codec_id = av_codec_get_id(tags, bih->biCompression);
+-            if (par->codec_id == AV_CODEC_ID_NONE) {
+-                av_log(avctx, AV_LOG_ERROR, "Unknown compression type. "
+-                                 "Please report type 0x%X.\n", (int) bih->biCompression);
+-                ret = AVERROR_PATCHWELCOME;
+-                goto error;
+-            }
+-            par->bits_per_coded_sample = bih->biBitCount;
+-        } else {
+-            par->codec_id = AV_CODEC_ID_RAWVIDEO;
++        par->color_range = fmt_info->col_range;
++        par->color_space = fmt_info->col_space;
++        par->color_primaries = fmt_info->col_prim;
++        par->color_trc = fmt_info->col_trc;
++        par->chroma_location = fmt_info->chroma_loc;
++        par->codec_id = fmt_info->codec_id;
++        if (par->codec_id == AV_CODEC_ID_RAWVIDEO) {
+             if (bih->biCompression == BI_RGB || bih->biCompression == BI_BITFIELDS) {
+                 par->bits_per_coded_sample = bih->biBitCount;
+                 if (par->height < 0) {
+@@ -1002,23 +1592,26 @@ dshow_add_device(AVFormatContext *avctx,
+                     }
+                 }
+             }
++        } else {
++            if (par->codec_id == AV_CODEC_ID_NONE) {
++                av_log(avctx, AV_LOG_ERROR, "Unknown compression type. "
++                                 "Please report type 0x%X.\n", (int) bih->biCompression);
++                ret = AVERROR_PATCHWELCOME;
++                goto error;
++            }
++            par->bits_per_coded_sample = bih->biBitCount;
+         }
+     } else {
+-        WAVEFORMATEX *fx = NULL;
+-
+-        if (IsEqualGUID(&type.formattype, &FORMAT_WaveFormatEx)) {
+-            fx = (void *) type.pbFormat;
+-        }
+-        if (!fx) {
++        if (!IsEqualGUID(&type.formattype, &FORMAT_WaveFormatEx)) {
+             av_log(avctx, AV_LOG_ERROR, "Could not get media type.\n");
+             goto error;
+         }
+ 
+         par->codec_type  = AVMEDIA_TYPE_AUDIO;
+-        par->format      = sample_fmt_bits_per_sample(fx->wBitsPerSample);
++        par->format      = sample_fmt_bits_per_sample(fmt_info->sample_size);
+         par->codec_id    = waveform_codec_id(par->format);
+-        par->sample_rate = fx->nSamplesPerSec;
+-        par->channels    = fx->nChannels;
++        par->sample_rate = fmt_info->sample_rate;
++        par->channels    = fmt_info->channels;
+     }
+ 
+     avpriv_set_pts_info(st, 64, 1, 10000000);
+@@ -1026,6 +1619,7 @@ dshow_add_device(AVFormatContext *avctx,
+     ret = 0;
+ 
+ error:
++    av_freep(&fmt_info);
+     if (type.pbFormat)
+         CoTaskMemFree(type.pbFormat);
+     return ret;
+@@ -1121,10 +1715,8 @@ static int dshow_read_header(AVFormatContext *avctx)
+     }
+ 
+     if (ctx->list_devices) {
+-        av_log(avctx, AV_LOG_INFO, "DirectShow video devices (some may be both video and audio devices)\n");
+-        dshow_cycle_devices(avctx, devenum, VideoDevice, VideoSourceDevice, NULL, NULL);
+-        av_log(avctx, AV_LOG_INFO, "DirectShow audio devices\n");
+-        dshow_cycle_devices(avctx, devenum, AudioDevice, AudioSourceDevice, NULL, NULL);
++        dshow_cycle_devices(avctx, devenum, VideoDevice, VideoSourceDevice, NULL, NULL, NULL);
++        dshow_cycle_devices(avctx, devenum, AudioDevice, AudioSourceDevice, NULL, NULL, NULL);
+         ret = AVERROR_EXIT;
+         goto error;
+     }
+@@ -1143,6 +1735,7 @@ static int dshow_read_header(AVFormatContext *avctx)
+                 }
+             }
+         }
++
+     }
+     if (ctx->device_name[VideoDevice]) {
+         if ((r = dshow_open_device(avctx, devenum, VideoDevice, VideoSourceDevice)) < 0 ||
+@@ -1309,6 +1902,7 @@ static const AVOption options[] = {
+     { "audio_device_save", "save audio capture filter device (and properties) to file", OFFSET(audio_filter_save_file), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, DEC },
+     { "video_device_load", "load video capture filter device (and properties) from file", OFFSET(video_filter_load_file), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, DEC },
+     { "video_device_save", "save video capture filter device (and properties) to file", OFFSET(video_filter_save_file), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, DEC },
++    { "use_video_device_timestamps", "use device instead of wallclock timestamps for video frames", OFFSET(use_video_device_timestamps), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, DEC },
+     { NULL },
+ };
+ 
+@@ -1327,6 +1921,7 @@ const AVInputFormat ff_dshow_demuxer = {
+     .read_header    = dshow_read_header,
+     .read_packet    = dshow_read_packet,
+     .read_close     = dshow_read_close,
+-    .flags          = AVFMT_NOFILE,
++    .get_device_list= dshow_get_device_list,
++    .flags          = AVFMT_NOFILE | AVFMT_NOBINSEARCH | AVFMT_NOGENSEARCH | AVFMT_NO_BYTE_SEEK,
+     .priv_class     = &dshow_class,
+ };
+diff --git a/libavdevice/dshow_capture.h b/libavdevice/dshow_capture.h
+index 06ded2b..5a26915 100644
+--- a/libavdevice/dshow_capture.h
++++ b/libavdevice/dshow_capture.h
+@@ -312,6 +312,7 @@ struct dshow_ctx {
+     char *audio_filter_save_file;
+     char *video_filter_load_file;
+     char *video_filter_save_file;
++    int   use_video_device_timestamps;
+ 
+     IBaseFilter *device_filter[2];
+     IPin        *device_pin[2];
+diff --git a/libavdevice/dshow_pin.c b/libavdevice/dshow_pin.c
+index 3dae405..2d1fa0e 100644
+--- a/libavdevice/dshow_pin.c
++++ b/libavdevice/dshow_pin.c
+@@ -295,13 +295,15 @@ long ff_dshow_meminputpin_Receive(DShowMemInputPin *this, IMediaSample *sample)
+     uint8_t *buf;
+     int buf_size; /* todo should be a long? */
+     int index;
+-    int64_t curtime;
+-    int64_t orig_curtime;
+-    int64_t graphtime;
++    int64_t chosentime = 0;
++    int64_t sampletime = 0;
++    int64_t graphtime = 0;
++    int use_sample_time = 1;
+     const char *devtypename = (devtype == VideoDevice) ? "video" : "audio";
+     IReferenceClock *clock = pin->filter->clock;
+     int64_t dummy;
+     struct dshow_ctx *ctx;
++    HRESULT hr;
+ 
+ 
+     dshowdebug("ff_dshow_meminputpin_Receive(%p)\n", this);
+@@ -309,36 +311,46 @@ long ff_dshow_meminputpin_Receive(DShowMemInputPin *this, IMediaSample *sample)
+     if (!sample)
+         return E_POINTER;
+ 
+-    IMediaSample_GetTime(sample, &orig_curtime, &dummy);
+-    orig_curtime += pin->filter->start_time;
++    priv_data = pin->filter->priv_data;
++    s = priv_data;
++    ctx = s->priv_data;
++
++    hr = IMediaSample_GetTime(sample, &sampletime, &dummy);
+     IReferenceClock_GetTime(clock, &graphtime);
+-    if (devtype == VideoDevice) {
++    if (devtype == VideoDevice && !ctx->use_video_device_timestamps) {
+         /* PTS from video devices is unreliable. */
+-        IReferenceClock_GetTime(clock, &curtime);
++        chosentime = graphtime;
++        use_sample_time = 0;
+     } else {
+-        IMediaSample_GetTime(sample, &curtime, &dummy);
+-        if(curtime > 400000000000000000LL) {
++        if (hr == VFW_E_SAMPLE_TIME_NOT_SET || sampletime == 0) {
++            chosentime = graphtime;
++            use_sample_time = 0;
++            av_log(s, AV_LOG_DEBUG,
++                "frame with missing sample timestamp encountered, falling back to graph timestamp\n");
++        }
++        else if (sampletime > 400000000000000000LL) {
+             /* initial frames sometimes start < 0 (shown as a very large number here,
+-               like 437650244077016960 which FFmpeg doesn't like.
++               like 437650244077016960 which FFmpeg doesn't like).
+                TODO figure out math. For now just drop them. */
+-            av_log(NULL, AV_LOG_DEBUG,
+-                "dshow dropping initial (or ending) audio frame with odd PTS too high %"PRId64"\n", curtime);
++            av_log(s, AV_LOG_DEBUG,
++                "dropping initial (or ending) sample with odd PTS too high %"PRId64"\n", sampletime);
+             return S_OK;
+-        }
+-        curtime += pin->filter->start_time;
++        } else
++            chosentime = sampletime;
+     }
++
++    sampletime += pin->filter->start_time;
++    if (use_sample_time)
++        chosentime += pin->filter->start_time;
+ 
+     buf_size = IMediaSample_GetActualDataLength(sample);
+     IMediaSample_GetPointer(sample, &buf);
+-    priv_data = pin->filter->priv_data;
+-    s = priv_data;
+-    ctx = s->priv_data;
+     index = pin->filter->stream_index;
+ 
+-    av_log(NULL, AV_LOG_VERBOSE, "dshow passing through packet of type %s size %8d "
++    av_log(s, AV_LOG_VERBOSE, "passing through packet of type %s size %8d "
+         "timestamp %"PRId64" orig timestamp %"PRId64" graph timestamp %"PRId64" diff %"PRId64" %s\n",
+-        devtypename, buf_size, curtime, orig_curtime, graphtime, graphtime - orig_curtime, ctx->device_name[devtype]);
+-    pin->filter->callback(priv_data, index, buf, buf_size, curtime, devtype);
++        devtypename, buf_size, chosentime, sampletime, graphtime, graphtime - sampletime, ctx->device_name[devtype]);
++    pin->filter->callback(priv_data, index, buf, buf_size, chosentime, devtype);
+ 
+     return S_OK;
+ }
+diff --git a/libavdevice/version.h b/libavdevice/version.h
+index 914e156..41f568d 100644
+--- a/libavdevice/version.h
++++ b/libavdevice/version.h
+@@ -28,8 +28,8 @@
+ #include "libavutil/version.h"
+ 
+ #define LIBAVDEVICE_VERSION_MAJOR  59
+-#define LIBAVDEVICE_VERSION_MINOR   0
+-#define LIBAVDEVICE_VERSION_MICRO 101
++#define LIBAVDEVICE_VERSION_MINOR   1
++#define LIBAVDEVICE_VERSION_MICRO 100
+ 
+ #define LIBAVDEVICE_VERSION_INT AV_VERSION_INT(LIBAVDEVICE_VERSION_MAJOR, \
+                                                LIBAVDEVICE_VERSION_MINOR, \
+diff --git a/libavfilter/Makefile b/libavfilter/Makefile
+index cb328c2..090944a 100644
+--- a/libavfilter/Makefile
++++ b/libavfilter/Makefile
+@@ -71,6 +71,7 @@ OBJS-$(CONFIG_AMIX_FILTER)                   += af_amix.o
+ OBJS-$(CONFIG_AMULTIPLY_FILTER)              += af_amultiply.o
+ OBJS-$(CONFIG_ANEQUALIZER_FILTER)            += af_anequalizer.o
+ OBJS-$(CONFIG_ANLMDN_FILTER)                 += af_anlmdn.o
++OBJS-$(CONFIG_ANLMF_FILTER)                  += af_anlms.o
+ OBJS-$(CONFIG_ANLMS_FILTER)                  += af_anlms.o
+ OBJS-$(CONFIG_ANULL_FILTER)                  += af_anull.o
+ OBJS-$(CONFIG_APAD_FILTER)                   += af_apad.o
+diff --git a/libavfilter/af_anlms.c b/libavfilter/af_anlms.c
+index f1f82b4..f20e3c0 100644
+--- a/libavfilter/af_anlms.c
++++ b/libavfilter/af_anlms.c
+@@ -54,6 +54,8 @@ typedef struct AudioNLMSContext {
+ 
+     AVFrame *frame[2];
+ 
++    int anlmf;
++
+     AVFloatDSPContext *fdsp;
+ } AudioNLMSContext;
+ 
+@@ -74,7 +76,7 @@ static const AVOption anlms_options[] = {
+     { NULL }
+ };
+ 
+-AVFILTER_DEFINE_CLASS(anlms);
++AVFILTER_DEFINE_CLASS_EXT(anlms, "anlm(f|s)", anlms_options);
+ 
+ static int query_formats(AVFilterContext *ctx)
+ {
+@@ -130,6 +132,8 @@ static float process_sample(AudioNLMSContext *s, float input, float desired,
+ 
+     norm = s->eps + sum;
+     b = mu * e / norm;
++    if (s->anlmf)
++        b *= 4.f * e * e;
+ 
+     memcpy(tmp, delay + offset, order * sizeof(float));
+ 
+@@ -241,6 +245,7 @@ static int config_output(AVFilterLink *outlink)
+     AVFilterContext *ctx = outlink->src;
+     AudioNLMSContext *s = ctx->priv;
+ 
++    s->anlmf = !strcmp(ctx->filter->name, "anlmf");
+     s->kernel_size = FFALIGN(s->order, 16);
+ 
+     if (!s->offset)
+@@ -312,3 +317,18 @@ const AVFilter ff_af_anlms = {
+     .flags          = AVFILTER_FLAG_SLICE_THREADS,
+     .process_command = ff_filter_process_command,
+ };
++
++const AVFilter ff_af_anlmf = {
++    .name           = "anlmf",
++    .description    = NULL_IF_CONFIG_SMALL("Apply Normalized Least-Mean-Fourth algorithm to first audio stream."),
++    .priv_size      = sizeof(AudioNLMSContext),
++    .priv_class     = &anlms_class,
++    .init           = init,
++    .uninit         = uninit,
++    .activate       = activate,
++    FILTER_INPUTS(inputs),
++    FILTER_OUTPUTS(outputs),
++    FILTER_QUERY_FUNC(query_formats),
++    .flags          = AVFILTER_FLAG_SLICE_THREADS,
++    .process_command = ff_filter_process_command,
++};
+diff --git a/libavfilter/allfilters.c b/libavfilter/allfilters.c
+index 26f1c73..caa7553 100644
+--- a/libavfilter/allfilters.c
++++ b/libavfilter/allfilters.c
+@@ -64,6 +64,7 @@ extern const AVFilter ff_af_amix;
+ extern const AVFilter ff_af_amultiply;
+ extern const AVFilter ff_af_anequalizer;
+ extern const AVFilter ff_af_anlmdn;
++extern const AVFilter ff_af_anlmf;
+ extern const AVFilter ff_af_anlms;
+ extern const AVFilter ff_af_anull;
+ extern const AVFilter ff_af_apad;
+diff --git a/libavfilter/version.h b/libavfilter/version.h
+index 0253c91..a4066fd 100644
+--- a/libavfilter/version.h
++++ b/libavfilter/version.h
+@@ -30,7 +30,7 @@
+ #include "libavutil/version.h"
+ 
+ #define LIBAVFILTER_VERSION_MAJOR   8
+-#define LIBAVFILTER_VERSION_MINOR  20
++#define LIBAVFILTER_VERSION_MINOR  21
+ #define LIBAVFILTER_VERSION_MICRO 100
+ 
+ 
+diff --git a/libavformat/Makefile b/libavformat/Makefile
+index 2b5caf9..10d1a89 100644
+--- a/libavformat/Makefile
++++ b/libavformat/Makefile
+@@ -138,6 +138,7 @@ OBJS-$(CONFIG_BINKA_DEMUXER)             += binka.o
+ OBJS-$(CONFIG_BINTEXT_DEMUXER)           += bintext.o sauce.o
+ OBJS-$(CONFIG_BIT_DEMUXER)               += bit.o
+ OBJS-$(CONFIG_BIT_MUXER)                 += bit.o
++OBJS-$(CONFIG_BITPACKED_DEMUXER)         += rawvideodec.o
+ OBJS-$(CONFIG_BMV_DEMUXER)               += bmv.o
+ OBJS-$(CONFIG_BOA_DEMUXER)               += boadec.o
+ OBJS-$(CONFIG_BFSTM_DEMUXER)             += brstm.o
+@@ -285,6 +286,7 @@ OBJS-$(CONFIG_IMAGE_WEBP_PIPE_DEMUXER)    += img2dec.o img2.o
+ OBJS-$(CONFIG_IMAGE_XBM_PIPE_DEMUXER)     += img2dec.o img2.o
+ OBJS-$(CONFIG_IMAGE_XPM_PIPE_DEMUXER)     += img2dec.o img2.o
+ OBJS-$(CONFIG_IMAGE_XWD_PIPE_DEMUXER)     += img2dec.o img2.o
++OBJS-$(CONFIG_IMF_DEMUXER)               += imfdec.o imf_cpl.o
+ OBJS-$(CONFIG_INGENIENT_DEMUXER)         += ingenientdec.o rawdec.o
+ OBJS-$(CONFIG_IPMOVIE_DEMUXER)           += ipmovie.o
+ OBJS-$(CONFIG_IPU_DEMUXER)               += ipudec.o rawdec.o
+@@ -696,6 +698,7 @@ TESTPROGS-$(CONFIG_FFRTMPCRYPT_PROTOCOL) += rtmpdh
+ TESTPROGS-$(CONFIG_MOV_MUXER)            += movenc
+ TESTPROGS-$(CONFIG_NETWORK)              += noproxy
+ TESTPROGS-$(CONFIG_SRTP)                 += srtp
++TESTPROGS-$(CONFIG_IMF_DEMUXER)          += imf
+ 
+ TOOLS     = aviocat                                                     \
+             ismindex                                                    \
+diff --git a/libavformat/allformats.c b/libavformat/allformats.c
+index 1054ac9..d066a77 100644
+--- a/libavformat/allformats.c
++++ b/libavformat/allformats.c
+@@ -96,6 +96,7 @@ extern const AVInputFormat  ff_bink_demuxer;
+ extern const AVInputFormat  ff_binka_demuxer;
+ extern const AVInputFormat  ff_bit_demuxer;
+ extern const AVOutputFormat ff_bit_muxer;
++extern const AVInputFormat  ff_bitpacked_demuxer;
+ extern const AVInputFormat  ff_bmv_demuxer;
+ extern const AVInputFormat  ff_bfstm_demuxer;
+ extern const AVInputFormat  ff_brstm_demuxer;
+@@ -212,6 +213,7 @@ extern const AVInputFormat  ff_image2pipe_demuxer;
+ extern const AVOutputFormat ff_image2pipe_muxer;
+ extern const AVInputFormat  ff_image2_alias_pix_demuxer;
+ extern const AVInputFormat  ff_image2_brender_pix_demuxer;
++extern const AVInputFormat  ff_imf_demuxer;
+ extern const AVInputFormat  ff_ingenient_demuxer;
+ extern const AVInputFormat  ff_ipmovie_demuxer;
+ extern const AVOutputFormat ff_ipod_muxer;
+diff --git a/libavformat/flvdec.c b/libavformat/flvdec.c
+index 44a7e5f..b9e36b3 100644
+--- a/libavformat/flvdec.c
++++ b/libavformat/flvdec.c
+@@ -461,6 +461,8 @@ static int parse_keyframes_index(AVFormatContext *s, AVIOContext *ioc, int64_t m
+             d = av_int2double(avio_rb64(ioc));
+             if (isnan(d) || d < INT64_MIN || d > INT64_MAX)
+                 goto invalid;
++            if (current_array == &times && (d <= INT64_MIN / 1000 || d >= INT64_MAX / 1000))
++                goto invalid;
+             current_array[0][i] = d;
+         }
+         if (times && filepositions) {
+diff --git a/libavformat/imf.h b/libavformat/imf.h
+new file mode 100644
+index 0000000..62c4468
+--- /dev/null
++++ b/libavformat/imf.h
+@@ -0,0 +1,207 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#ifndef AVFORMAT_IMF_H
++#define AVFORMAT_IMF_H
++
++#include "avformat.h"
++#include "libavformat/avio.h"
++#include "libavutil/rational.h"
++#include <libxml/tree.h>
++
++#define FF_IMF_UUID_FORMAT                            \
++    "urn:uuid:%02hhx%02hhx%02hhx%02hhx-%02hhx%02hhx-" \
++    "%02hhx%02hhx-%02hhx%02hhx-%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx"
++
++
++
++
++typedef uint8_t FFIMFUUID[16];
++
++
++
++
++typedef struct FFIMFBaseResource {
++    AVRational edit_rate;
++    uint32_t entry_point;
++    uint32_t duration;
++    uint32_t repeat_count;
++} FFIMFBaseResource;
++
++
++
++
++typedef struct FFIMFTrackFileResource {
++    FFIMFBaseResource base;
++    FFIMFUUID track_file_uuid;
++} FFIMFTrackFileResource;
++
++
++
++
++typedef struct FFIMFMarker {
++    xmlChar *label_utf8;
++    xmlChar *scope_utf8;
++    uint32_t offset;
++} FFIMFMarker;
++
++
++
++
++typedef struct FFIMFMarkerResource {
++    FFIMFBaseResource base;
++    uint32_t marker_count;
++    FFIMFMarker *markers;
++} FFIMFMarkerResource;
++
++
++
++
++typedef struct FFIMFBaseVirtualTrack {
++    FFIMFUUID id_uuid;
++} FFIMFBaseVirtualTrack;
++
++
++
++
++typedef struct FFIMFTrackFileVirtualTrack {
++    FFIMFBaseVirtualTrack base;
++    uint32_t resource_count;
++    FFIMFTrackFileResource *resources;
++    unsigned int resources_alloc_sz;
++} FFIMFTrackFileVirtualTrack;
++
++
++
++
++typedef struct FFIMFMarkerVirtualTrack {
++    FFIMFBaseVirtualTrack base;
++    uint32_t resource_count;
++    FFIMFMarkerResource *resources;
++} FFIMFMarkerVirtualTrack;
++
++
++
++
++typedef struct FFIMFCPL {
++    FFIMFUUID id_uuid;
++    xmlChar *content_title_utf8;
++    AVRational edit_rate;
++    FFIMFMarkerVirtualTrack *main_markers_track;
++    FFIMFTrackFileVirtualTrack *main_image_2d_track;
++    uint32_t main_audio_track_count;
++    FFIMFTrackFileVirtualTrack *main_audio_tracks;
++} FFIMFCPL;
++
++
++
++
++
++
++
++
++
++
++int ff_imf_parse_cpl_from_xml_dom(xmlDocPtr doc, FFIMFCPL **cpl);
++
++
++
++
++
++
++
++
++
++
++int ff_imf_parse_cpl(AVIOContext *in, FFIMFCPL **cpl);
++
++
++
++
++
++
++
++FFIMFCPL *ff_imf_cpl_alloc(void);
++
++
++
++
++
++void ff_imf_cpl_free(FFIMFCPL *cpl);
++
++
++
++
++
++int ff_imf_xml_read_uint32(xmlNodePtr element, uint32_t *number);
++
++
++
++
++
++int ff_imf_xml_read_rational(xmlNodePtr element, AVRational *rational);
++
++
++
++
++
++int ff_imf_xml_read_uuid(xmlNodePtr element, uint8_t uuid[16]);
++
++
++
++
++
++xmlNodePtr ff_imf_xml_get_child_element_by_name(xmlNodePtr parent, const char *name_utf8);
++
++#endif
+diff --git a/libavformat/imf_cpl.c b/libavformat/imf_cpl.c
+new file mode 100644
+index 0000000..7055b49
+--- /dev/null
++++ b/libavformat/imf_cpl.c
+@@ -0,0 +1,841 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#include "imf.h"
++#include "libavformat/mxf.h"
++#include "libavutil/bprint.h"
++#include "libavutil/error.h"
++#include <libxml/parser.h>
++
++xmlNodePtr ff_imf_xml_get_child_element_by_name(xmlNodePtr parent, const char *name_utf8)
++{
++    xmlNodePtr cur_element;
++
++    cur_element = xmlFirstElementChild(parent);
++    while (cur_element) {
++        if (xmlStrcmp(cur_element->name, name_utf8) == 0)
++            return cur_element;
++
++        cur_element = xmlNextElementSibling(cur_element);
++    }
++    return NULL;
++}
++
++int ff_imf_xml_read_uuid(xmlNodePtr element, uint8_t uuid[16])
++{
++    xmlChar *element_text = NULL;
++    int scanf_ret;
++    int ret = 0;
++
++    element_text = xmlNodeListGetString(element->doc, element->xmlChildrenNode, 1);
++    scanf_ret = sscanf(element_text,
++                       FF_IMF_UUID_FORMAT,
++                       &uuid[0],
++                       &uuid[1],
++                       &uuid[2],
++                       &uuid[3],
++                       &uuid[4],
++                       &uuid[5],
++                       &uuid[6],
++                       &uuid[7],
++                       &uuid[8],
++                       &uuid[9],
++                       &uuid[10],
++                       &uuid[11],
++                       &uuid[12],
++                       &uuid[13],
++                       &uuid[14],
++                       &uuid[15]);
++    if (scanf_ret != 16) {
++        av_log(NULL, AV_LOG_ERROR, "Invalid UUID\n");
++        ret = AVERROR_INVALIDDATA;
++    }
++    xmlFree(element_text);
++
++    return ret;
++}
++
++int ff_imf_xml_read_rational(xmlNodePtr element, AVRational *rational)
++{
++    xmlChar *element_text = NULL;
++    int ret = 0;
++
++    element_text = xmlNodeListGetString(element->doc, element->xmlChildrenNode, 1);
++    if (sscanf(element_text, "%i %i", &rational->num, &rational->den) != 2) {
++        av_log(NULL, AV_LOG_ERROR, "Invalid rational number\n");
++        ret = AVERROR_INVALIDDATA;
++    }
++    xmlFree(element_text);
++
++    return ret;
++}
++
++int ff_imf_xml_read_uint32(xmlNodePtr element, uint32_t *number)
++{
++    xmlChar *element_text = NULL;
++    int ret = 0;
++
++    element_text = xmlNodeListGetString(element->doc, element->xmlChildrenNode, 1);
++    if (sscanf(element_text, "%" PRIu32, number) != 1) {
++        av_log(NULL, AV_LOG_ERROR, "Invalid unsigned 32-bit integer");
++        ret = AVERROR_INVALIDDATA;
++    }
++    xmlFree(element_text);
++
++    return ret;
++}
++
++static void imf_base_virtual_track_init(FFIMFBaseVirtualTrack *track)
++{
++    memset(track->id_uuid, 0, sizeof(track->id_uuid));
++}
++
++static void imf_marker_virtual_track_init(FFIMFMarkerVirtualTrack *track)
++{
++    imf_base_virtual_track_init((FFIMFBaseVirtualTrack *)track);
++    track->resource_count = 0;
++    track->resources = NULL;
++}
++
++static void imf_trackfile_virtual_track_init(FFIMFTrackFileVirtualTrack *track)
++{
++    imf_base_virtual_track_init((FFIMFBaseVirtualTrack *)track);
++    track->resource_count = 0;
++    track->resources_alloc_sz = 0;
++    track->resources = NULL;
++}
++
++static void imf_base_resource_init(FFIMFBaseResource *rsrc)
++{
++    rsrc->duration = 0;
++    rsrc->edit_rate = av_make_q(0, 1);
++    rsrc->entry_point = 0;
++    rsrc->repeat_count = 1;
++}
++
++static void imf_marker_resource_init(FFIMFMarkerResource *rsrc)
++{
++    imf_base_resource_init((FFIMFBaseResource *)rsrc);
++    rsrc->marker_count = 0;
++    rsrc->markers = NULL;
++}
++
++static void imf_marker_init(FFIMFMarker *marker)
++{
++    marker->label_utf8 = NULL;
++    marker->offset = 0;
++    marker->scope_utf8 = NULL;
++}
++
++static void imf_trackfile_resource_init(FFIMFTrackFileResource *rsrc)
++{
++    imf_base_resource_init((FFIMFBaseResource *)rsrc);
++    memset(rsrc->track_file_uuid, 0, sizeof(rsrc->track_file_uuid));
++}
++
++static int fill_content_title(xmlNodePtr cpl_element, FFIMFCPL *cpl)
++{
++    xmlNodePtr element = NULL;
++
++    if (!(element = ff_imf_xml_get_child_element_by_name(cpl_element, "ContentTitle"))) {
++        av_log(NULL, AV_LOG_ERROR, "ContentTitle element not found in the IMF CPL\n");
++        return AVERROR_INVALIDDATA;
++    }
++    cpl->content_title_utf8 = xmlNodeListGetString(cpl_element->doc,
++                                                   element->xmlChildrenNode,
++                                                   1);
++
++    return 0;
++}
++
++static int fill_edit_rate(xmlNodePtr cpl_element, FFIMFCPL *cpl)
++{
++    xmlNodePtr element = NULL;
++
++    if (!(element = ff_imf_xml_get_child_element_by_name(cpl_element, "EditRate"))) {
++        av_log(NULL, AV_LOG_ERROR, "EditRate element not found in the IMF CPL\n");
++        return AVERROR_INVALIDDATA;
++    }
++
++    return ff_imf_xml_read_rational(element, &cpl->edit_rate);
++}
++
++static int fill_id(xmlNodePtr cpl_element, FFIMFCPL *cpl)
++{
++    xmlNodePtr element = NULL;
++
++    if (!(element = ff_imf_xml_get_child_element_by_name(cpl_element, "Id"))) {
++        av_log(NULL, AV_LOG_ERROR, "Id element not found in the IMF CPL\n");
++        return AVERROR_INVALIDDATA;
++    }
++
++    return ff_imf_xml_read_uuid(element, cpl->id_uuid);
++}
++
++static int fill_marker(xmlNodePtr marker_elem, FFIMFMarker *marker)
++{
++    xmlNodePtr element = NULL;
++    int ret = 0;
++
++
++    if (!(element = ff_imf_xml_get_child_element_by_name(marker_elem, "Offset"))) {
++        av_log(NULL, AV_LOG_ERROR, "Offset element not found in a Marker\n");
++        return AVERROR_INVALIDDATA;
++    }
++    if ((ret = ff_imf_xml_read_uint32(element, &marker->offset)))
++        return ret;
++
++
++    if (!(element = ff_imf_xml_get_child_element_by_name(marker_elem, "Label"))) {
++        av_log(NULL, AV_LOG_ERROR, "Label element not found in a Marker\n");
++        return AVERROR_INVALIDDATA;
++    }
++    if (!(marker->label_utf8 = xmlNodeListGetString(element->doc, element->xmlChildrenNode, 1))) {
++        av_log(NULL, AV_LOG_ERROR, "Empty Label element found in a Marker\n");
++        return AVERROR_INVALIDDATA;
++    }
++    if (!(marker->scope_utf8 = xmlGetNoNsProp(element, "scope"))) {
++        marker->scope_utf8
++            = xmlCharStrdup("http:
++        if (!marker->scope_utf8) {
++            xmlFree(marker->label_utf8);
++            return AVERROR(ENOMEM);
++        }
++    }
++
++    return ret;
++}
++
++static int fill_base_resource(xmlNodePtr resource_elem, FFIMFBaseResource *resource, FFIMFCPL *cpl)
++{
++    xmlNodePtr element = NULL;
++    int ret = 0;
++
++
++    if (!(element = ff_imf_xml_get_child_element_by_name(resource_elem, "EditRate"))) {
++        resource->edit_rate = cpl->edit_rate;
++    } else if ((ret = ff_imf_xml_read_rational(element, &resource->edit_rate))) {
++        av_log(NULL, AV_LOG_ERROR, "Invalid EditRate element found in a Resource\n");
++        return ret;
++    }
++
++
++    if ((element = ff_imf_xml_get_child_element_by_name(resource_elem, "EntryPoint"))) {
++        if ((ret = ff_imf_xml_read_uint32(element, &resource->entry_point))) {
++            av_log(NULL, AV_LOG_ERROR, "Invalid EntryPoint element found in a Resource\n");
++            return ret;
++        }
++    } else {
++        resource->entry_point = 0;
++    }
++
++
++    if (!(element = ff_imf_xml_get_child_element_by_name(resource_elem, "IntrinsicDuration"))) {
++        av_log(NULL, AV_LOG_ERROR, "IntrinsicDuration element missing from Resource\n");
++        return AVERROR_INVALIDDATA;
++    }
++    if ((ret = ff_imf_xml_read_uint32(element, &resource->duration))) {
++        av_log(NULL, AV_LOG_ERROR, "Invalid IntrinsicDuration element found in a Resource\n");
++        return ret;
++    }
++    resource->duration -= resource->entry_point;
++
++
++    if ((element = ff_imf_xml_get_child_element_by_name(resource_elem, "SourceDuration"))) {
++        if ((ret = ff_imf_xml_read_uint32(element, &resource->duration))) {
++            av_log(NULL, AV_LOG_ERROR, "SourceDuration element missing from Resource\n");
++            return ret;
++        }
++    }
++
++
++    if ((element = ff_imf_xml_get_child_element_by_name(resource_elem, "RepeatCount")))
++        ret = ff_imf_xml_read_uint32(element, &resource->repeat_count);
++
++    return ret;
++}
++
++static int fill_trackfile_resource(xmlNodePtr tf_resource_elem,
++                                   FFIMFTrackFileResource *tf_resource,
++                                   FFIMFCPL *cpl)
++{
++    xmlNodePtr element = NULL;
++    int ret = 0;
++
++    if ((ret = fill_base_resource(tf_resource_elem, (FFIMFBaseResource *)tf_resource, cpl)))
++        return ret;
++
++
++    if ((element = ff_imf_xml_get_child_element_by_name(tf_resource_elem, "TrackFileId"))) {
++        if ((ret = ff_imf_xml_read_uuid(element, tf_resource->track_file_uuid))) {
++            av_log(NULL, AV_LOG_ERROR, "Invalid TrackFileId element found in Resource\n");
++            return ret;
++        }
++    } else {
++        av_log(NULL, AV_LOG_ERROR, "TrackFileId element missing from Resource\n");
++        return AVERROR_INVALIDDATA;
++    }
++
++    return ret;
++}
++
++static int fill_marker_resource(xmlNodePtr marker_resource_elem,
++                                FFIMFMarkerResource *marker_resource,
++                                FFIMFCPL *cpl)
++{
++    xmlNodePtr element = NULL;
++    int ret = 0;
++
++    if ((ret = fill_base_resource(marker_resource_elem, (FFIMFBaseResource *)marker_resource, cpl)))
++        return ret;
++
++
++    element = xmlFirstElementChild(marker_resource_elem);
++    while (element) {
++        if (xmlStrcmp(element->name, "Marker") == 0) {
++            void *tmp;
++
++            if (marker_resource->marker_count == UINT32_MAX)
++                return AVERROR(ENOMEM);
++            tmp = av_realloc_array(marker_resource->markers,
++                                   marker_resource->marker_count + 1,
++                                   sizeof(FFIMFMarker));
++            if (!tmp)
++                return AVERROR(ENOMEM);
++            marker_resource->markers = tmp;
++
++            imf_marker_init(&marker_resource->markers[marker_resource->marker_count]);
++            ret = fill_marker(element,
++                              &marker_resource->markers[marker_resource->marker_count]);
++            marker_resource->marker_count++;
++            if (ret)
++                return ret;
++        }
++
++        element = xmlNextElementSibling(element);
++    }
++
++    return ret;
++}
++
++static int push_marker_sequence(xmlNodePtr marker_sequence_elem, FFIMFCPL *cpl)
++{
++    int ret = 0;
++    uint8_t uuid[16];
++    xmlNodePtr resource_list_elem = NULL;
++    xmlNodePtr resource_elem = NULL;
++    xmlNodePtr track_id_elem = NULL;
++    unsigned long resource_elem_count;
++    void *tmp;
++
++
++    if (!(track_id_elem = ff_imf_xml_get_child_element_by_name(marker_sequence_elem, "TrackId"))) {
++        av_log(NULL, AV_LOG_ERROR, "TrackId element missing from Sequence\n");
++        return AVERROR_INVALIDDATA;
++    }
++    if (ff_imf_xml_read_uuid(track_id_elem, uuid)) {
++        av_log(NULL, AV_LOG_ERROR, "Invalid TrackId element found in Sequence\n");
++        return AVERROR_INVALIDDATA;
++    }
++    av_log(NULL,
++           AV_LOG_DEBUG,
++           "Processing IMF CPL Marker Sequence for Virtual Track " FF_IMF_UUID_FORMAT "\n",
++           UID_ARG(uuid));
++
++
++    if (!cpl->main_markers_track) {
++        cpl->main_markers_track = av_malloc(sizeof(FFIMFMarkerVirtualTrack));
++        if (!cpl->main_markers_track)
++            return AVERROR(ENOMEM);
++        imf_marker_virtual_track_init(cpl->main_markers_track);
++        memcpy(cpl->main_markers_track->base.id_uuid, uuid, sizeof(uuid));
++
++    } else if (memcmp(cpl->main_markers_track->base.id_uuid, uuid, sizeof(uuid)) != 0) {
++        av_log(NULL, AV_LOG_ERROR, "Multiple marker virtual tracks were found\n");
++        return AVERROR_INVALIDDATA;
++    }
++
++
++    resource_list_elem = ff_imf_xml_get_child_element_by_name(marker_sequence_elem, "ResourceList");
++    if (!resource_list_elem)
++        return 0;
++
++    resource_elem_count = xmlChildElementCount(resource_list_elem);
++    if (resource_elem_count > UINT32_MAX
++        || cpl->main_markers_track->resource_count > UINT32_MAX - resource_elem_count)
++        return AVERROR(ENOMEM);
++    tmp = av_realloc_array(cpl->main_markers_track->resources,
++                           cpl->main_markers_track->resource_count + resource_elem_count,
++                           sizeof(FFIMFMarkerResource));
++    if (!tmp) {
++        av_log(NULL, AV_LOG_ERROR, "Cannot allocate Marker Resources\n");
++        return AVERROR(ENOMEM);
++    }
++    cpl->main_markers_track->resources = tmp;
++
++    resource_elem = xmlFirstElementChild(resource_list_elem);
++    while (resource_elem) {
++        imf_marker_resource_init(&cpl->main_markers_track->resources[cpl->main_markers_track->resource_count]);
++        ret = fill_marker_resource(resource_elem,
++                                   &cpl->main_markers_track->resources[cpl->main_markers_track->resource_count],
++                                   cpl);
++        cpl->main_markers_track->resource_count++;
++        if (ret)
++            return ret;
++
++        resource_elem = xmlNextElementSibling(resource_elem);
++    }
++
++    return ret;
++}
++
++static int has_stereo_resources(xmlNodePtr element)
++{
++    if (xmlStrcmp(element->name, "Left") == 0 || xmlStrcmp(element->name, "Right") == 0)
++        return 1;
++
++    element = xmlFirstElementChild(element);
++    while (element) {
++        if (has_stereo_resources(element))
++            return 1;
++
++        element = xmlNextElementSibling(element);
++    }
++
++    return 0;
++}
++
++static int push_main_audio_sequence(xmlNodePtr audio_sequence_elem, FFIMFCPL *cpl)
++{
++    int ret = 0;
++    uint8_t uuid[16];
++    xmlNodePtr resource_list_elem = NULL;
++    xmlNodePtr resource_elem = NULL;
++    xmlNodePtr track_id_elem = NULL;
++    unsigned long resource_elem_count;
++    FFIMFTrackFileVirtualTrack *vt = NULL;
++    void *tmp;
++
++
++    if (!(track_id_elem = ff_imf_xml_get_child_element_by_name(audio_sequence_elem, "TrackId"))) {
++        av_log(NULL, AV_LOG_ERROR, "TrackId element missing from audio sequence\n");
++        return AVERROR_INVALIDDATA;
++    }
++    if ((ret = ff_imf_xml_read_uuid(track_id_elem, uuid))) {
++        av_log(NULL, AV_LOG_ERROR, "Invalid TrackId element found in audio sequence\n");
++        return ret;
++    }
++    av_log(NULL,
++           AV_LOG_DEBUG,
++           "Processing IMF CPL Audio Sequence for Virtual Track " FF_IMF_UUID_FORMAT "\n",
++           UID_ARG(uuid));
++
++
++    for (uint32_t i = 0; i < cpl->main_audio_track_count; i++) {
++        if (memcmp(cpl->main_audio_tracks[i].base.id_uuid, uuid, sizeof(uuid)) == 0) {
++            vt = &cpl->main_audio_tracks[i];
++            break;
++        }
++    }
++
++
++    if (!vt) {
++        if (cpl->main_audio_track_count == UINT32_MAX)
++            return AVERROR(ENOMEM);
++        tmp = av_realloc_array(cpl->main_audio_tracks,
++                               cpl->main_audio_track_count + 1,
++                               sizeof(FFIMFTrackFileVirtualTrack));
++        if (!tmp)
++            return AVERROR(ENOMEM);
++
++        cpl->main_audio_tracks = tmp;
++        vt = &cpl->main_audio_tracks[cpl->main_audio_track_count];
++        imf_trackfile_virtual_track_init(vt);
++        cpl->main_audio_track_count++;
++        memcpy(vt->base.id_uuid, uuid, sizeof(uuid));
++    }
++
++
++    resource_list_elem = ff_imf_xml_get_child_element_by_name(audio_sequence_elem, "ResourceList");
++    if (!resource_list_elem)
++        return 0;
++
++    resource_elem_count = xmlChildElementCount(resource_list_elem);
++    if (resource_elem_count > UINT32_MAX
++        || vt->resource_count > UINT32_MAX - resource_elem_count)
++        return AVERROR(ENOMEM);
++    tmp = av_fast_realloc(vt->resources,
++                          &vt->resources_alloc_sz,
++                          (vt->resource_count + resource_elem_count)
++
++    if (!tmp) {
++        av_log(NULL, AV_LOG_ERROR, "Cannot allocate Main Audio Resources\n");
++        return AVERROR(ENOMEM);
++    }
++    vt->resources = tmp;
++
++    resource_elem = xmlFirstElementChild(resource_list_elem);
++    while (resource_elem) {
++        imf_trackfile_resource_init(&vt->resources[vt->resource_count]);
++        ret = fill_trackfile_resource(resource_elem,
++                                      &vt->resources[vt->resource_count],
++                                      cpl);
++        vt->resource_count++;
++        if (ret) {
++            av_log(NULL, AV_LOG_ERROR, "Invalid Resource\n");
++            continue;
++        }
++
++        resource_elem = xmlNextElementSibling(resource_elem);
++    }
++
++    return ret;
++}
++
++static int push_main_image_2d_sequence(xmlNodePtr image_sequence_elem, FFIMFCPL *cpl)
++{
++    int ret = 0;
++    uint8_t uuid[16];
++    xmlNodePtr resource_list_elem = NULL;
++    xmlNodePtr resource_elem = NULL;
++    xmlNodePtr track_id_elem = NULL;
++    void *tmp;
++    unsigned long resource_elem_count;
++
++
++    if (has_stereo_resources(image_sequence_elem)) {
++        av_log(NULL, AV_LOG_ERROR, "Stereoscopic 3D image virtual tracks not supported\n");
++        return AVERROR_PATCHWELCOME;
++    }
++
++
++    if (!(track_id_elem = ff_imf_xml_get_child_element_by_name(image_sequence_elem, "TrackId"))) {
++        av_log(NULL, AV_LOG_ERROR, "TrackId element missing from audio sequence\n");
++        return AVERROR_INVALIDDATA;
++    }
++    if ((ret = ff_imf_xml_read_uuid(track_id_elem, uuid))) {
++        av_log(NULL, AV_LOG_ERROR, "Invalid TrackId element found in audio sequence\n");
++        return ret;
++    }
++
++
++    if (!cpl->main_image_2d_track) {
++        cpl->main_image_2d_track = av_malloc(sizeof(FFIMFTrackFileVirtualTrack));
++        if (!cpl->main_image_2d_track)
++            return AVERROR(ENOMEM);
++        imf_trackfile_virtual_track_init(cpl->main_image_2d_track);
++        memcpy(cpl->main_image_2d_track->base.id_uuid, uuid, sizeof(uuid));
++
++    } else if (memcmp(cpl->main_image_2d_track->base.id_uuid, uuid, sizeof(uuid)) != 0) {
++        av_log(NULL, AV_LOG_ERROR, "Multiple MainImage virtual tracks found\n");
++        return AVERROR_INVALIDDATA;
++    }
++    av_log(NULL,
++           AV_LOG_DEBUG,
++           "Processing IMF CPL Main Image Sequence for Virtual Track " FF_IMF_UUID_FORMAT "\n",
++           UID_ARG(uuid));
++
++
++    resource_list_elem = ff_imf_xml_get_child_element_by_name(image_sequence_elem, "ResourceList");
++    if (!resource_list_elem)
++        return 0;
++
++    resource_elem_count = xmlChildElementCount(resource_list_elem);
++    if (resource_elem_count > UINT32_MAX
++        || cpl->main_image_2d_track->resource_count > UINT32_MAX - resource_elem_count
++        || (cpl->main_image_2d_track->resource_count + resource_elem_count)
++            > INT_MAX / sizeof(FFIMFTrackFileResource))
++        return AVERROR(ENOMEM);
++    tmp = av_fast_realloc(cpl->main_image_2d_track->resources,
++                          &cpl->main_image_2d_track->resources_alloc_sz,
++                          (cpl->main_image_2d_track->resource_count + resource_elem_count)
++
++    if (!tmp) {
++        av_log(NULL, AV_LOG_ERROR, "Cannot allocate Main Image Resources\n");
++        return AVERROR(ENOMEM);
++    }
++    cpl->main_image_2d_track->resources = tmp;
++
++    resource_elem = xmlFirstElementChild(resource_list_elem);
++    while (resource_elem) {
++        imf_trackfile_resource_init(
++            &cpl->main_image_2d_track->resources[cpl->main_image_2d_track->resource_count]);
++        ret = fill_trackfile_resource(resource_elem,
++                                      &cpl->main_image_2d_track->resources[cpl->main_image_2d_track->resource_count],
++                                      cpl);
++        cpl->main_image_2d_track->resource_count++;
++        if (ret) {
++            av_log(NULL, AV_LOG_ERROR, "Invalid Resource\n");
++            continue;
++        }
++
++        resource_elem = xmlNextElementSibling(resource_elem);
++    }
++
++    return 0;
++}
++
++static int fill_virtual_tracks(xmlNodePtr cpl_element, FFIMFCPL *cpl)
++{
++    int ret = 0;
++    xmlNodePtr segment_list_elem = NULL;
++    xmlNodePtr segment_elem = NULL;
++    xmlNodePtr sequence_list_elem = NULL;
++    xmlNodePtr sequence_elem = NULL;
++
++    if (!(segment_list_elem = ff_imf_xml_get_child_element_by_name(cpl_element, "SegmentList"))) {
++        av_log(NULL, AV_LOG_ERROR, "SegmentList element missing\n");
++        return AVERROR_INVALIDDATA;
++    }
++
++
++    segment_elem = xmlFirstElementChild(segment_list_elem);
++    while (segment_elem) {
++        av_log(NULL, AV_LOG_DEBUG, "Processing IMF CPL Segment\n");
++
++        sequence_list_elem = ff_imf_xml_get_child_element_by_name(segment_elem, "SequenceList");
++        if (!segment_list_elem)
++            continue;
++
++        sequence_elem = xmlFirstElementChild(sequence_list_elem);
++        while (sequence_elem) {
++            if (xmlStrcmp(sequence_elem->name, "MarkerSequence") == 0)
++                ret = push_marker_sequence(sequence_elem, cpl);
++
++            else if (xmlStrcmp(sequence_elem->name, "MainImageSequence") == 0)
++                ret = push_main_image_2d_sequence(sequence_elem, cpl);
++
++            else if (xmlStrcmp(sequence_elem->name, "MainAudioSequence") == 0)
++                ret = push_main_audio_sequence(sequence_elem, cpl);
++
++            else
++                av_log(NULL,
++                       AV_LOG_INFO,
++                       "The following Sequence is not supported and is ignored: %s\n",
++                       sequence_elem->name);
++
++
++            if (ret == AVERROR(ENOMEM))
++                return ret;
++
++            sequence_elem = xmlNextElementSibling(sequence_elem);
++        }
++
++        segment_elem = xmlNextElementSibling(segment_elem);
++    }
++
++    return ret;
++}
++
++int ff_imf_parse_cpl_from_xml_dom(xmlDocPtr doc, FFIMFCPL **cpl)
++{
++    int ret = 0;
++    xmlNodePtr cpl_element = NULL;
++
++
++    if (!*cpl) {
++        ret = AVERROR(ENOMEM);
++        goto cleanup;
++    }
++
++    cpl_element = xmlDocGetRootElement(doc);
++    if (xmlStrcmp(cpl_element->name, "CompositionPlaylist")) {
++        av_log(NULL, AV_LOG_ERROR, "The root element of the CPL is not CompositionPlaylist\n");
++        ret = AVERROR_INVALIDDATA;
++        goto cleanup;
++    }
++
++    if ((ret = fill_content_title(cpl_element, *cpl)))
++        goto cleanup;
++    if ((ret = fill_id(cpl_element, *cpl)))
++        goto cleanup;
++    if ((ret = fill_edit_rate(cpl_element, *cpl)))
++        goto cleanup;
++    if ((ret = fill_virtual_tracks(cpl_element, *cpl)))
++        goto cleanup;
++
++cleanup:
++    if (*cpl && ret) {
++        ff_imf_cpl_free(*cpl);
++
++    }
++    return ret;
++}
++
++static void imf_marker_free(FFIMFMarker *marker)
++{
++    if (!marker)
++        return;
++    xmlFree(marker->label_utf8);
++    xmlFree(marker->scope_utf8);
++}
++
++static void imf_marker_resource_free(FFIMFMarkerResource *rsrc)
++{
++    if (!rsrc)
++        return;
++    for (uint32_t i = 0; i < rsrc->marker_count; i++)
++        imf_marker_free(&rsrc->markers[i]);
++    av_freep(&rsrc->markers);
++}
++
++static void imf_marker_virtual_track_free(FFIMFMarkerVirtualTrack *vt)
++{
++    if (!vt)
++        return;
++    for (uint32_t i = 0; i < vt->resource_count; i++)
++        imf_marker_resource_free(&vt->resources[i]);
++    av_freep(&vt->resources);
++}
++
++static void imf_trackfile_virtual_track_free(FFIMFTrackFileVirtualTrack *vt)
++{
++    if (!vt)
++        return;
++    av_freep(&vt->resources);
++}
++
++static void imf_cpl_init(FFIMFCPL *cpl)
++{
++    memset(cpl->id_uuid, 0, sizeof(cpl->id_uuid));
++    cpl->content_title_utf8 = NULL;
++    cpl->edit_rate = av_make_q(0, 1);
++    cpl->main_markers_track = NULL;
++    cpl->main_image_2d_track = NULL;
++    cpl->main_audio_track_count = 0;
++    cpl->main_audio_tracks = NULL;
++}
++
++FFIMFCPL *ff_imf_cpl_alloc(void)
++{
++    FFIMFCPL *cpl;
++
++    cpl = av_malloc(sizeof(FFIMFCPL));
++    if (!cpl)
++        return NULL;
++    imf_cpl_init(cpl);
++    return cpl;
++}
++
++void ff_imf_cpl_free(FFIMFCPL *cpl)
++{
++    if (!cpl)
++        return;
++
++    xmlFree(cpl->content_title_utf8);
++
++    imf_marker_virtual_track_free(cpl->main_markers_track);
++
++    if (cpl->main_markers_track)
++        av_freep(&cpl->main_markers_track);
++
++    imf_trackfile_virtual_track_free(cpl->main_image_2d_track);
++
++    if (cpl->main_image_2d_track)
++        av_freep(&cpl->main_image_2d_track);
++
++    for (uint32_t i = 0; i < cpl->main_audio_track_count; i++)
++        imf_trackfile_virtual_track_free(&cpl->main_audio_tracks[i]);
++
++    if (cpl->main_audio_tracks)
++        av_freep(&cpl->main_audio_tracks);
++
++    av_freep(&cpl);
++}
++
++int ff_imf_parse_cpl(AVIOContext *in, FFIMFCPL **cpl)
++{
++    AVBPrint buf;
++    xmlDoc *doc = NULL;
++    int ret = 0;
++    int64_t filesize = 0;
++
++    filesize = avio_size(in);
++    filesize = filesize > 0 ? filesize : 8192;
++    av_bprint_init(&buf, filesize + 1, AV_BPRINT_SIZE_UNLIMITED);
++    ret = avio_read_to_bprint(in, &buf, UINT_MAX - 1);
++    if (ret < 0 || !avio_feof(in) || buf.len == 0) {
++        av_log(NULL, AV_LOG_ERROR, "Cannot read IMF CPL\n");
++        if (ret == 0)
++            ret = AVERROR_INVALIDDATA;
++    } else {
++        LIBXML_TEST_VERSION
++
++        filesize = buf.len;
++        doc = xmlReadMemory(buf.str, filesize, NULL, NULL, 0);
++        if (!doc) {
++            av_log(NULL,
++                   AV_LOG_ERROR,
++                   "XML parsing failed when reading the IMF CPL\n");
++            ret = AVERROR_INVALIDDATA;
++        }
++
++        if ((ret = ff_imf_parse_cpl_from_xml_dom(doc, cpl))) {
++            av_log(NULL, AV_LOG_ERROR, "Cannot parse IMF CPL\n");
++        } else {
++            av_log(NULL,
++                   AV_LOG_INFO,
++                   "IMF CPL ContentTitle: %s\n",
++                   (*cpl)->content_title_utf8);
++            av_log(NULL,
++                   AV_LOG_INFO,
++                   "IMF CPL Id: " FF_IMF_UUID_FORMAT "\n",
++                   UID_ARG((*cpl)->id_uuid));
++        }
++
++        xmlFreeDoc(doc);
++    }
++
++    av_bprint_finalize(&buf, NULL);
++
++    return ret;
++}
+diff --git a/libavformat/imfdec.c b/libavformat/imfdec.c
+new file mode 100644
+index 0000000..f17064c
+--- /dev/null
++++ b/libavformat/imfdec.c
+@@ -0,0 +1,899 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#include "avio_internal.h"
++#include "imf.h"
++#include "internal.h"
++#include "libavutil/avstring.h"
++#include "libavutil/bprint.h"
++#include "libavutil/opt.h"
++#include "mxf.h"
++#include "url.h"
++#include <inttypes.h>
++#include <libxml/parser.h>
++
++#define MAX_BPRINT_READ_SIZE (UINT_MAX - 1)
++#define DEFAULT_ASSETMAP_SIZE 8 * 1024
++#define AVRATIONAL_FORMAT "%d/%d"
++#define AVRATIONAL_ARG(rational) rational.num, rational.den
++
++
++
++
++typedef struct IMFAssetLocator {
++    FFIMFUUID uuid;
++    char *absolute_uri;
++} IMFAssetLocator;
++
++
++
++
++
++typedef struct IMFAssetLocatorMap {
++    uint32_t asset_count;
++    IMFAssetLocator *assets;
++} IMFAssetLocatorMap;
++
++typedef struct IMFVirtualTrackResourcePlaybackCtx {
++    IMFAssetLocator *locator;
++    FFIMFTrackFileResource *resource;
++    AVFormatContext *ctx;
++} IMFVirtualTrackResourcePlaybackCtx;
++
++typedef struct IMFVirtualTrackPlaybackCtx {
++    int32_t index;
++    AVRational current_timestamp;
++    AVRational duration;
++    uint32_t resource_count;
++    unsigned int resources_alloc_sz;
++    IMFVirtualTrackResourcePlaybackCtx *resources;
++    uint32_t current_resource_index;
++    int64_t last_pts;
++} IMFVirtualTrackPlaybackCtx;
++
++typedef struct IMFContext {
++    const AVClass *class;
++    const char *base_url;
++    char *asset_map_paths;
++    AVIOInterruptCB *interrupt_callback;
++    AVDictionary *avio_opts;
++    FFIMFCPL *cpl;
++    IMFAssetLocatorMap asset_locator_map;
++    uint32_t track_count;
++    IMFVirtualTrackPlaybackCtx **tracks;
++} IMFContext;
++
++static int imf_uri_is_url(const char *string)
++{
++    return strstr(string, ":
++}
++
++static int imf_uri_is_unix_abs_path(const char *string)
++{
++    return string[0] == '/';
++}
++
++static int imf_uri_is_dos_abs_path(const char *string)
++{
++
++    if (string[1] == ':' && string[2] == '\\')
++        return 1;
++
++
++    if (string[1] == ':' && string[2] == '/')
++        return 1;
++
++
++    if (string[0] == '\\' && string[1] == '\\')
++        return 1;
++
++    return 0;
++}
++
++
++
++
++
++
++
++
++
++static int parse_imf_asset_map_from_xml_dom(AVFormatContext *s,
++                                            xmlDocPtr doc,
++                                            IMFAssetLocatorMap *asset_map,
++                                            const char *base_url)
++{
++    xmlNodePtr asset_map_element = NULL;
++    xmlNodePtr node = NULL;
++    xmlNodePtr asset_element = NULL;
++    unsigned long elem_count;
++    char *uri;
++    int ret = 0;
++    IMFAssetLocator *asset = NULL;
++    void *tmp;
++
++    asset_map_element = xmlDocGetRootElement(doc);
++
++    if (!asset_map_element) {
++        av_log(s, AV_LOG_ERROR, "Unable to parse asset map XML - missing root node\n");
++        return AVERROR_INVALIDDATA;
++    }
++
++    if (asset_map_element->type != XML_ELEMENT_NODE || av_strcasecmp(asset_map_element->name, "AssetMap")) {
++        av_log(s,
++               AV_LOG_ERROR,
++               "Unable to parse asset map XML - wrong root node name[%s] type[%d]\n",
++               asset_map_element->name,
++               (int)asset_map_element->type);
++        return AVERROR_INVALIDDATA;
++    }
++
++
++    if (!(node = ff_imf_xml_get_child_element_by_name(asset_map_element, "AssetList"))) {
++        av_log(s, AV_LOG_ERROR, "Unable to parse asset map XML - missing AssetList node\n");
++        return AVERROR_INVALIDDATA;
++    }
++    elem_count = xmlChildElementCount(node);
++    if (elem_count > UINT32_MAX
++        || asset_map->asset_count > UINT32_MAX - elem_count)
++        return AVERROR(ENOMEM);
++    tmp = av_realloc_array(asset_map->assets,
++                           elem_count + asset_map->asset_count,
++                           sizeof(IMFAssetLocator));
++    if (!tmp) {
++        av_log(NULL, AV_LOG_ERROR, "Cannot allocate IMF asset locators\n");
++        return AVERROR(ENOMEM);
++    }
++    asset_map->assets = tmp;
++
++    asset_element = xmlFirstElementChild(node);
++    while (asset_element) {
++        if (av_strcasecmp(asset_element->name, "Asset") != 0)
++            continue;
++
++        asset = &(asset_map->assets[asset_map->asset_count]);
++
++        if (ff_imf_xml_read_uuid(ff_imf_xml_get_child_element_by_name(asset_element, "Id"), asset->uuid)) {
++            av_log(s, AV_LOG_ERROR, "Could not parse UUID from asset in asset map.\n");
++            return AVERROR_INVALIDDATA;
++        }
++
++        av_log(s, AV_LOG_DEBUG, "Found asset id: " FF_IMF_UUID_FORMAT "\n", UID_ARG(asset->uuid));
++
++        if (!(node = ff_imf_xml_get_child_element_by_name(asset_element, "ChunkList"))) {
++            av_log(s, AV_LOG_ERROR, "Unable to parse asset map XML - missing ChunkList node\n");
++            return AVERROR_INVALIDDATA;
++        }
++
++        if (!(node = ff_imf_xml_get_child_element_by_name(node, "Chunk"))) {
++            av_log(s, AV_LOG_ERROR, "Unable to parse asset map XML - missing Chunk node\n");
++            return AVERROR_INVALIDDATA;
++        }
++
++        uri = xmlNodeGetContent(ff_imf_xml_get_child_element_by_name(node, "Path"));
++        if (!imf_uri_is_url(uri) && !imf_uri_is_unix_abs_path(uri) && !imf_uri_is_dos_abs_path(uri))
++            asset->absolute_uri = av_append_path_component(base_url, uri);
++        else
++            asset->absolute_uri = av_strdup(uri);
++        xmlFree(uri);
++        if (!asset->absolute_uri)
++            return AVERROR(ENOMEM);
++
++        av_log(s, AV_LOG_DEBUG, "Found asset absolute URI: %s\n", asset->absolute_uri);
++
++        asset_map->asset_count++;
++        asset_element = xmlNextElementSibling(asset_element);
++    }
++
++    return ret;
++}
++
++
++
++
++static void imf_asset_locator_map_init(IMFAssetLocatorMap *asset_map)
++{
++    asset_map->assets = NULL;
++    asset_map->asset_count = 0;
++}
++
++
++
++
++static void imf_asset_locator_map_deinit(IMFAssetLocatorMap *asset_map)
++{
++    for (uint32_t i = 0; i < asset_map->asset_count; ++i)
++        av_freep(&asset_map->assets[i].absolute_uri);
++
++    av_freep(&asset_map->assets);
++}
++
++static int parse_assetmap(AVFormatContext *s, const char *url)
++{
++    IMFContext *c = s->priv_data;
++    AVIOContext *in = NULL;
++    struct AVBPrint buf;
++    AVDictionary *opts = NULL;
++    xmlDoc *doc = NULL;
++    const char *base_url;
++    char *tmp_str = NULL;
++    int ret;
++    int64_t filesize;
++
++    av_log(s, AV_LOG_DEBUG, "Asset Map URL: %s\n", url);
++
++    av_dict_copy(&opts, c->avio_opts, 0);
++    ret = s->io_open(s, &in, url, AVIO_FLAG_READ, &opts);
++    av_dict_free(&opts);
++    if (ret < 0)
++        return ret;
++
++    filesize = avio_size(in);
++    filesize = filesize > 0 ? filesize : DEFAULT_ASSETMAP_SIZE;
++
++    av_bprint_init(&buf, filesize + 1, AV_BPRINT_SIZE_UNLIMITED);
++
++    ret = avio_read_to_bprint(in, &buf, MAX_BPRINT_READ_SIZE);
++    if (ret < 0 || !avio_feof(in) || buf.len == 0) {
++        av_log(s, AV_LOG_ERROR, "Unable to read to asset map '%s'\n", url);
++        if (ret == 0)
++            ret = AVERROR_INVALIDDATA;
++        goto clean_up;
++    }
++
++    LIBXML_TEST_VERSION
++
++    tmp_str = av_strdup(url);
++    if (!tmp_str) {
++        ret = AVERROR(ENOMEM);
++        goto clean_up;
++    }
++    base_url = av_dirname(tmp_str);
++
++    filesize = buf.len;
++    doc = xmlReadMemory(buf.str, filesize, url, NULL, 0);
++
++    ret = parse_imf_asset_map_from_xml_dom(s, doc, &c->asset_locator_map, base_url);
++    if (!ret)
++        av_log(s,
++               AV_LOG_DEBUG,
++               "Found %d assets from %s\n",
++               c->asset_locator_map.asset_count,
++               url);
++
++    xmlFreeDoc(doc);
++
++clean_up:
++    if (tmp_str)
++        av_freep(&tmp_str);
++    ff_format_io_close(s, &in);
++    av_bprint_finalize(&buf, NULL);
++    return ret;
++}
++
++static IMFAssetLocator *find_asset_map_locator(IMFAssetLocatorMap *asset_map, FFIMFUUID uuid)
++{
++    for (uint32_t i = 0; i < asset_map->asset_count; ++i) {
++        if (memcmp(asset_map->assets[i].uuid, uuid, 16) == 0)
++            return &(asset_map->assets[i]);
++    }
++    return NULL;
++}
++
++static int open_track_resource_context(AVFormatContext *s,
++                                       IMFVirtualTrackResourcePlaybackCtx *track_resource)
++{
++    IMFContext *c = s->priv_data;
++    int ret = 0;
++    int64_t entry_point;
++    AVDictionary *opts = NULL;
++
++    if (track_resource->ctx) {
++        av_log(s,
++               AV_LOG_DEBUG,
++               "Input context already opened for %s.\n",
++               track_resource->locator->absolute_uri);
++        return 0;
++    }
++
++    track_resource->ctx = avformat_alloc_context();
++    if (!track_resource->ctx)
++        return AVERROR(ENOMEM);
++
++    track_resource->ctx->io_open = s->io_open;
++    track_resource->ctx->io_close = s->io_close;
++    track_resource->ctx->io_close2 = s->io_close2;
++    track_resource->ctx->flags |= s->flags & ~AVFMT_FLAG_CUSTOM_IO;
++
++    if ((ret = ff_copy_whiteblacklists(track_resource->ctx, s)) < 0)
++        goto cleanup;
++
++    if ((ret = av_opt_set(track_resource->ctx, "format_whitelist", "mxf", 0)))
++        goto cleanup;
++
++    if ((ret = av_dict_copy(&opts, c->avio_opts, 0)) < 0)
++        goto cleanup;
++
++    ret = avformat_open_input(&track_resource->ctx,
++                              track_resource->locator->absolute_uri,
++                              NULL,
++                              &opts);
++    if (ret < 0) {
++        av_log(s,
++               AV_LOG_ERROR,
++               "Could not open %s input context: %s\n",
++               track_resource->locator->absolute_uri,
++               av_err2str(ret));
++        goto cleanup;
++    }
++    av_dict_free(&opts);
++
++
++
++
++    if (av_cmp_q(track_resource->ctx->streams[0]->time_base,
++                 av_inv_q(track_resource->resource->base.edit_rate)))
++        av_log(s,
++               AV_LOG_WARNING,
++               "Incoherent source stream timebase %d/%d regarding resource edit rate: %d/%d",
++               track_resource->ctx->streams[0]->time_base.num,
++               track_resource->ctx->streams[0]->time_base.den,
++               track_resource->resource->base.edit_rate.den,
++               track_resource->resource->base.edit_rate.num);
++
++    entry_point = (int64_t)track_resource->resource->base.entry_point
++
++
++        / track_resource->resource->base.edit_rate.num;
++
++    if (entry_point) {
++        av_log(s,
++               AV_LOG_DEBUG,
++               "Seek at resource %s entry point: %" PRIu32 "\n",
++               track_resource->locator->absolute_uri,
++               track_resource->resource->base.entry_point);
++        ret = avformat_seek_file(track_resource->ctx, -1, entry_point, entry_point, entry_point, 0);
++        if (ret < 0) {
++            av_log(s,
++                   AV_LOG_ERROR,
++                   "Could not seek at %" PRId64 "on %s: %s\n",
++                   entry_point,
++                   track_resource->locator->absolute_uri,
++                   av_err2str(ret));
++            avformat_close_input(&track_resource->ctx);
++            return ret;
++        }
++    }
++
++    return 0;
++
++cleanup:
++    av_dict_free(&opts);
++    avformat_free_context(track_resource->ctx);
++    track_resource->ctx = NULL;
++    return ret;
++}
++
++static int open_track_file_resource(AVFormatContext *s,
++                                    FFIMFTrackFileResource *track_file_resource,
++                                    IMFVirtualTrackPlaybackCtx *track)
++{
++    IMFContext *c = s->priv_data;
++    IMFAssetLocator *asset_locator;
++    void *tmp;
++    int ret;
++
++    asset_locator = find_asset_map_locator(&c->asset_locator_map, track_file_resource->track_file_uuid);
++    if (!asset_locator) {
++        av_log(s,
++               AV_LOG_ERROR,
++               "Could not find asset locator for UUID: " FF_IMF_UUID_FORMAT "\n",
++               UID_ARG(track_file_resource->track_file_uuid));
++        return AVERROR_INVALIDDATA;
++    }
++
++    av_log(s,
++           AV_LOG_DEBUG,
++           "Found locator for " FF_IMF_UUID_FORMAT ": %s\n",
++           UID_ARG(asset_locator->uuid),
++           asset_locator->absolute_uri);
++
++    if (track->resource_count > UINT32_MAX - track_file_resource->base.repeat_count
++        || (track->resource_count + track_file_resource->base.repeat_count)
++            > INT_MAX / sizeof(IMFVirtualTrackResourcePlaybackCtx))
++        return AVERROR(ENOMEM);
++    tmp = av_fast_realloc(track->resources,
++                          &track->resources_alloc_sz,
++                          (track->resource_count + track_file_resource->base.repeat_count)
++
++    if (!tmp)
++        return AVERROR(ENOMEM);
++    track->resources = tmp;
++
++    for (uint32_t i = 0; i < track_file_resource->base.repeat_count; ++i) {
++        IMFVirtualTrackResourcePlaybackCtx vt_ctx;
++
++        vt_ctx.locator = asset_locator;
++        vt_ctx.resource = track_file_resource;
++        vt_ctx.ctx = NULL;
++        if ((ret = open_track_resource_context(s, &vt_ctx)) != 0)
++            return ret;
++        track->resources[track->resource_count++] = vt_ctx;
++        track->duration = av_add_q(track->duration,
++                                   av_make_q((int)track_file_resource->base.duration
++
++                                             track_file_resource->base.edit_rate.num));
++    }
++
++    return 0;
++}
++
++static void imf_virtual_track_playback_context_deinit(IMFVirtualTrackPlaybackCtx *track)
++{
++    for (uint32_t i = 0; i < track->resource_count; ++i)
++        avformat_close_input(&track->resources[i].ctx);
++
++    av_freep(&track->resources);
++}
++
++static int open_virtual_track(AVFormatContext *s,
++                              FFIMFTrackFileVirtualTrack *virtual_track,
++                              int32_t track_index)
++{
++    IMFContext *c = s->priv_data;
++    IMFVirtualTrackPlaybackCtx *track = NULL;
++    void *tmp;
++    int ret = 0;
++
++    if (!(track = av_mallocz(sizeof(IMFVirtualTrackPlaybackCtx))))
++        return AVERROR(ENOMEM);
++    track->index = track_index;
++    track->duration = av_make_q(0, 1);
++
++    for (uint32_t i = 0; i < virtual_track->resource_count; i++) {
++        av_log(s,
++               AV_LOG_DEBUG,
++               "Open stream from file " FF_IMF_UUID_FORMAT ", stream %d\n",
++               UID_ARG(virtual_track->resources[i].track_file_uuid),
++               i);
++        if ((ret = open_track_file_resource(s, &virtual_track->resources[i], track)) != 0) {
++            av_log(s,
++                   AV_LOG_ERROR,
++                   "Could not open image track resource " FF_IMF_UUID_FORMAT "\n",
++                   UID_ARG(virtual_track->resources[i].track_file_uuid));
++            goto clean_up;
++        }
++    }
++
++    track->current_timestamp = av_make_q(0, track->duration.den);
++
++    if (c->track_count == UINT32_MAX) {
++        ret = AVERROR(ENOMEM);
++        goto clean_up;
++    }
++    tmp = av_realloc_array(c->tracks, c->track_count + 1, sizeof(IMFVirtualTrackPlaybackCtx *));
++    if (!tmp) {
++        ret = AVERROR(ENOMEM);
++        goto clean_up;
++    }
++    c->tracks = tmp;
++    c->tracks[c->track_count++] = track;
++
++    return 0;
++
++clean_up:
++    imf_virtual_track_playback_context_deinit(track);
++    av_free(track);
++    return ret;
++}
++
++static int set_context_streams_from_tracks(AVFormatContext *s)
++{
++    IMFContext *c = s->priv_data;
++    int ret = 0;
++
++    for (uint32_t i = 0; i < c->track_count; ++i) {
++        AVStream *asset_stream;
++        AVStream *first_resource_stream;
++
++
++        first_resource_stream = c->tracks[i]->resources[0].ctx->streams[0];
++        av_log(s, AV_LOG_DEBUG, "Open the first resource of track %d\n", c->tracks[i]->index);
++
++
++        asset_stream = avformat_new_stream(s, NULL);
++        if (!asset_stream) {
++            ret = AVERROR(ENOMEM);
++            av_log(s, AV_LOG_ERROR, "Could not create stream\n");
++            break;
++        }
++        asset_stream->id = i;
++        ret = avcodec_parameters_copy(asset_stream->codecpar, first_resource_stream->codecpar);
++        if (ret < 0) {
++            av_log(s, AV_LOG_ERROR, "Could not copy stream parameters\n");
++            return ret;
++        }
++        avpriv_set_pts_info(asset_stream,
++                            first_resource_stream->pts_wrap_bits,
++                            first_resource_stream->time_base.num,
++                            first_resource_stream->time_base.den);
++        asset_stream->duration = (int64_t)av_q2d(av_mul_q(c->tracks[i]->duration,
++                                                          av_inv_q(asset_stream->time_base)));
++    }
++
++    return 0;
++}
++
++static int open_cpl_tracks(AVFormatContext *s)
++{
++    IMFContext *c = s->priv_data;
++    int32_t track_index = 0;
++    int ret;
++
++    if (c->cpl->main_image_2d_track) {
++        if ((ret = open_virtual_track(s, c->cpl->main_image_2d_track, track_index++)) != 0) {
++            av_log(s,
++                   AV_LOG_ERROR,
++                   "Could not open image track " FF_IMF_UUID_FORMAT "\n",
++                   UID_ARG(c->cpl->main_image_2d_track->base.id_uuid));
++            return ret;
++        }
++    }
++
++    for (uint32_t i = 0; i < c->cpl->main_audio_track_count; ++i) {
++        if ((ret = open_virtual_track(s, &c->cpl->main_audio_tracks[i], track_index++)) != 0) {
++            av_log(s,
++                   AV_LOG_ERROR,
++                   "Could not open audio track " FF_IMF_UUID_FORMAT "\n",
++                   UID_ARG(c->cpl->main_audio_tracks[i].base.id_uuid));
++            return ret;
++        }
++    }
++
++    return set_context_streams_from_tracks(s);
++}
++
++static int imf_read_header(AVFormatContext *s)
++{
++    IMFContext *c = s->priv_data;
++    char *asset_map_path;
++    char *tmp_str;
++    int ret = 0;
++
++    c->interrupt_callback = &s->interrupt_callback;
++    tmp_str = av_strdup(s->url);
++    if (!tmp_str)
++        return AVERROR(ENOMEM);
++
++    c->base_url = av_dirname(tmp_str);
++    if ((ret = ffio_copy_url_options(s->pb, &c->avio_opts)) < 0)
++        return ret;
++
++    av_log(s, AV_LOG_DEBUG, "start parsing IMF CPL: %s\n", s->url);
++
++    if ((ret = ff_imf_parse_cpl(s->pb, &c->cpl)) < 0)
++        return ret;
++
++    av_log(s,
++           AV_LOG_DEBUG,
++           "parsed IMF CPL: " FF_IMF_UUID_FORMAT "\n",
++           UID_ARG(c->cpl->id_uuid));
++
++    if (!c->asset_map_paths) {
++        c->asset_map_paths = av_append_path_component(c->base_url, "ASSETMAP.xml");
++        if (!c->asset_map_paths) {
++            ret = AVERROR(ENOMEM);
++            return ret;
++        }
++        av_log(s, AV_LOG_DEBUG, "No asset maps provided, using the default ASSETMAP.xml\n");
++    }
++
++
++    imf_asset_locator_map_init(&c->asset_locator_map);
++    asset_map_path = av_strtok(c->asset_map_paths, ",", &tmp_str);
++    while (asset_map_path != NULL) {
++        av_log(s, AV_LOG_DEBUG, "start parsing IMF Asset Map: %s\n", asset_map_path);
++
++        if ((ret = parse_assetmap(s, asset_map_path)))
++            return ret;
++
++        asset_map_path = av_strtok(NULL, ",", &tmp_str);
++    }
++
++    av_log(s, AV_LOG_DEBUG, "parsed IMF Asset Maps\n");
++
++    if ((ret = open_cpl_tracks(s)))
++        return ret;
++
++    av_log(s, AV_LOG_DEBUG, "parsed IMF package\n");
++
++    return 0;
++}
++
++static IMFVirtualTrackPlaybackCtx *get_next_track_with_minimum_timestamp(AVFormatContext *s)
++{
++    IMFContext *c = s->priv_data;
++    IMFVirtualTrackPlaybackCtx *track;
++
++    AVRational minimum_timestamp = av_make_q(INT32_MAX, 1);
++    for (uint32_t i = c->track_count; i > 0; i--) {
++        av_log(s,
++               AV_LOG_DEBUG,
++               "Compare track %d timestamp " AVRATIONAL_FORMAT
++               " to minimum " AVRATIONAL_FORMAT
++               " (over duration: " AVRATIONAL_FORMAT
++               ")\n",
++               i,
++               AVRATIONAL_ARG(c->tracks[i - 1]->current_timestamp),
++               AVRATIONAL_ARG(minimum_timestamp),
++               AVRATIONAL_ARG(c->tracks[i - 1]->duration));
++
++        if (av_cmp_q(c->tracks[i - 1]->current_timestamp, minimum_timestamp) <= 0) {
++            track = c->tracks[i - 1];
++            minimum_timestamp = track->current_timestamp;
++        }
++    }
++
++    av_log(s,
++           AV_LOG_DEBUG,
++           "Found next track to read: %d (timestamp: %lf / %lf)\n",
++           track->index,
++           av_q2d(track->current_timestamp),
++           av_q2d(minimum_timestamp));
++    return track;
++}
++
++static IMFVirtualTrackResourcePlaybackCtx *get_resource_context_for_timestamp(AVFormatContext *s,
++                                                                              IMFVirtualTrackPlaybackCtx *track)
++{
++    AVRational edit_unit_duration = av_inv_q(track->resources[0].resource->base.edit_rate);
++    AVRational cumulated_duration = av_make_q(0, edit_unit_duration.den);
++
++    av_log(s,
++           AV_LOG_DEBUG,
++           "Looking for track %d resource for timestamp = %lf / %lf\n",
++           track->index,
++           av_q2d(track->current_timestamp),
++           av_q2d(track->duration));
++    for (uint32_t i = 0; i < track->resource_count; ++i) {
++        cumulated_duration = av_add_q(cumulated_duration,
++                                      av_make_q((int)track->resources[i].resource->base.duration
++
++                                                edit_unit_duration.den));
++
++        if (av_cmp_q(av_add_q(track->current_timestamp, edit_unit_duration), cumulated_duration) <= 0) {
++            av_log(s,
++                   AV_LOG_DEBUG,
++                   "Found resource %d in track %d to read for timestamp %lf "
++                   "(on cumulated=%lf): entry=%" PRIu32
++                   ", duration=%" PRIu32
++                   ", editrate=" AVRATIONAL_FORMAT
++                   " | edit_unit_duration=%lf\n",
++                   i,
++                   track->index,
++                   av_q2d(track->current_timestamp),
++                   av_q2d(cumulated_duration),
++                   track->resources[i].resource->base.entry_point,
++                   track->resources[i].resource->base.duration,
++                   AVRATIONAL_ARG(track->resources[i].resource->base.edit_rate),
++                   av_q2d(edit_unit_duration));
++
++            if (track->current_resource_index != i) {
++                av_log(s,
++                       AV_LOG_DEBUG,
++                       "Switch resource on track %d: re-open context\n",
++                       track->index);
++                if (open_track_resource_context(s, &(track->resources[i])) != 0)
++                    return NULL;
++                avformat_close_input(&(track->resources[track->current_resource_index].ctx));
++                track->current_resource_index = i;
++            }
++
++            return &(track->resources[track->current_resource_index]);
++        }
++    }
++    return NULL;
++}
++
++static int imf_read_packet(AVFormatContext *s, AVPacket *pkt)
++{
++    IMFContext *c = s->priv_data;
++    IMFVirtualTrackResourcePlaybackCtx *resource_to_read = NULL;
++    AVRational edit_unit_duration;
++    int ret = 0;
++    IMFVirtualTrackPlaybackCtx *track;
++    FFStream *track_stream;
++
++    track = get_next_track_with_minimum_timestamp(s);
++
++    if (av_cmp_q(track->current_timestamp, track->duration) == 0)
++        return AVERROR_EOF;
++
++    resource_to_read = get_resource_context_for_timestamp(s, track);
++
++    if (!resource_to_read) {
++        edit_unit_duration
++            = av_inv_q(track->resources[track->current_resource_index].resource->base.edit_rate);
++
++        if (av_cmp_q(av_add_q(track->current_timestamp, edit_unit_duration), track->duration) > 0)
++            return AVERROR_EOF;
++
++        av_log(s, AV_LOG_ERROR, "Could not find IMF track resource to read\n");
++        return AVERROR_STREAM_NOT_FOUND;
++    }
++
++    while (!ff_check_interrupt(c->interrupt_callback) && !ret) {
++        ret = av_read_frame(resource_to_read->ctx, pkt);
++        av_log(s,
++               AV_LOG_DEBUG,
++               "Got packet: pts=%" PRId64
++               ", dts=%" PRId64
++               ", duration=%" PRId64
++               ", stream_index=%d, pos=%" PRId64
++               "\n",
++               pkt->pts,
++               pkt->dts,
++               pkt->duration,
++               pkt->stream_index,
++               pkt->pos);
++
++        track_stream = ffstream(s->streams[track->index]);
++        if (ret >= 0) {
++
++            if (pkt->dts < track_stream->cur_dts && track->last_pts > 0)
++                pkt->dts = track_stream->cur_dts;
++
++            pkt->pts = track->last_pts;
++            pkt->dts = pkt->dts
++                - (int64_t)track->resources[track->current_resource_index].resource->base.entry_point;
++            pkt->stream_index = track->index;
++
++
++            track->current_timestamp
++                = av_add_q(track->current_timestamp,
++                           av_make_q((int)pkt->duration
++
++                                     resource_to_read->ctx->streams[0]->time_base.den));
++            track->last_pts += pkt->duration;
++
++            return 0;
++        } else if (ret != AVERROR_EOF) {
++            av_log(s,
++                   AV_LOG_ERROR,
++                   "Could not get packet from track %d: %s\n",
++                   track->index,
++                   av_err2str(ret));
++            return ret;
++        }
++    }
++
++    return AVERROR_EOF;
++}
++
++static int imf_close(AVFormatContext *s)
++{
++    IMFContext *c = s->priv_data;
++
++    av_log(s, AV_LOG_DEBUG, "Close IMF package\n");
++    av_dict_free(&c->avio_opts);
++    av_freep(&c->base_url);
++    imf_asset_locator_map_deinit(&c->asset_locator_map);
++    ff_imf_cpl_free(c->cpl);
++
++    for (uint32_t i = 0; i < c->track_count; ++i) {
++        imf_virtual_track_playback_context_deinit(c->tracks[i]);
++        av_freep(&c->tracks[i]);
++    }
++
++    av_freep(&c->tracks);
++
++    return 0;
++}
++
++static int imf_probe(const AVProbeData *p)
++{
++    if (!strstr(p->buf, "<CompositionPlaylist"))
++        return 0;
++
++
++
++
++    if (!strstr(p->buf, "ContentTitle>"))
++        return 0;
++
++    return AVPROBE_SCORE_MAX;
++}
++
++static const AVOption imf_options[] = {
++    {
++        .name        = "assetmaps",
++        .help        = "Comma-separated paths to ASSETMAP files."
++                       "If not specified, the `ASSETMAP.xml` file in the same "
++                       "directory as the CPL is used.",
++        .offset      = offsetof(IMFContext, asset_map_paths),
++        .type        = AV_OPT_TYPE_STRING,
++        .default_val = {.str = NULL},
++        .flags       = AV_OPT_FLAG_DECODING_PARAM,
++    },
++    {NULL},
++};
++
++static const AVClass imf_class = {
++    .class_name = "imf",
++    .item_name  = av_default_item_name,
++    .option     = imf_options,
++    .version    = LIBAVUTIL_VERSION_INT,
++};
++
++const AVInputFormat ff_imf_demuxer = {
++    .name           = "imf",
++    .long_name      = NULL_IF_CONFIG_SMALL("IMF (Interoperable Master Format)"),
++    .flags_internal = FF_FMT_INIT_CLEANUP,
++    .priv_class     = &imf_class,
++    .priv_data_size = sizeof(IMFContext),
++    .read_probe     = imf_probe,
++    .read_header    = imf_read_header,
++    .read_packet    = imf_read_packet,
++    .read_close     = imf_close,
++};
+diff --git a/libavformat/isom.h b/libavformat/isom.h
+index ef8f19b..625dea8 100644
+--- a/libavformat/isom.h
++++ b/libavformat/isom.h
+@@ -305,6 +305,7 @@ typedef struct MOVContext {
+     int32_t movie_display_matrix[3][3]; ///< display matrix from mvhd
+     int have_read_mfra_size;
+     uint32_t mfra_size;
++    uint32_t max_stts_delta;
+ } MOVContext;
+ 
+ int ff_mp4_read_descr_len(AVIOContext *pb);
+diff --git a/libavformat/mov.c b/libavformat/mov.c
+index 2aed6e8..351ecde 100644
+--- a/libavformat/mov.c
++++ b/libavformat/mov.c
+@@ -2925,6 +2925,8 @@ static int mov_read_stts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+     unsigned int i, entries, alloc_size = 0;
+     int64_t duration = 0;
+     int64_t total_sample_count = 0;
++    int64_t current_dts = 0;
++    int64_t corrected_dts = 0;
+ 
+     if (c->fc->nb_streams < 1)
+         return 0;
+@@ -2965,11 +2967,34 @@ static int mov_read_stts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+         sc->stts_data[i].count= sample_count;
+         sc->stts_data[i].duration= sample_duration;
+ 
+-        av_log(c->fc, AV_LOG_TRACE, "sample_count=%d, sample_duration=%d\n",
++        av_log(c->fc, AV_LOG_TRACE, "sample_count=%u, sample_duration=%u\n",
+                 sample_count, sample_duration);
+ 
+-        duration+=(int64_t)sample_duration*(uint64_t)sample_count;
+-        total_sample_count+=sample_count;
++
++
++           There may be abnormally large values as well. */
++        if (sample_duration > c->max_stts_delta) {
++
++            int32_t delta_magnitude = (int32_t)sample_duration;
++            av_log(c->fc, AV_LOG_WARNING, "Too large sample offset %u in stts entry %u with count %u in st:%d. Clipping to 1.\n",
++                   sample_duration, i, sample_count, st->index);
++            sc->stts_data[i].duration = 1;
++            corrected_dts += (delta_magnitude < 0 ? (int64_t)delta_magnitude : 1) * sample_count;
++        } else {
++            corrected_dts += sample_duration * sample_count;
++        }
++
++        current_dts += sc->stts_data[i].duration * sample_count;
++
++        if (current_dts > corrected_dts) {
++            int64_t drift = (current_dts - corrected_dts)/FFMAX(sample_count, 1);
++            uint32_t correction = (sc->stts_data[i].duration > drift) ? drift : sc->stts_data[i].duration - 1;
++            current_dts -= correction * sample_count;
++            sc->stts_data[i].duration -= correction;
++        }
++
++        duration+=(int64_t)sc->stts_data[i].duration*(uint64_t)sc->stts_data[i].count;
++        total_sample_count+=sc->stts_data[i].count;
+     }
+ 
+     sc->stts_count = i;
+@@ -3856,13 +3881,10 @@ static void mov_build_index(MOVContext *mov, AVStream *st)
+         unsigned int distance = 0;
+         unsigned int rap_group_index = 0;
+         unsigned int rap_group_sample = 0;
+-        int64_t last_dts = 0;
+-        int64_t dts_correction = 0;
+         int rap_group_present = sc->rap_group_count && sc->rap_group;
+         int key_off = (sc->keyframe_count && sc->keyframes[0] > 0) || (sc->stps_count && sc->stps_data[0] > 0);
+ 
+         current_dts -= sc->dts_shift;
+-        last_dts     = current_dts;
+ 
+         if (!sc->sample_count || sti->nb_index_entries)
+             return;
+@@ -3973,26 +3995,8 @@ static void mov_build_index(MOVContext *mov, AVStream *st)
+                 current_offset += sample_size;
+                 stream_size += sample_size;
+ 
+-                /* A negative sample duration is invalid based on the spec,
+-                 * but some samples need it to correct the DTS. */
+-                if (sc->stts_data[stts_index].duration < 0) {
+-                    av_log(mov->fc, AV_LOG_WARNING,
+-                           "Invalid SampleDelta %d in STTS, at %d st:%d\n",
+-                           sc->stts_data[stts_index].duration, stts_index,
+-                           st->index);
+-                    dts_correction += sc->stts_data[stts_index].duration - 1;
+-                    sc->stts_data[stts_index].duration = 1;
+-                }
+                 current_dts += sc->stts_data[stts_index].duration;
+-                if (!dts_correction || current_dts + dts_correction > last_dts) {
+-                    current_dts += dts_correction;
+-                    dts_correction = 0;
+-                } else {
+-                    /* Avoid creating non-monotonous DTS */
+-                    dts_correction += current_dts - last_dts - 1;
+-                    current_dts = last_dts + 1;
+-                }
+-                last_dts = current_dts;
++
+                 distance++;
+                 stts_sample++;
+                 current_sample++;
+@@ -8577,6 +8581,7 @@ static const AVOption mov_options[] = {
+     { "decryption_key", "The media decryption key (hex)", OFFSET(decryption_key), AV_OPT_TYPE_BINARY, .flags = AV_OPT_FLAG_DECODING_PARAM },
+     { "enable_drefs", "Enable external track support.", OFFSET(enable_drefs), AV_OPT_TYPE_BOOL,
+         {.i64 = 0}, 0, 1, FLAGS },
++    { "max_stts_delta", "treat offsets above this value as invalid", OFFSET(max_stts_delta), AV_OPT_TYPE_INT, {.i64 = UINT_MAX-48000*10 }, 0, UINT_MAX, .flags = AV_OPT_FLAG_DECODING_PARAM },
+ 
+     { NULL },
+ };
+diff --git a/libavformat/mvdec.c b/libavformat/mvdec.c
+index 1a5012e..ea955d2 100644
+--- a/libavformat/mvdec.c
++++ b/libavformat/mvdec.c
+@@ -366,6 +366,9 @@ static int mv_read_header(AVFormatContext *avctx)
+             avpriv_request_sample(avctx, "Audio compression (format %i)", v);
+         }
+ 
++        if (bytes_per_sample == 0)
++            return AVERROR_INVALIDDATA;
++
+         if (set_channels(avctx, ast, avio_rb32(pb)) < 0)
+             return AVERROR_INVALIDDATA;
+ 
+diff --git a/libavformat/mxfenc.c b/libavformat/mxfenc.c
+index 1cdfc07..873d64a 100644
+--- a/libavformat/mxfenc.c
++++ b/libavformat/mxfenc.c
+@@ -32,6 +32,7 @@
+  * SMPTE 379M MXF Generic Container
+  * SMPTE 381M Mapping MPEG Streams into the MXF Generic Container
+  * SMPTE 422M Mapping JPEG 2000 Codestreams into the MXF Generic Container
++
+  * SMPTE RP210: SMPTE Metadata Dictionary
+  * SMPTE RP224: Registry of SMPTE Universal Labels
+  */
+@@ -180,8 +181,8 @@ static const MXFContainerEssenceEntry mxf_essence_container_uls[] = {
+       { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x04,0x01,0x02,0x02,0x02,0x00,0x00,0x00 },
+       mxf_write_cdci_desc },
+     // DNxHD
+-    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x01,0x0D,0x01,0x03,0x01,0x02,0x11,0x01,0x00 },
+-      { 0x06,0x0E,0x2B,0x34,0x01,0x02,0x01,0x01,0x0D,0x01,0x03,0x01,0x15,0x01,0x05,0x00 },
++    { { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0A,0x0D,0x01,0x03,0x01,0x02,0x11,0x01,0x00 },
++      { 0x06,0x0E,0x2B,0x34,0x01,0x02,0x01,0x01,0x0D,0x01,0x03,0x01,0x15,0x01,0x0C,0x00 },
+       { 0x06,0x0E,0x2B,0x34,0x04,0x01,0x01,0x0A,0x04,0x01,0x02,0x02,0x71,0x01,0x00,0x00 },
+       mxf_write_cdci_desc },
+     // JPEG2000
+@@ -2674,6 +2675,12 @@ static int mxf_init(AVFormatContext *s)
+ 
+         memcpy(sc->track_essence_element_key, mxf_essence_container_uls[sc->index].element_ul, 15);
+         sc->track_essence_element_key[15] = present[sc->index];
++        if (s->oformat == &ff_mxf_opatom_muxer && st->codecpar->codec_id == AV_CODEC_ID_DNXHD) {
++
++
++
++            sc->track_essence_element_key[14] = 0x06;
++        }
+         PRINT_KEY(s, "track essence element key", sc->track_essence_element_key);
+ 
+         if (!present[sc->index])
+diff --git a/libavformat/rawvideodec.c b/libavformat/rawvideodec.c
+index 5049a29..710724c 100644
+--- a/libavformat/rawvideodec.c
++++ b/libavformat/rawvideodec.c
+@@ -59,10 +59,38 @@ static int rawvideo_read_header(AVFormatContext *ctx)
+ 
+     st->codecpar->width  = s->width;
+     st->codecpar->height = s->height;
++
++    if (ctx->iformat->raw_codec_id == AV_CODEC_ID_BITPACKED) {
++        unsigned int pgroup;
++        unsigned int xinc;
++        const AVPixFmtDescriptor *desc;
++        int tag;
++
++        desc = av_pix_fmt_desc_get(pix_fmt);
++        st->codecpar->bits_per_coded_sample = av_get_bits_per_pixel(desc);
++        if (pix_fmt == AV_PIX_FMT_YUV422P10) {
++            tag = MKTAG('U', 'Y', 'V', 'Y');
++            pgroup = 5;
++            xinc   = 2;
++        } else if (pix_fmt == AV_PIX_FMT_UYVY422) {
++            tag = MKTAG('U', 'Y', 'V', 'Y');
++            pgroup = 4;
++            xinc   = 2;
++            st->codecpar->codec_id = AV_CODEC_ID_RAWVIDEO;
++        } else {
++            av_log(ctx, AV_LOG_ERROR, "unsupported format: %s for bitpacked.\n",
++                    s->pixel_format);
++            return AVERROR(EINVAL);
++        }
++        st->codecpar->codec_tag = tag;
++        packet_size  = s->width * s->height * pgroup / xinc;
++    } else {
++        packet_size = av_image_get_buffer_size(pix_fmt, s->width, s->height, 1);
++        if (packet_size < 0)
++            return packet_size;
++    }
++
+     st->codecpar->format = pix_fmt;
+-    packet_size = av_image_get_buffer_size(st->codecpar->format, s->width, s->height, 1);
+-    if (packet_size < 0)
+-        return packet_size;
+     ctx->packet_size = packet_size;
+     st->codecpar->bit_rate = av_rescale_q(ctx->packet_size,
+                                        (AVRational){8,1}, st->time_base);
+@@ -111,3 +139,24 @@ const AVInputFormat ff_rawvideo_demuxer = {
+     .raw_codec_id   = AV_CODEC_ID_RAWVIDEO,
+     .priv_class     = &rawvideo_demuxer_class,
+ };
++
++static const AVClass bitpacked_demuxer_class = {
++    .class_name = "bitpacked demuxer",
++    .item_name  = av_default_item_name,
++    .option     = rawvideo_options,
++    .version    = LIBAVUTIL_VERSION_INT,
++};
++
++#if CONFIG_BITPACKED_DEMUXER
++const AVInputFormat ff_bitpacked_demuxer = {
++    .name           = "bitpacked",
++    .long_name      = NULL_IF_CONFIG_SMALL("Bitpacked"),
++    .priv_data_size = sizeof(RawVideoDemuxerContext),
++    .read_header    = rawvideo_read_header,
++    .read_packet    = rawvideo_read_packet,
++    .flags          = AVFMT_GENERIC_INDEX,
++    .extensions     = "bitpacked",
++    .raw_codec_id   = AV_CODEC_ID_BITPACKED,
++    .priv_class     = &bitpacked_demuxer_class,
++};
++#endif
+diff --git a/libavformat/tests/imf.c b/libavformat/tests/imf.c
+new file mode 100644
+index 0000000..68e4c8b
+--- /dev/null
++++ b/libavformat/tests/imf.c
+@@ -0,0 +1,526 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#include "libavformat/imf_cpl.c"
++#include "libavformat/imfdec.c"
++#include "libavformat/mxf.h"
++
++#include <stdio.h>
++
++const char *cpl_doc =
++    "<CompositionPlaylist xmlns=\"http:
++    " xmlns:cc=\"http:
++    " xmlns:xsi=\"http:
++    "<Id>urn:uuid:8713c020-2489-45f5-a9f7-87be539e20b5</Id>"
++    "<IssueDate>2021-07-13T17:06:22Z</IssueDate>"
++    "<Creator language=\"en\">FFMPEG</Creator>"
++    "<ContentTitle>FFMPEG sample content</ContentTitle>"
++    "<EssenceDescriptorList>"
++    "  <EssenceDescriptor>"
++    "    <Id>urn:uuid:8e097bb0-cff7-4969-a692-bad47bfb528f</Id>"
++    "  </EssenceDescriptor>"
++    "</EssenceDescriptorList>"
++    "<EditRate>24000 1001</EditRate>"
++    "<SegmentList>"
++    "<Segment>"
++    "<Id>urn:uuid:81fed4e5-9722-400a-b9d1-7f2bd21df4b6</Id>"
++    "<SequenceList>"
++    "<MarkerSequence>"
++    "<Id>urn:uuid:16327185-9205-47ef-a17b-ee28df251db7</Id>"
++    "<TrackId>urn:uuid:461f5424-8f6e-48a9-a385-5eda46fda381</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"MarkerResourceType\">"
++    "<Id>urn:uuid:ea3d0f23-55d6-4e03-86ec-cfe0666f0e6a</Id>"
++    "<IntrinsicDuration>24</IntrinsicDuration>"
++    "<Marker>"
++    "<Label>LFOA</Label>"
++    "<Offset>5</Offset>"
++    "</Marker>"
++    "</Resource>"
++    "</ResourceList>"
++    "</MarkerSequence>"
++    "<cc:MainImageSequence>"
++    "<Id>urn:uuid:6ae100b0-92d1-41be-9321-85e0933dfc42</Id>"
++    "<TrackId>urn:uuid:e8ef9653-565c-479c-8039-82d4547973c5</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"TrackFileResourceType\">"
++    "<Id>urn:uuid:7d418acb-07a3-4e57-984c-b8ea2f7de4ec</Id>"
++    "<IntrinsicDuration>24</IntrinsicDuration>"
++    "<SourceEncoding>urn:uuid:f00e49a8-0dec-4e6c-95e7-078df988b751</SourceEncoding>"
++    "<TrackFileId>urn:uuid:6f768ca4-c89e-4dac-9056-a29425d40ba1</TrackFileId>"
++    "</Resource>"
++    "</ResourceList>"
++    "</cc:MainImageSequence>"
++    "<cc:MainAudioSequence>"
++    "<Id>urn:uuid:754dae53-c25f-4f3c-97e4-2bfe5463f83b</Id>"
++    "<TrackId>urn:uuid:68e3fae5-d94b-44d2-92a6-b94877fbcdb5</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"TrackFileResourceType\">"
++    "<Id>urn:uuid:61ce2a70-10a2-4521-850b-4218755ff3c9</Id>"
++    "<IntrinsicDuration>24</IntrinsicDuration>"
++    "<SourceEncoding>urn:uuid:f00e49a8-0dec-4e6c-95e7-078df988b751</SourceEncoding>"
++    "<TrackFileId>urn:uuid:381dadd2-061e-46cc-a63a-e3d58ce7f488</TrackFileId>"
++    "</Resource>"
++    "</ResourceList>"
++    "</cc:MainAudioSequence>"
++    "<cc:MainAudioSequence>"
++    "<Id>urn:uuid:d29b3884-6633-4dad-9c67-7154af342bc6</Id>"
++    "<TrackId>urn:uuid:6978c106-95bc-424b-a17c-628206a5892d</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"TrackFileResourceType\">"
++    "<Id>urn:uuid:001ea472-f5da-436c-86de-acaa68c1a7e4</Id>"
++    "<IntrinsicDuration>24</IntrinsicDuration>"
++    "<SourceEncoding>urn:uuid:f00e49a8-0dec-4e6c-95e7-078df988b751</SourceEncoding>"
++    "<TrackFileId>urn:uuid:381dadd2-061e-46cc-a63a-e3d58ce7f488</TrackFileId>"
++    "</Resource>"
++    "</ResourceList>"
++    "</cc:MainAudioSequence>"
++    "<cc:SubtitlesSequence>"
++    "<Id>urn:uuid:02af22bf-f776-488a-b001-eb6e16953119</Id>"
++    "<TrackId>urn:uuid:19ff6da1-be79-4235-8d04-42201ad06e65</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"TrackFileResourceType\">"
++    "<Id>urn:uuid:dfa84292-0609-4097-824c-8e2e15e2ce4d</Id>"
++    "<IntrinsicDuration>24</IntrinsicDuration>"
++    "<SourceEncoding>urn:uuid:f00e49a8-0dec-4e6c-95e7-078df988b751</SourceEncoding>"
++    "<TrackFileId>urn:uuid:bd6272b6-511e-47c1-93bc-d56ebd314a70</TrackFileId>"
++    "</Resource>"
++    "</ResourceList>"
++    "</cc:SubtitlesSequence>"
++    "</SequenceList>"
++    "</Segment>"
++    "<Segment>"
++    "<Id>urn:uuid:a94be493-cd55-4bf7-b496-ea87bfe38632</Id>"
++    "<SequenceList>"
++    "<MarkerSequence>"
++    "<Id>urn:uuid:20c6020b-1fc0-4080-bcf7-89f09f95bea8</Id>"
++    "<TrackId>urn:uuid:461f5424-8f6e-48a9-a385-5eda46fda381</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"MarkerResourceType\">"
++    "<Id>urn:uuid:d1f93845-d3e5-4c3b-aa67-8d96c45cfe9c</Id>"
++    "<IntrinsicDuration>36</IntrinsicDuration>"
++    "<Marker>"
++    "<Label>FFOA</Label>"
++    "<Offset>20</Offset>"
++    "</Marker>"
++    "<Marker>"
++    "<Label>LFOC</Label>"
++    "<Offset>24</Offset>"
++    "</Marker>"
++    "</Resource>"
++    "</ResourceList>"
++    "</MarkerSequence>"
++    "<cc:MainImageSequence>"
++    "<Id>urn:uuid:9b509f42-e4e8-4f78-8c2a-12ddd79ef3c5</Id>"
++    "<TrackId>urn:uuid:e8ef9653-565c-479c-8039-82d4547973c5</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"TrackFileResourceType\">"
++    "<Id>urn:uuid:a733d812-a3d7-45e9-ba50-13b856d5d35a</Id>"
++    "<IntrinsicDuration>36</IntrinsicDuration>"
++    "<SourceEncoding>urn:uuid:f00e49a8-0dec-4e6c-95e7-078df988b751</SourceEncoding>"
++    "<TrackFileId>urn:uuid:f3b263b3-096b-4360-a952-b1a9623cd0ca</TrackFileId>"
++    "</Resource>"
++    "</ResourceList>"
++    "</cc:MainImageSequence>"
++    "<cc:MainAudioSequence>"
++    "<Id>urn:uuid:19a282e6-beac-4d99-a008-afa61378eb6c</Id>"
++    "<TrackId>urn:uuid:68e3fae5-d94b-44d2-92a6-b94877fbcdb5</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"TrackFileResourceType\">"
++    "<Id>urn:uuid:53de5ff9-f5f7-47c5-a2d8-117c36cce517</Id>"
++    "<IntrinsicDuration>36</IntrinsicDuration>"
++    "<SourceEncoding>urn:uuid:f00e49a8-0dec-4e6c-95e7-078df988b751</SourceEncoding>"
++    "<TrackFileId>urn:uuid:2484d613-bb7d-4bcc-8b0f-2e65938f0535</TrackFileId>"
++    "</Resource>"
++    "</ResourceList>"
++    "</cc:MainAudioSequence>"
++    "<cc:MainAudioSequence>"
++    "<Id>urn:uuid:94b0ef77-0621-4086-95a2-85432fa97d40</Id>"
++    "<TrackId>urn:uuid:6978c106-95bc-424b-a17c-628206a5892d</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"TrackFileResourceType\">"
++    "<Id>urn:uuid:2ce499f2-59bc-4053-87bc-80f4b7e7b73e</Id>"
++    "<IntrinsicDuration>36</IntrinsicDuration>"
++    "<SourceEncoding>urn:uuid:f00e49a8-0dec-4e6c-95e7-078df988b751</SourceEncoding>"
++    "<TrackFileId>urn:uuid:2484d613-bb7d-4bcc-8b0f-2e65938f0535</TrackFileId>"
++    "</Resource>"
++    "</ResourceList>"
++    "</cc:MainAudioSequence>"
++    "<cc:SubtitlesSequence>"
++    "<Id>urn:uuid:9ac3b905-c599-4da8-8f0f-fc07e619899d</Id>"
++    "<TrackId>urn:uuid:19ff6da1-be79-4235-8d04-42201ad06e65</TrackId>"
++    "<ResourceList>"
++    "<Resource xsi:type=\"TrackFileResourceType\">"
++    "<Id>urn:uuid:0239017b-2ad9-4235-b46d-c4c1126e29fc</Id>"
++    "<IntrinsicDuration>36</IntrinsicDuration>"
++    "<SourceEncoding>urn:uuid:f00e49a8-0dec-4e6c-95e7-078df988b751</SourceEncoding>"
++    "<TrackFileId>urn:uuid:bd6272b6-511e-47c1-93bc-d56ebd314a70</TrackFileId>"
++    "</Resource>"
++    "</ResourceList>"
++    "</cc:SubtitlesSequence>"
++    "</SequenceList>"
++    "</Segment>"
++    "</SegmentList>"
++    "</CompositionPlaylist>";
++
++const char *cpl_bad_doc = "<Composition></Composition>";
++
++const char *asset_map_doc =
++    "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>"
++    "<am:AssetMap xmlns:am=\"http:
++    "<am:Id>urn:uuid:68d9f591-8191-46b5-38b4-affb87a14132</am:Id>"
++    "<am:AnnotationText>IMF_TEST_ASSET_MAP</am:AnnotationText>"
++    "<am:Creator>Some tool</am:Creator>"
++    "<am:VolumeCount>1</am:VolumeCount>"
++    "<am:IssueDate>2021-06-07T12:00:00+00:00</am:IssueDate>"
++    "<am:Issuer>FFmpeg</am:Issuer>"
++    "<am:AssetList>"
++    "<am:Asset>"
++    "<am:Id>urn:uuid:b5d674b8-c6ce-4bce-3bdf-be045dfdb2d0</am:Id>"
++    "<am:ChunkList>"
++    "<am:Chunk>"
++    "<am:Path>IMF_TEST_ASSET_MAP_video.mxf</am:Path>"
++    "<am:VolumeIndex>1</am:VolumeIndex>"
++    "<am:Offset>0</am:Offset>"
++    "<am:Length>1234567</am:Length>"
++    "</am:Chunk>"
++    "</am:ChunkList>"
++    "</am:Asset>"
++    "<am:Asset>"
++    "<am:Id>urn:uuid:ec3467ec-ab2a-4f49-c8cb-89caa3761f4a</am:Id>"
++    "<am:ChunkList>"
++    "<am:Chunk>"
++    "<am:Path>IMF_TEST_ASSET_MAP_video_1.mxf</am:Path>"
++    "<am:VolumeIndex>1</am:VolumeIndex>"
++    "<am:Offset>0</am:Offset>"
++    "<am:Length>234567</am:Length>"
++    "</am:Chunk>"
++    "</am:ChunkList>"
++    "</am:Asset>"
++    "<am:Asset>"
++    "<am:Id>urn:uuid:5cf5b5a7-8bb3-4f08-eaa6-3533d4b77fa6</am:Id>"
++    "<am:ChunkList>"
++    "<am:Chunk>"
++    "<am:Path>IMF_TEST_ASSET_MAP_audio.mxf</am:Path>"
++    "<am:VolumeIndex>1</am:VolumeIndex>"
++    "<am:Offset>0</am:Offset>"
++    "<am:Length>34567</am:Length>"
++    "</am:Chunk>"
++    "</am:ChunkList>"
++    "</am:Asset>"
++    "<am:Asset>"
++    "<am:Id>urn:uuid:559777d6-ec29-4375-f90d-300b0bf73686</am:Id>"
++    "<am:ChunkList>"
++    "<am:Chunk>"
++    "<am:Path>CPL_IMF_TEST_ASSET_MAP.xml</am:Path>"
++    "<am:VolumeIndex>1</am:VolumeIndex>"
++    "<am:Offset>0</am:Offset>"
++    "<am:Length>12345</am:Length>"
++    "</am:Chunk>"
++    "</am:ChunkList>"
++    "</am:Asset>"
++    "<am:Asset>"
++    "<am:Id>urn:uuid:dd04528d-9b80-452a-7a13-805b08278b3d</am:Id>"
++    "<am:PackingList>true</am:PackingList>"
++    "<am:ChunkList>"
++    "<am:Chunk>"
++    "<am:Path>PKL_IMF_TEST_ASSET_MAP.xml</am:Path>"
++    "<am:VolumeIndex>1</am:VolumeIndex>"
++    "<am:Offset>0</am:Offset>"
++    "<am:Length>2345</am:Length>"
++    "</am:Chunk>"
++    "</am:ChunkList>"
++    "</am:Asset>"
++    "</am:AssetList>"
++    "</am:AssetMap>";
++
++static int test_cpl_parsing(void)
++{
++    xmlDocPtr doc;
++    FFIMFCPL *cpl;
++    int ret;
++
++    doc = xmlReadMemory(cpl_doc, strlen(cpl_doc), NULL, NULL, 0);
++    if (doc == NULL) {
++        printf("XML parsing failed.\n");
++        return 1;
++    }
++
++    ret = ff_imf_parse_cpl_from_xml_dom(doc, &cpl);
++    xmlFreeDoc(doc);
++    if (ret) {
++        printf("CPL parsing failed.\n");
++        return 1;
++    }
++
++    printf("%s\n", cpl->content_title_utf8);
++    printf(FF_IMF_UUID_FORMAT "\n", UID_ARG(cpl->id_uuid));
++    printf("%i %i\n", cpl->edit_rate.num, cpl->edit_rate.den);
++
++    printf("Marker resource count: %" PRIu32 "\n", cpl->main_markers_track->resource_count);
++    for (uint32_t i = 0; i < cpl->main_markers_track->resource_count; i++) {
++        printf("Marker resource %" PRIu32 "\n", i);
++        for (uint32_t j = 0; j < cpl->main_markers_track->resources[i].marker_count; j++) {
++            printf("  Marker %" PRIu32 "\n", j);
++            printf("    Label %s\n", cpl->main_markers_track->resources[i].markers[j].label_utf8);
++            printf("    Offset %" PRIu32 "\n", cpl->main_markers_track->resources[i].markers[j].offset);
++        }
++    }
++
++    printf("Main image resource count: %" PRIu32 "\n", cpl->main_image_2d_track->resource_count);
++    for (uint32_t i = 0; i < cpl->main_image_2d_track->resource_count; i++) {
++        printf("Track file resource %" PRIu32 "\n", i);
++        printf("  " FF_IMF_UUID_FORMAT "\n", UID_ARG(cpl->main_image_2d_track->resources[i].track_file_uuid));
++    }
++
++    printf("Main audio track count: %" PRIu32 "\n", cpl->main_audio_track_count);
++    for (uint32_t i = 0; i < cpl->main_audio_track_count; i++) {
++        printf("  Main audio virtual track %" PRIu32 "\n", i);
++        printf("  Main audio resource count: %" PRIu32 "\n", cpl->main_audio_tracks[i].resource_count);
++        for (uint32_t j = 0; j < cpl->main_audio_tracks[i].resource_count; j++) {
++            printf("  Track file resource %" PRIu32 "\n", j);
++            printf("    " FF_IMF_UUID_FORMAT "\n", UID_ARG(cpl->main_audio_tracks[i].resources[j].track_file_uuid));
++        }
++    }
++
++    ff_imf_cpl_free(cpl);
++
++    return 0;
++}
++
++static int test_bad_cpl_parsing(void)
++{
++    xmlDocPtr doc;
++    FFIMFCPL *cpl;
++    int ret;
++
++    doc = xmlReadMemory(cpl_bad_doc, strlen(cpl_bad_doc), NULL, NULL, 0);
++    if (doc == NULL) {
++        printf("XML parsing failed.\n");
++        return ret;
++    }
++
++    ret = ff_imf_parse_cpl_from_xml_dom(doc, &cpl);
++    xmlFreeDoc(doc);
++    if (ret) {
++        printf("CPL parsing failed.\n");
++        return ret;
++    }
++
++    return 0;
++}
++
++static int check_asset_locator_attributes(IMFAssetLocator *asset, IMFAssetLocator *expected_asset)
++{
++
++    printf("\tCompare " FF_IMF_UUID_FORMAT " to " FF_IMF_UUID_FORMAT ".\n",
++           UID_ARG(asset->uuid),
++           UID_ARG(expected_asset->uuid));
++
++    for (uint32_t i = 0; i < 16; ++i) {
++        if (asset->uuid[i] != expected_asset->uuid[i]) {
++            printf("Invalid asset locator UUID: found " FF_IMF_UUID_FORMAT " instead of " FF_IMF_UUID_FORMAT " expected.\n",
++                   UID_ARG(asset->uuid),
++                   UID_ARG(expected_asset->uuid));
++            return 1;
++        }
++    }
++
++    printf("\tCompare %s to %s.\n", asset->absolute_uri, expected_asset->absolute_uri);
++    if (strcmp(asset->absolute_uri, expected_asset->absolute_uri) != 0) {
++        printf("Invalid asset locator URI: found %s instead of %s expected.\n",
++               asset->absolute_uri,
++               expected_asset->absolute_uri);
++        return 1;
++    }
++
++    return 0;
++}
++
++static IMFAssetLocator ASSET_MAP_EXPECTED_LOCATORS[5] = {
++    {.uuid = {0xb5, 0xd6, 0x74, 0xb8, 0xc6, 0xce, 0x4b, 0xce, 0x3b, 0xdf, 0xbe, 0x04, 0x5d, 0xfd, 0xb2, 0xd0},
++     .absolute_uri = (char *)"IMF_TEST_ASSET_MAP_video.mxf"},
++    {.uuid = {0xec, 0x34, 0x67, 0xec, 0xab, 0x2a, 0x4f, 0x49, 0xc8, 0xcb, 0x89, 0xca, 0xa3, 0x76, 0x1f, 0x4a},
++     .absolute_uri = (char *)"IMF_TEST_ASSET_MAP_video_1.mxf"},
++    {.uuid = {0x5c, 0xf5, 0xb5, 0xa7, 0x8b, 0xb3, 0x4f, 0x08, 0xea, 0xa6, 0x35, 0x33, 0xd4, 0xb7, 0x7f, 0xa6},
++     .absolute_uri = (char *)"IMF_TEST_ASSET_MAP_audio.mxf"},
++    {.uuid = {0x55, 0x97, 0x77, 0xd6, 0xec, 0x29, 0x43, 0x75, 0xf9, 0x0d, 0x30, 0x0b, 0x0b, 0xf7, 0x36, 0x86},
++     .absolute_uri = (char *)"CPL_IMF_TEST_ASSET_MAP.xml"},
++    {.uuid = {0xdd, 0x04, 0x52, 0x8d, 0x9b, 0x80, 0x45, 0x2a, 0x7a, 0x13, 0x80, 0x5b, 0x08, 0x27, 0x8b, 0x3d},
++     .absolute_uri = (char *)"PKL_IMF_TEST_ASSET_MAP.xml"},
++};
++
++static int test_asset_map_parsing(void)
++{
++    IMFAssetLocatorMap asset_locator_map;
++    xmlDoc *doc;
++    int ret;
++
++    doc = xmlReadMemory(asset_map_doc, strlen(asset_map_doc), NULL, NULL, 0);
++    if (doc == NULL) {
++        printf("Asset map XML parsing failed.\n");
++        return 1;
++    }
++
++    printf("Allocate asset map\n");
++    imf_asset_locator_map_init(&asset_locator_map);
++
++    printf("Parse asset map XML document\n");
++    ret = parse_imf_asset_map_from_xml_dom(NULL, doc, &asset_locator_map, doc->name);
++    if (ret) {
++        printf("Asset map parsing failed.\n");
++        goto cleanup;
++    }
++
++    printf("Compare assets count: %d to 5\n", asset_locator_map.asset_count);
++    if (asset_locator_map.asset_count != 5) {
++        printf("Asset map parsing failed: found %d assets instead of 5 expected.\n",
++               asset_locator_map.asset_count);
++        ret = 1;
++        goto cleanup;
++    }
++
++    for (uint32_t i = 0; i < asset_locator_map.asset_count; ++i) {
++        printf("For asset: %d:\n", i);
++        ret = check_asset_locator_attributes(&(asset_locator_map.assets[i]),
++                                             &(ASSET_MAP_EXPECTED_LOCATORS[i]));
++        if (ret > 0)
++            goto cleanup;
++    }
++
++cleanup:
++    imf_asset_locator_map_deinit(&asset_locator_map);
++    xmlFreeDoc(doc);
++    return ret;
++}
++
++typedef struct PathTypeTestStruct {
++    const char *path;
++    int is_url;
++    int is_unix_absolute_path;
++    int is_dos_absolute_path;
++} PathTypeTestStruct;
++
++static const PathTypeTestStruct PATH_TYPE_TEST_STRUCTS[11] = {
++    {.path = "file:
++    {.path = "http:
++    {.path = "https:
++    {.path = "s3:
++    {.path = "ftp:
++    {.path = "/path/to/somewhere", .is_url = 0, .is_unix_absolute_path = 1, .is_dos_absolute_path = 0},
++    {.path = "path/to/somewhere", .is_url = 0, .is_unix_absolute_path = 0, .is_dos_absolute_path = 0},
++    {.path = "C:\\path\\to\\somewhere", .is_url = 0, .is_unix_absolute_path = 0, .is_dos_absolute_path = 1},
++    {.path = "C:/path/to/somewhere", .is_url = 0, .is_unix_absolute_path = 0, .is_dos_absolute_path = 1},
++    {.path = "\\\\path\\to\\somewhere", .is_url = 0, .is_unix_absolute_path = 0, .is_dos_absolute_path = 1},
++    {.path = "path\\to\\somewhere", .is_url = 0, .is_unix_absolute_path = 0, .is_dos_absolute_path = 0},
++};
++
++static int test_path_type_functions(void)
++{
++    PathTypeTestStruct path_type;
++    for (uint32_t i = 0; i < 11; ++i) {
++        path_type = PATH_TYPE_TEST_STRUCTS[i];
++        if (imf_uri_is_url(path_type.path) != path_type.is_url) {
++            fprintf(stderr,
++                    "URL comparison test failed for '%s', got %d instead of expected %d\n",
++                    path_type.path,
++                    path_type.is_url,
++                    !path_type.is_url);
++            goto fail;
++        }
++
++        if (imf_uri_is_unix_abs_path(path_type.path) != path_type.is_unix_absolute_path) {
++            fprintf(stderr,
++                    "Unix absolute path comparison test failed for '%s', got %d instead of expected %d\n",
++                    path_type.path,
++                    path_type.is_unix_absolute_path,
++                    !path_type.is_unix_absolute_path);
++            goto fail;
++        }
++
++        if (imf_uri_is_dos_abs_path(path_type.path) != path_type.is_dos_absolute_path) {
++            fprintf(stderr,
++                    "DOS absolute path comparison test failed for '%s', got %d instead of expected %d\n",
++                    path_type.path,
++                    path_type.is_dos_absolute_path,
++                    !path_type.is_dos_absolute_path);
++            goto fail;
++        }
++    }
++
++    return 0;
++
++fail:
++    return 1;
++}
++
++int main(int argc, char *argv[])
++{
++    int ret = 0;
++
++    if (test_cpl_parsing() != 0)
++        ret = 1;
++
++    if (test_asset_map_parsing() != 0)
++        ret = 1;
++
++    if (test_path_type_functions() != 0)
++        ret = 1;
++
++    printf("#### The following should fail ####\n");
++    if (test_bad_cpl_parsing() == 0)
++        ret = 1;
++    printf("#### End failing test ####\n");
++
++    return ret;
++}
+diff --git a/libavformat/tls_mbedtls.c b/libavformat/tls_mbedtls.c
+index aadf177..5754d0d 100644
+--- a/libavformat/tls_mbedtls.c
++++ b/libavformat/tls_mbedtls.c
+@@ -223,7 +223,7 @@ static int tls_open(URLContext *h, const char *uri, int flags, AVDictionary **op
+     }
+ 
+     mbedtls_ssl_conf_authmode(&tls_ctx->ssl_config,
+-                              shr->ca_file ? MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE);
++                              shr->verify ? MBEDTLS_SSL_VERIFY_REQUIRED : MBEDTLS_SSL_VERIFY_NONE);
+     mbedtls_ssl_conf_rng(&tls_ctx->ssl_config, mbedtls_ctr_drbg_random, &tls_ctx->ctr_drbg_context);
+     mbedtls_ssl_conf_ca_chain(&tls_ctx->ssl_config, &tls_ctx->ca_cert, NULL);
+ 
+diff --git a/libavformat/version.h b/libavformat/version.h
+index 379a68c..917b9ff 100644
+--- a/libavformat/version.h
++++ b/libavformat/version.h
+@@ -32,7 +32,7 @@
+ // Major bumping may affect Ticket5467, 5421, 5451(compatibility with Chromium)
+ // Also please add any ticket numbers that you believe might be affected here
+ #define LIBAVFORMAT_VERSION_MAJOR  59
+-#define LIBAVFORMAT_VERSION_MINOR  10
++#define LIBAVFORMAT_VERSION_MINOR  12
+ #define LIBAVFORMAT_VERSION_MICRO 100
+ 
+ #define LIBAVFORMAT_VERSION_INT AV_VERSION_INT(LIBAVFORMAT_VERSION_MAJOR, \
+diff --git a/tests/fate/libavformat.mak b/tests/fate/libavformat.mak
+index d1e8128..59ff0eb 100644
+--- a/tests/fate/libavformat.mak
++++ b/tests/fate/libavformat.mak
+@@ -22,6 +22,10 @@ FATE_LIBAVFORMAT-$(CONFIG_MOV_MUXER) += fate-movenc
+ fate-movenc: libavformat/tests/movenc$(EXESUF)
+ fate-movenc: CMD = run libavformat/tests/movenc$(EXESUF)
+ 
++FATE_LIBAVFORMAT-$(CONFIG_IMF_DEMUXER) += fate-imf
++fate-imf: libavformat/tests/imf$(EXESUF)
++fate-imf: CMD = run libavformat/tests/imf$(EXESUF)
++
+ FATE_LIBAVFORMAT += $(FATE_LIBAVFORMAT-yes)
+ FATE-$(CONFIG_AVFORMAT) += $(FATE_LIBAVFORMAT)
+ fate-libavformat: $(FATE_LIBAVFORMAT)
+diff --git a/tests/ref/fate/imf b/tests/ref/fate/imf
+new file mode 100644
+index 0000000..90b461d
+--- /dev/null
++++ b/tests/ref/fate/imf
+@@ -0,0 +1,54 @@
++FFMPEG sample content
++urn:uuid:8713c020-2489-45f5-a9f7-87be539e20b5
++24000 1001
++Marker resource count: 2
++Marker resource 0
++  Marker 0
++    Label LFOA
++    Offset 5
++Marker resource 1
++  Marker 0
++    Label FFOA
++    Offset 20
++  Marker 1
++    Label LFOC
++    Offset 24
++Main image resource count: 2
++Track file resource 0
++  urn:uuid:6f768ca4-c89e-4dac-9056-a29425d40ba1
++Track file resource 1
++  urn:uuid:f3b263b3-096b-4360-a952-b1a9623cd0ca
++Main audio track count: 2
++  Main audio virtual track 0
++  Main audio resource count: 2
++  Track file resource 0
++    urn:uuid:381dadd2-061e-46cc-a63a-e3d58ce7f488
++  Track file resource 1
++    urn:uuid:2484d613-bb7d-4bcc-8b0f-2e65938f0535
++  Main audio virtual track 1
++  Main audio resource count: 2
++  Track file resource 0
++    urn:uuid:381dadd2-061e-46cc-a63a-e3d58ce7f488
++  Track file resource 1
++    urn:uuid:2484d613-bb7d-4bcc-8b0f-2e65938f0535
++Allocate asset map
++Parse asset map XML document
++Compare assets count: 5 to 5
++For asset: 0:
++	Compare urn:uuid:b5d674b8-c6ce-4bce-3bdf-be045dfdb2d0 to urn:uuid:b5d674b8-c6ce-4bce-3bdf-be045dfdb2d0.
++	Compare IMF_TEST_ASSET_MAP_video.mxf to IMF_TEST_ASSET_MAP_video.mxf.
++For asset: 1:
++	Compare urn:uuid:ec3467ec-ab2a-4f49-c8cb-89caa3761f4a to urn:uuid:ec3467ec-ab2a-4f49-c8cb-89caa3761f4a.
++	Compare IMF_TEST_ASSET_MAP_video_1.mxf to IMF_TEST_ASSET_MAP_video_1.mxf.
++For asset: 2:
++	Compare urn:uuid:5cf5b5a7-8bb3-4f08-eaa6-3533d4b77fa6 to urn:uuid:5cf5b5a7-8bb3-4f08-eaa6-3533d4b77fa6.
++	Compare IMF_TEST_ASSET_MAP_audio.mxf to IMF_TEST_ASSET_MAP_audio.mxf.
++For asset: 3:
++	Compare urn:uuid:559777d6-ec29-4375-f90d-300b0bf73686 to urn:uuid:559777d6-ec29-4375-f90d-300b0bf73686.
++	Compare CPL_IMF_TEST_ASSET_MAP.xml to CPL_IMF_TEST_ASSET_MAP.xml.
++For asset: 4:
++	Compare urn:uuid:dd04528d-9b80-452a-7a13-805b08278b3d to urn:uuid:dd04528d-9b80-452a-7a13-805b08278b3d.
++	Compare PKL_IMF_TEST_ASSET_MAP.xml to PKL_IMF_TEST_ASSET_MAP.xml.
++#### The following should fail ####
++CPL parsing failed.
++#### End failing test ####
+diff --git a/tests/ref/lavf/mxf_opatom b/tests/ref/lavf/mxf_opatom
+index 61e7555..e34cf25 100644
+--- a/tests/ref/lavf/mxf_opatom
++++ b/tests/ref/lavf/mxf_opatom
+@@ -1,3 +1,3 @@
+-5d235c127ace64b1f4fe6c79a7ca8be6 *tests/data/lavf/lavf.mxf_opatom
++aab6397829bd90f0c77a3f9fde53bb9c *tests/data/lavf/lavf.mxf_opatom
+ 4717625 tests/data/lavf/lavf.mxf_opatom
+ tests/data/lavf/lavf.mxf_opatom CRC=0xf55aa22a

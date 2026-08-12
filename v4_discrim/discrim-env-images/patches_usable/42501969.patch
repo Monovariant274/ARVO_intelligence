@@ -1,0 +1,33 @@
+diff --git a/blosc/blosc.h b/blosc/blosc.h
+index c1ff394..77a2411 100644
+--- a/blosc/blosc.h
++++ b/blosc/blosc.h
+@@ -25,7 +25,7 @@ extern "C" {
+ #define BLOSC_VERSION_REVISION "$Rev$"   /* revision version */
+ #define BLOSC_VERSION_DATE     "$Date:: 2020-12-22 #$"    /* date version */
+ 
+-#define BLOSCLZ_VERSION_STRING "2.5.0"   /* the internal compressor version */
++#define BLOSCLZ_VERSION_STRING "2.5.1"
+ 
+ /* The *_FORMAT symbols should be just 1-byte long */
+ #define BLOSC_VERSION_FORMAT    2   /* Blosc format version, starting at 1 */
+diff --git a/blosc/blosclz.c b/blosc/blosclz.c
+index 4e1f648..a0552c2 100644
+--- a/blosc/blosclz.c
++++ b/blosc/blosclz.c
+@@ -462,6 +462,7 @@ int blosclz_compress(const int clevel, const void* input, int length,
+   const uint8_t* ip_bound = ibase + length - 1;
+   const uint8_t* ip_limit = ibase + length - 12;
+   uint8_t* op = (uint8_t*)output;
++  const uint8_t* op_limit = op + maxout;
+ 
+   /* input and output buffer cannot be less than 16 and 66 bytes or we can get into trouble */
+   if (length < 16 || maxout < 66) {
+@@ -481,7 +482,6 @@ int blosclz_compress(const int clevel, const void* input, int length,
+   *op++ = *ip++;
+ 
+   /* main loop */
+-  const uint8_t* op_limit = op + maxout;
+   while (BLOSCLZ_LIKELY(ip < ip_limit)) {
+     const uint8_t* ref;
+     unsigned distance;

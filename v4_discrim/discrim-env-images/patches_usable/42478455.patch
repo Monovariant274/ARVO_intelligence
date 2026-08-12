@@ -1,0 +1,21 @@
+diff --git a/docs/THANKS b/docs/THANKS
+index 385ecd8..6d89c0f 100644
+--- a/docs/THANKS
++++ b/docs/THANKS
+@@ -1682,7 +1682,6 @@ Stephen Kick
+ Stephen More
+ Stephen Toub
+ Sterling Hughes
+-Steve Brokenshire
+ Steve Green
+ Steve H Truong
+ Steve Havelka
+diff --git a/docs/THANKS-filter b/docs/THANKS-filter
+index 29dc24c..d2adda5 100644
+--- a/docs/THANKS-filter
++++ b/docs/THANKS-filter
+@@ -98,3 +98,4 @@ s/Jason Priebe/Jason S. Priebe/
+ s/Ale Vesely/Alessandro Vesely/
+ s/Yamada Yasuharu/Yasuharu Yamada/
+ s/Jim Gallagher/James Gallagher/
++s/Steve Brokenshire/Stephen Brokenshire/

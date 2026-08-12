@@ -1,0 +1,12 @@
+diff --git a/xmlreader.c b/xmlreader.c
+index 3acec75..cd1fb5f 100644
+--- a/xmlreader.c
++++ b/xmlreader.c
+@@ -273,6 +273,7 @@ xmlTextReaderRemoveID(xmlDocPtr doc, xmlAttrPtr attr) {
+ 	return(-1);
+     }
+     id->name = attr->name;
++    attr->name = NULL;
+     id->attr = NULL;
+     return(0);
+ }

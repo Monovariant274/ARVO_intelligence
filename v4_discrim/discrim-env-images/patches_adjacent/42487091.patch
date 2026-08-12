@@ -1,0 +1,35 @@
+diff --git a/OpenEXR/IlmImf/ImfFastHuf.cpp b/OpenEXR/IlmImf/ImfFastHuf.cpp
+index 1c95fc7..97782f8 100644
+--- a/OpenEXR/IlmImf/ImfFastHuf.cpp
++++ b/OpenEXR/IlmImf/ImfFastHuf.cpp
+@@ -127,7 +127,7 @@ FastHufDecoder::FastHufDecoder
+ 
+     for (Int64 symbol = static_cast<Int64>(minSymbol); symbol <= static_cast<Int64>(maxSymbol); symbol++)
+     {
+-        if (currByte - table > numBytes)
++        if (currByte - table >= numBytes)
+         {
+             throw IEX_NAMESPACE::InputExc ("Error decoding Huffman table "
+                                            "(Truncated table data).");
+@@ -144,7 +144,7 @@ FastHufDecoder::FastHufDecoder
+ 
+         if (codeLen == (Int64) LONG_ZEROCODE_RUN)
+         {
+-            if (currByte - table > numBytes)
++            if (currByte - table >= numBytes)
+             {
+                 throw IEX_NAMESPACE::InputExc ("Error decoding Huffman table "
+                                                "(Truncated table data).");
+diff --git a/OpenEXR/IlmImf/ImfPizCompressor.cpp b/OpenEXR/IlmImf/ImfPizCompressor.cpp
+index edc141a..ffcd9e9 100644
+--- a/OpenEXR/IlmImf/ImfPizCompressor.cpp
++++ b/OpenEXR/IlmImf/ImfPizCompressor.cpp
+@@ -594,7 +594,7 @@ Xdr::read <CharPtrIO> (inPtr, (char *) &bitmap[0] + minNonZero,
+     int length;
+     Xdr::read <CharPtrIO> (inPtr, length);
+ 
+-    if (length > inSize)
++    if (inPtr + length > inputEnd || length<0 )
+     {
+ 	throw InputExc ("Error in header for PIZ-compressed data "
+ 			"(invalid array length).");

@@ -1,0 +1,12 @@
+diff --git a/SAX2.c b/SAX2.c
+index ac3ab19..7642501 100644
+--- a/SAX2.c
++++ b/SAX2.c
+@@ -2261,6 +2261,7 @@ xmlSAX2StartElementNs(void *ctx,
+ 	ctxt->freeElems = ret->next;
+ 	ctxt->freeElemsNr--;
+ 	memset(ret, 0, sizeof(xmlNode));
++        ret->doc = ctxt->myDoc;
+ 	ret->type = XML_ELEMENT_NODE;
+ 
+ 	if (ctxt->dictNames)

@@ -1,0 +1,474 @@
+diff --git a/fftools/cmdutils.c b/fftools/cmdutils.c
+index ae34118..c0d802d 100644
+--- a/fftools/cmdutils.c
++++ b/fftools/cmdutils.c
+@@ -68,7 +68,7 @@ static int init_report(const char *env);
+ 
+ AVDictionary *sws_dict;
+ AVDictionary *swr_opts;
+-AVDictionary *format_opts, *codec_opts, *resample_opts;
++AVDictionary *format_opts, *codec_opts;
+ 
+ static FILE *report_file;
+ static int report_file_level = AV_LOG_DEBUG;
+@@ -86,7 +86,6 @@ void uninit_opts(void)
+     av_dict_free(&sws_dict);
+     av_dict_free(&format_opts);
+     av_dict_free(&codec_opts);
+-    av_dict_free(&resample_opts);
+ }
+ 
+ void log_callback_help(void *ptr, int level, const char *fmt, va_list vl)
+@@ -657,11 +656,9 @@ static void finish_group(OptionParseContext *octx, int group_idx,
+     g->swr_opts    = swr_opts;
+     g->codec_opts  = codec_opts;
+     g->format_opts = format_opts;
+-    g->resample_opts = resample_opts;
+ 
+     codec_opts  = NULL;
+     format_opts = NULL;
+-    resample_opts = NULL;
+     sws_dict    = NULL;
+     swr_opts    = NULL;
+ 
+@@ -714,7 +711,6 @@ void uninit_parse_context(OptionParseContext *octx)
+             av_freep(&l->groups[j].opts);
+             av_dict_free(&l->groups[j].codec_opts);
+             av_dict_free(&l->groups[j].format_opts);
+-            av_dict_free(&l->groups[j].resample_opts);
+ 
+             av_dict_free(&l->groups[j].sws_dict);
+             av_dict_free(&l->groups[j].swr_opts);
+@@ -826,7 +822,7 @@ do {                                                                           \
+         return AVERROR_OPTION_NOT_FOUND;
+     }
+ 
+-    if (octx->cur_group.nb_opts || codec_opts || format_opts || resample_opts)
++    if (octx->cur_group.nb_opts || codec_opts || format_opts)
+         av_log(NULL, AV_LOG_WARNING, "Trailing option(s) found in the "
+                "command: may be ignored.\n");
+ 
+diff --git a/fftools/cmdutils.h b/fftools/cmdutils.h
+index 0330ee3..9caad01 100644
+--- a/fftools/cmdutils.h
++++ b/fftools/cmdutils.h
+@@ -48,7 +48,7 @@ extern AVCodecContext *avcodec_opts[AVMEDIA_TYPE_NB];
+ extern AVFormatContext *avformat_opts;
+ extern AVDictionary *sws_dict;
+ extern AVDictionary *swr_opts;
+-extern AVDictionary *format_opts, *codec_opts, *resample_opts;
++extern AVDictionary *format_opts, *codec_opts;
+ extern int hide_banner;
+ 
+ /**
+@@ -323,7 +323,6 @@ typedef struct OptionGroup {
+ 
+     AVDictionary *codec_opts;
+     AVDictionary *format_opts;
+-    AVDictionary *resample_opts;
+     AVDictionary *sws_dict;
+     AVDictionary *swr_opts;
+ } OptionGroup;
+diff --git a/fftools/ffmpeg.c b/fftools/ffmpeg.c
+index b0ce7c7..c3df955 100644
+--- a/fftools/ffmpeg.c
++++ b/fftools/ffmpeg.c
+@@ -4926,7 +4926,6 @@ static int transcode(void)
+                 av_dict_free(&ost->encoder_opts);
+                 av_dict_free(&ost->sws_dict);
+                 av_dict_free(&ost->swr_opts);
+-                av_dict_free(&ost->resample_opts);
+             }
+         }
+     }
+diff --git a/fftools/ffmpeg.h b/fftools/ffmpeg.h
+index d2dd7ca..8184099 100644
+--- a/fftools/ffmpeg.h
++++ b/fftools/ffmpeg.h
+@@ -360,8 +360,6 @@ typedef struct InputStream {
+         unsigned int initialize; ///< marks if sub2video_update should force an initialization
+     } sub2video;
+ 
+-    int dr1;
+-
+     /* decoded data from this stream goes into all those filters
+      * currently video and audio only */
+     InputFilter **filters;
+@@ -413,7 +411,6 @@ typedef struct InputFile {
+     int64_t ts_offset;
+     int64_t last_ts;
+     int64_t start_time;   /* user-specified start time in AV_TIME_BASE or AV_NOPTS_VALUE */
+-    int seek_timestamp;
+     int64_t recording_time;
+     int nb_streams;       /* number of stream that ffmpeg is aware of; may be different
+                              from ctx.nb_streams if new streams appear during av_read_frame() */
+@@ -523,7 +520,6 @@ typedef struct OutputStream {
+     AVDictionary *encoder_opts;
+     AVDictionary *sws_dict;
+     AVDictionary *swr_opts;
+-    AVDictionary *resample_opts;
+     char *apad;
+     OSTFinished finished;        /* no more packets should be written for this stream */
+     int unavailable;                     /* true if the steram is unavailable (possibly temporarily) */
+diff --git a/fftools/ffmpeg_filter.c b/fftools/ffmpeg_filter.c
+index 21d54cc..4b9ad30 100644
+--- a/fftools/ffmpeg_filter.c
++++ b/fftools/ffmpeg_filter.c
+@@ -995,15 +995,6 @@ int configure_filtergraph(FilterGraph *fg)
+         if (strlen(args))
+             args[strlen(args)-1] = 0;
+         av_opt_set(fg->graph, "aresample_swr_opts", args, 0);
+-
+-        args[0] = '\0';
+-        e       = NULL;
+-        while ((e = av_dict_get(fg->outputs[0]->ost->resample_opts, "", e,
+-                                AV_DICT_IGNORE_SUFFIX))) {
+-            av_strlcatf(args, sizeof(args), "%s=%s:", e->key, e->value);
+-        }
+-        if (strlen(args))
+-            args[strlen(args) - 1] = '\0';
+     } else {
+         fg->graph->nb_threads = filter_complex_nbthreads;
+     }
+diff --git a/fftools/ffmpeg_opt.c b/fftools/ffmpeg_opt.c
+index 428934a..bd8f26c 100644
+--- a/fftools/ffmpeg_opt.c
++++ b/fftools/ffmpeg_opt.c
+@@ -1628,8 +1628,6 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
+     if (ost->enc && av_get_exact_bits_per_sample(ost->enc->id) == 24)
+         av_dict_set(&ost->swr_opts, "output_sample_bits", "24", 0);
+ 
+-    av_dict_copy(&ost->resample_opts, o->g->resample_opts, 0);
+-
+     ost->source_index = source_index;
+     if (source_index >= 0) {
+         ost->sync_ist = input_streams[source_index];
+diff --git a/libavcodec/interplayacm.c b/libavcodec/interplayacm.c
+index 470d640..c11178a 100644
+--- a/libavcodec/interplayacm.c
++++ b/libavcodec/interplayacm.c
+@@ -39,6 +39,7 @@ typedef struct InterplayACMContext {
+     GetBitContext gb;
+     uint8_t *bitstream;
+     int max_framesize;
++    uint64_t max_samples;
+     int bitstream_size;
+     int bitstream_index;
+ 
+@@ -83,6 +84,9 @@ static av_cold int decode_init(AVCodecContext *avctx)
+         return AVERROR_INVALIDDATA;
+     }
+ 
++    s->max_samples = AV_RL32(avctx->extradata + 4) / avctx->channels;
++    if (s->max_samples == 0)
++        s->max_samples = UINT64_MAX;
+     s->level = AV_RL16(avctx->extradata + 12) & 0xf;
+     s->rows  = AV_RL16(avctx->extradata + 12) >>  4;
+     s->cols  = 1 << s->level;
+@@ -581,7 +585,8 @@ static int decode_frame(AVCodecContext *avctx, void *data,
+     if ((ret = init_get_bits8(gb, buf, buf_size)) < 0)
+         return ret;
+ 
+-    frame->nb_samples = s->block_len / avctx->channels;
++    frame->nb_samples = FFMIN(s->block_len / avctx->channels, s->max_samples);
++    s->max_samples -= FFMIN(frame->nb_samples, s->max_samples);
+     if ((ret = ff_get_buffer(avctx, frame, 0)) < 0)
+         return ret;
+ 
+@@ -606,9 +611,9 @@ static int decode_frame(AVCodecContext *avctx, void *data,
+         return AVERROR_INVALIDDATA;
+     }
+ 
+-    if (s->bitstream_size) {
++    if (s->bitstream_size > 0) {
+         s->bitstream_index += n;
+-        s->bitstream_size  -= n;
++        s->bitstream_size  -= FFMIN(s->bitstream_size, n);
+         return input_buf_size;
+     }
+     return n;
+diff --git a/libavcodec/libdav1d.c b/libavcodec/libdav1d.c
+index 51e0980..4711337 100644
+--- a/libavcodec/libdav1d.c
++++ b/libavcodec/libdav1d.c
+@@ -228,6 +228,15 @@ static av_cold int libdav1d_init(AVCodecContext *c)
+     if (dav1d->operating_point >= 0)
+         s.operating_point = dav1d->operating_point;
+ 
++#if FF_DAV1D_VERSION_AT_LEAST(6,0)
++    if (dav1d->frame_threads || dav1d->tile_threads)
++        s.n_threads = FFMAX(dav1d->frame_threads, dav1d->tile_threads);
++    else
++        s.n_threads = FFMIN(threads, DAV1D_MAX_THREADS);
++    s.max_frame_delay = (c->flags & AV_CODEC_FLAG_LOW_DELAY) ? 1 : s.n_threads;
++    av_log(c, AV_LOG_DEBUG, "Using %d threads, %d max_frame_delay\n",
++           s.n_threads, s.max_frame_delay);
++#else
+     s.n_tile_threads = dav1d->tile_threads
+                      ? dav1d->tile_threads
+                      : FFMIN(floor(sqrt(threads)), DAV1D_MAX_TILE_THREADS);
+@@ -236,6 +245,7 @@ static av_cold int libdav1d_init(AVCodecContext *c)
+                       : FFMIN(ceil(threads / s.n_tile_threads), DAV1D_MAX_FRAME_THREADS);
+     av_log(c, AV_LOG_DEBUG, "Using %d frame threads, %d tile threads\n",
+            s.n_frame_threads, s.n_tile_threads);
++#endif
+ 
+     res = libdav1d_parse_extradata(c);
+     if (res < 0)
+@@ -519,11 +529,18 @@ static av_cold int libdav1d_close(AVCodecContext *c)
+     return 0;
+ }
+ 
++#ifndef DAV1D_MAX_FRAME_THREADS
++#define DAV1D_MAX_FRAME_THREADS DAV1D_MAX_THREADS
++#endif
++#ifndef DAV1D_MAX_TILE_THREADS
++#define DAV1D_MAX_TILE_THREADS DAV1D_MAX_THREADS
++#endif
++
+ #define OFFSET(x) offsetof(Libdav1dContext, x)
+ #define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
+ static const AVOption libdav1d_options[] = {
+-    { "tilethreads", "Tile threads", OFFSET(tile_threads), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, DAV1D_MAX_TILE_THREADS, VD },
+-    { "framethreads", "Frame threads", OFFSET(frame_threads), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, DAV1D_MAX_FRAME_THREADS, VD },
++    { "tilethreads", "Tile threads", OFFSET(tile_threads), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, DAV1D_MAX_TILE_THREADS, VD | AV_OPT_FLAG_DEPRECATED },
++    { "framethreads", "Frame threads", OFFSET(frame_threads), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, DAV1D_MAX_FRAME_THREADS, VD | AV_OPT_FLAG_DEPRECATED },
+     { "filmgrain", "Apply Film Grain", OFFSET(apply_grain), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, VD | AV_OPT_FLAG_DEPRECATED },
+     { "oppoint",  "Select an operating point of the scalable bitstream", OFFSET(operating_point), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 31, VD },
+     { "alllayers", "Output all spatial layers", OFFSET(all_layers), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD },
+diff --git a/libavcodec/pnm_parser.c b/libavcodec/pnm_parser.c
+index f8eb2e7..309bc76 100644
+--- a/libavcodec/pnm_parser.c
++++ b/libavcodec/pnm_parser.c
+@@ -133,7 +133,7 @@ end:
+ 
+ const AVCodecParser ff_pnm_parser = {
+     .codec_ids      = { AV_CODEC_ID_PGM, AV_CODEC_ID_PGMYUV, AV_CODEC_ID_PPM,
+-                        AV_CODEC_ID_PBM, AV_CODEC_ID_PAM },
++                        AV_CODEC_ID_PBM, AV_CODEC_ID_PAM, AV_CODEC_ID_PFM },
+     .priv_data_size = sizeof(PNMParseContext),
+     .parser_parse   = pnm_parse,
+     .parser_close   = ff_parse_close,
+diff --git a/libavcodec/wmaprodec.c b/libavcodec/wmaprodec.c
+index 97ad878..a4b48b1 100644
+--- a/libavcodec/wmaprodec.c
++++ b/libavcodec/wmaprodec.c
+@@ -252,6 +252,7 @@ typedef struct XMADecodeCtx {
+     AVAudioFifo *samples[2][XMA_MAX_STREAMS];
+     int start_channel[XMA_MAX_STREAMS];
+     int trim_start, trim_end;
++    int flushed;
+ } XMADecodeCtx;
+ 
+ /**
+@@ -574,7 +575,8 @@ static av_cold int decode_init(WMAProDecodeCtx *s, AVCodecContext *avctx, int nu
+     if (avctx->debug & FF_DEBUG_BITSTREAM)
+         dump_context(s);
+ 
+-    avctx->channel_layout = channel_mask;
++    if (avctx->codec_id == AV_CODEC_ID_WMAPRO)
++        avctx->channel_layout = channel_mask;
+ 
+     ff_thread_once(&init_static_once, decode_init_static);
+ 
+@@ -1829,7 +1831,7 @@ static int xma_decode_packet(AVCodecContext *avctx, void *data,
+     XMADecodeCtx *s = avctx->priv_data;
+     int got_stream_frame_ptr = 0;
+     AVFrame *frame = data;
+-    int i, ret, eof = 1;
++    int i, ret = 0, eof = 0;
+ 
+     if (!s->frames[s->current_stream]->data[0]) {
+         avctx->internal->skip_samples = 64;
+@@ -1844,8 +1846,23 @@ static int xma_decode_packet(AVCodecContext *avctx, void *data,
+             return ret;
+     }
+     /* decode current stream packet */
+-    ret = decode_packet(avctx, &s->xma[s->current_stream], s->frames[s->current_stream],
+-                        &got_stream_frame_ptr, avpkt);
++    if (!s->xma[s->current_stream].eof_done) {
++        ret = decode_packet(avctx, &s->xma[s->current_stream], s->frames[s->current_stream],
++                            &got_stream_frame_ptr, avpkt);
++    }
++
++    if (!avpkt->size) {
++        eof = 1;
++
++        for (i = 0; i < s->num_streams; i++) {
++            if (!s->xma[i].eof_done) {
++                ret = decode_packet(avctx, &s->xma[i], s->frames[i],
++                                    &got_stream_frame_ptr, avpkt);
++            }
++
++            eof &= s->xma[i].eof_done;
++        }
++    }
+ 
+     if (s->xma[0].trim_start)
+         s->trim_start = s->xma[0].trim_start;
+@@ -1892,18 +1909,20 @@ static int xma_decode_packet(AVCodecContext *avctx, void *data,
+ 
+         /* all other streams skip next packet */
+         for (i = 0; i < s->num_streams; i++) {
+-            eof &= s->xma[i].eof_done;
+             s->xma[i].skip_packets = FFMAX(0, s->xma[i].skip_packets - 1);
+             nb_samples = FFMIN(nb_samples, av_audio_fifo_size(s->samples[0][i]));
+         }
+ 
++        if (!eof && avpkt->size)
++            nb_samples -= FFMIN(nb_samples, 4096);
++
+         /* copy samples from buffer to output if possible */
+-        if (nb_samples > 8192 || eof || !avpkt->size) {
++        if ((nb_samples > 0 || eof || !avpkt->size) && !s->flushed) {
+             int bret;
+ 
+-            if (!avpkt->size) {
+-                nb_samples -= s->trim_end + s->trim_start - 128 - 64;
+-                s->trim_end = s->trim_start = 0;
++            if (eof) {
++                nb_samples -= av_clip(s->trim_end + s->trim_start - 128 - 64, 0, nb_samples);
++                s->flushed = 1;
+             }
+ 
+             frame->nb_samples = nb_samples;
+@@ -1920,7 +1939,7 @@ static int xma_decode_packet(AVCodecContext *avctx, void *data,
+                     av_audio_fifo_read(s->samples[1][i], right, nb_samples);
+             }
+ 
+-            *got_frame_ptr = 1;
++
+         }
+     }
+ 
+@@ -1937,7 +1956,8 @@ static av_cold int xma_decode_init(AVCodecContext *avctx)
+ 
+     /* get stream config */
+     if (avctx->codec_id == AV_CODEC_ID_XMA2 && avctx->extradata_size == 34) { /* XMA2WAVEFORMATEX */
+-        s->num_streams = (avctx->channels + 1) / 2;
++        s->num_streams = AV_RL16(avctx->extradata);
++        avctx->channel_layout = AV_RL32(avctx->extradata + 2);
+     } else if (avctx->codec_id == AV_CODEC_ID_XMA2 && avctx->extradata_size >= 2) { /* XMA2WAVEFORMAT */
+         s->num_streams = avctx->extradata[1];
+         if (avctx->extradata_size != (32 + ((avctx->extradata[0]==3)?0:8) + 4*s->num_streams)) {
+@@ -2049,6 +2069,7 @@ static void xma_flush(AVCodecContext *avctx)
+         flush(&s->xma[i]);
+ 
+     s->current_stream = 0;
++    s->flushed = 0;
+ }
+ 
+ /**
+diff --git a/libavformat/internal.h b/libavformat/internal.h
+index 4fc1154..9d7312c 100644
+--- a/libavformat/internal.h
++++ b/libavformat/internal.h
+@@ -506,7 +506,8 @@ void ff_sdp_write_media(char *buff, int size, AVStream *st, int idx,
+  *
+  * @param dst the muxer to write the packet to
+  * @param dst_stream the stream index within dst to write the packet to
+- * @param pkt the packet to be written
++
++
+  * @param src the muxer the packet originally was intended for
+  * @param interleave 0->use av_write_frame, 1->av_interleaved_write_frame
+  * @return the value av_write_frame returned
+diff --git a/libavformat/mux.c b/libavformat/mux.c
+index b1ad0dd..6ba1306 100644
+--- a/libavformat/mux.c
++++ b/libavformat/mux.c
+@@ -643,12 +643,12 @@ static void guess_pkt_duration(AVFormatContext *s, AVStream *st, AVPacket *pkt)
+  */
+ static int write_packet(AVFormatContext *s, AVPacket *pkt)
+ {
++    AVStream *const st = s->streams[pkt->stream_index];
+     int ret;
+ 
+     // If the timestamp offsetting below is adjusted, adjust
+     // ff_interleaved_peek similarly.
+     if (s->output_ts_offset) {
+-        AVStream *st = s->streams[pkt->stream_index];
+         int64_t offset = av_rescale_q(s->output_ts_offset, AV_TIME_BASE_Q, st->time_base);
+ 
+         if (pkt->dts != AV_NOPTS_VALUE)
+@@ -658,7 +658,6 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
+     }
+ 
+     if (s->avoid_negative_ts > 0) {
+-        AVStream *st = s->streams[pkt->stream_index];
+         int64_t offset = st->internal->mux_ts_offset;
+         int64_t ts = s->internal->avoid_negative_ts_use_pts ? pkt->pts : pkt->dts;
+ 
+@@ -719,7 +718,7 @@ static int write_packet(AVFormatContext *s, AVPacket *pkt)
+     }
+ 
+     if (ret >= 0)
+-        s->streams[pkt->stream_index]->nb_frames++;
++        st->nb_frames++;
+ 
+     return ret;
+ }
+@@ -1192,6 +1191,7 @@ int av_write_frame(AVFormatContext *s, AVPacket *in)
+         pkt = in;
+     } else {
+         /* We don't own in, so we have to make sure not to modify it.
++
+          * The following avoids copying in's data unnecessarily.
+          * Copying side data is unavoidable as a bitstream filter
+          * may change it, e.g. free it on errors. */
+@@ -1291,21 +1291,30 @@ int av_get_output_timestamp(struct AVFormatContext *s, int stream,
+ int ff_write_chained(AVFormatContext *dst, int dst_stream, AVPacket *pkt,
+                      AVFormatContext *src, int interleave)
+ {
+-    AVPacket local_pkt;
++    int64_t pts = pkt->pts, dts = pkt->dts, duration = pkt->duration;
++    int stream_index = pkt->stream_index;
++    AVRational time_base = pkt->time_base;
+     int ret;
+ 
+-    local_pkt = *pkt;
+-    local_pkt.stream_index = dst_stream;
++    pkt->stream_index = dst_stream;
+ 
+-    av_packet_rescale_ts(&local_pkt,
+-                         src->streams[pkt->stream_index]->time_base,
++    av_packet_rescale_ts(pkt,
++                         src->streams[stream_index]->time_base,
+                          dst->streams[dst_stream]->time_base);
+ 
+-    if (interleave) ret = av_interleaved_write_frame(dst, &local_pkt);
+-    else            ret = av_write_frame(dst, &local_pkt);
+-    pkt->buf = local_pkt.buf;
+-    pkt->side_data       = local_pkt.side_data;
+-    pkt->side_data_elems = local_pkt.side_data_elems;
++    if (!interleave) {
++        ret = av_write_frame(dst, pkt);
++
++
++
++        pkt->pts          = pts;
++        pkt->dts          = dts;
++        pkt->duration     = duration;
++        pkt->stream_index = stream_index;
++        pkt->time_base    = time_base;
++    } else
++        ret = av_interleaved_write_frame(dst, pkt);
++
+     return ret;
+ }
+ 
+diff --git a/libavformat/segment.c b/libavformat/segment.c
+index ed67135..7c171b6 100644
+--- a/libavformat/segment.c
++++ b/libavformat/segment.c
+@@ -952,7 +952,9 @@ calc_times:
+                            seg->initial_offset || seg->reset_timestamps || seg->avf->oformat->interleave_packet);
+ 
+ fail:
+-    if (pkt->stream_index == seg->reference_stream_index) {
++
++
++    if (st->index == seg->reference_stream_index) {
+         seg->frame_count++;
+         seg->segment_frame_count++;
+     }

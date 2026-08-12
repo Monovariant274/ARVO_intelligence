@@ -1,0 +1,200 @@
+diff --git a/src/libopensc/asn1.c b/src/libopensc/asn1.c
+index 47b42c7..7df3e0a 100644
+--- a/src/libopensc/asn1.c
++++ b/src/libopensc/asn1.c
+@@ -570,16 +570,19 @@ static int decode_bit_string(const u8 * inbuf, size_t inlen, void *outbuf,
+ {
+ 	const u8 *in = inbuf;
+ 	u8 *out = (u8 *) outbuf;
+-	int zero_bits = *in & 0x07;
+-	size_t octets_left = inlen - 1;
+ 	int i, count = 0;
++	int zero_bits;
++	size_t octets_left;
+ 
++	if (inlen < 1)
++		return SC_ERROR_INVALID_ASN1_OBJECT;
+ 	memset(outbuf, 0, outlen);
++	zero_bits = *in & 0x07;
+ 	in++;
++	octets_left = inlen - 1;
+ 	if (outlen < octets_left)
+ 		return SC_ERROR_BUFFER_TOO_SMALL;
+-	if (inlen < 1)
+-		return SC_ERROR_INVALID_ASN1_OBJECT;
++
+ 	while (octets_left) {
+ 		/* 1st octet of input:  ABCDEFGH, where A is the MSB */
+ 		/* 1st octet of output: HGFEDCBA, where A is the LSB */
+@@ -1465,7 +1468,7 @@ static int asn1_decode_entry(sc_context_t *ctx,struct sc_asn1_entry *entry,
+ 
+ 			/* Strip off padding zero */
+ 			if ((entry->flags & SC_ASN1_UNSIGNED)
+-			 && obj[0] == 0x00 && objlen > 1) {
++					&& objlen > 1 && obj[0] == 0x00) {
+ 				objlen--;
+ 				obj++;
+ 			}
+diff --git a/src/libopensc/card-isoApplet.c b/src/libopensc/card-isoApplet.c
+index 430cb30..fbdc757 100644
+--- a/src/libopensc/card-isoApplet.c
++++ b/src/libopensc/card-isoApplet.c
+@@ -211,6 +211,8 @@ isoApplet_init(sc_card_t *card)
+ 
+ 	/* Obtain applet version and specific features */
+ 	if (0 > isoApplet_select_applet(card, isoApplet_aid, ISOAPPLET_AID_LEN, rbuf, &rlen)) {
++		free(card->drv_data);
++		card->drv_data = NULL;
+ 		LOG_TEST_RET(card->ctx, SC_ERROR_INVALID_CARD, "Error obtaining applet version.");
+ 	}
+ 	if(rlen < 3)
+diff --git a/src/libopensc/pkcs15-din-66291.c b/src/libopensc/pkcs15-din-66291.c
+index 241afb8..f9c90fc 100644
+--- a/src/libopensc/pkcs15-din-66291.c
++++ b/src/libopensc/pkcs15-din-66291.c
+@@ -260,6 +260,8 @@ sc_pkcs15emu_din_66291_init(sc_pkcs15_card_t *p15card)
+ 
+ int sc_pkcs15emu_din_66291_init_ex(sc_pkcs15_card_t *p15card, struct sc_aid *aid)
+ {
++    int r;
++
+     if (!p15card || ! p15card->card)
+         return SC_ERROR_INVALID_ARGUMENTS;
+ 
+@@ -270,5 +272,13 @@ int sc_pkcs15emu_din_66291_init_ex(sc_pkcs15_card_t *p15card, struct sc_aid *aid
+         return SC_ERROR_WRONG_CARD;
+ 
+     /* Init card */
+-    return sc_pkcs15emu_din_66291_init(p15card);
++    r = sc_pkcs15emu_din_66291_init(p15card);
++    if (r != SC_SUCCESS) {
++        sc_pkcs15_free_tokeninfo(p15card->tokeninfo);
++        sc_file_free(p15card->file_tokeninfo);
++        p15card->tokeninfo = NULL;
++        p15card->file_tokeninfo = NULL;
++    }
++
++    return r;
+ }
+diff --git a/src/pkcs11/pkcs11-display.c b/src/pkcs11/pkcs11-display.c
+index 6347320..7a0c3d5 100644
+--- a/src/pkcs11/pkcs11-display.c
++++ b/src/pkcs11/pkcs11-display.c
+@@ -96,7 +96,7 @@ buf_spec(CK_VOID_PTR buf_addr, CK_ULONG buf_len)
+ #if !defined(_MSC_VER) || _MSC_VER >= 1800
+ 	const size_t prwidth = sizeof(CK_VOID_PTR) * 2;
+ 
+-	sprintf(ret, "%0*"PRIxPTR" / %lu", (int) prwidth, (uintptr_t) buf_addr,
++	sprintf(ret, "%0*"PRIxPTR" / %ld", (int) prwidth, (uintptr_t) buf_addr,
+ 		buf_len);
+ #else
+ 	if (sizeof(CK_VOID_PTR) == 4)
+@@ -750,6 +750,20 @@ type_spec ck_attribute_specs[] = {
+   { CKA_WRAP_WITH_TRUSTED , "CKA_WRAP_WITH_TRUSTED ", print_generic, NULL },
+   { CKA_WRAP_TEMPLATE     , "CKA_WRAP_TEMPLATE    ", print_generic, NULL },
+   { CKA_UNWRAP_TEMPLATE   , "CKA_UNWRAP_TEMPLATE  ", print_generic, NULL },
++  { CKA_OTP_FORMAT        , "CKA_OTP_FORMAT       ", print_generic, NULL },
++  { CKA_OTP_LENGTH        , "CKA_OTP_LENGTH       ", print_generic, NULL },
++  { CKA_OTP_TIME_INTERVAL , "CKA_OTP_TIME_INTERVAL ", print_generic, NULL },
++  { CKA_OTP_USER_FRIENDLY_MODE, "CKA_OTP_USER_FRIENDLY_MODE ", print_boolean, NULL },
++  { CKA_OTP_CHALLENGE_REQUIREMENT, "CKA_OTP_CHALLENGE_REQUIREMENT ", print_generic, NULL },
++  { CKA_OTP_TIME_REQUIREMENT, "CKA_OTP_TIME_REQUIREMENT ", print_generic, NULL },
++  { CKA_OTP_COUNTER_REQUIREMENT, "CKA_OTP_COUNTER_REQUIREMENT ", print_generic, NULL },
++  { CKA_OTP_PIN_REQUIREMENT, "CKA_OTP_PIN_REQUIREMENT ", print_generic, NULL },
++  { CKA_OTP_COUNTER       , "CKA_OTP_COUNTER      ", print_generic, NULL },
++  { CKA_OTP_TIME          , "CKA_OTP_TIME         ", print_print, NULL },
++  { CKA_OTP_USER_IDENTIFIER, "CKA_OTP_USER_IDENTIFIER ", print_print, NULL },
++  { CKA_OTP_SERVICE_IDENTIFIER, "CKA_OTP_SERVICE_IDENTIFIER ", print_print, NULL },
++  { CKA_OTP_SERVICE_LOGO  , "CKA_OTP_SERVICE_LOGO ", print_generic, NULL },
++  { CKA_OTP_SERVICE_LOGO_TYPE, "CKA_OTP_SERVICE_LOGO_TYPE ", print_print, NULL },
+   { CKA_GOSTR3410_PARAMS  , "CKA_GOSTR3410_PARAMS ", print_generic, NULL },
+   { CKA_GOSTR3411_PARAMS  , "CKA_GOSTR3411_PARAMS ", print_generic, NULL },
+   { CKA_GOST28147_PARAMS  , "CKA_GOST28147_PARAMS ", print_generic, NULL },
+diff --git a/src/pkcs11/pkcs11-spy.c b/src/pkcs11/pkcs11-spy.c
+index 8d54cdb..df71e48 100644
+--- a/src/pkcs11/pkcs11-spy.c
++++ b/src/pkcs11/pkcs11-spy.c
+@@ -1113,6 +1113,27 @@ C_VerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_
+ 	enter("C_VerifyInit");
+ 	spy_dump_ulong_in("hSession", hSession);
+ 	fprintf(spy_output, "pMechanism->type=%s\n", lookup_enum(MEC_T, pMechanism->mechanism));
++	switch (pMechanism->mechanism) {
++	case CKM_RSA_PKCS_PSS:
++	case CKM_SHA1_RSA_PKCS_PSS:
++	case CKM_SHA256_RSA_PKCS_PSS:
++	case CKM_SHA384_RSA_PKCS_PSS:
++	case CKM_SHA512_RSA_PKCS_PSS:
++		if (pMechanism->pParameter != NULL) {
++			CK_RSA_PKCS_PSS_PARAMS *param =
++				(CK_RSA_PKCS_PSS_PARAMS *) pMechanism->pParameter;
++			fprintf(spy_output, "pMechanism->pParameter->hashAlg=%s\n",
++				lookup_enum(MEC_T, param->hashAlg));
++			fprintf(spy_output, "pMechanism->pParameter->mgf=%s\n",
++				lookup_enum(MGF_T, param->mgf));
++			fprintf(spy_output, "pMechanism->pParameter->sLen=%lu\n",
++				param->sLen);
++		} else {
++			fprintf(spy_output, "Parameters block for %s is empty...\n",
++				lookup_enum(MEC_T, pMechanism->mechanism));
++		}
++		break;
++	}
+ 	spy_dump_ulong_in("hKey", hKey);
+ 	rv = po->C_VerifyInit(hSession, pMechanism, hKey);
+ 	return retne(rv);
+diff --git a/src/pkcs11/pkcs11.h b/src/pkcs11/pkcs11.h
+index 7673d41..1f5f282 100644
+--- a/src/pkcs11/pkcs11.h
++++ b/src/pkcs11/pkcs11.h
+@@ -464,6 +464,20 @@ typedef unsigned long ck_attribute_type_t;
+ #define CKA_SUPPORTED_CMS_ATTRIBUTES	(0x503UL)
+ #define CKA_WRAP_TEMPLATE		(CKF_ARRAY_ATTRIBUTE | 0x211UL)
+ #define CKA_UNWRAP_TEMPLATE		(CKF_ARRAY_ATTRIBUTE | 0x212UL)
++#define CKA_OTP_FORMAT			(0x220UL)
++#define CKA_OTP_LENGTH			(0x221UL)
++#define CKA_OTP_TIME_INTERVAL		(0x222UL)
++#define CKA_OTP_USER_FRIENDLY_MODE	(0x223UL)
++#define CKA_OTP_CHALLENGE_REQUIREMENT	(0x224UL)
++#define CKA_OTP_TIME_REQUIREMENT	(0x225UL)
++#define CKA_OTP_COUNTER_REQUIREMENT	(0x226UL)
++#define CKA_OTP_PIN_REQUIREMENT		(0x227UL)
++#define CKA_OTP_USER_IDENTIFIER		(0x22AUL)
++#define CKA_OTP_SERVICE_IDENTIFIER	(0x22BUL)
++#define CKA_OTP_SERVICE_LOGO		(0x22CUL)
++#define CKA_OTP_SERVICE_LOGO_TYPE	(0x22DUL)
++#define CKA_OTP_COUNTER			(0x22EUL)
++#define CKA_OTP_TIME			(0x22FUL)
+ #define CKA_ALLOWED_MECHANISMS		(CKF_ARRAY_ATTRIBUTE | 0x600UL)
+ #define CKA_VENDOR_DEFINED		(1UL << 31)
+ 
+diff --git a/src/tests/fuzzing/fuzz_pkcs15_reader.c b/src/tests/fuzzing/fuzz_pkcs15_reader.c
+index 009e238..105ea88 100644
+--- a/src/tests/fuzzing/fuzz_pkcs15_reader.c
++++ b/src/tests/fuzzing/fuzz_pkcs15_reader.c
+@@ -210,7 +210,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
+             int decipher_flags[] = {SC_ALGORITHM_RSA_RAW,
+                 SC_ALGORITHM_RSA_PAD_PKCS1, SC_ALGORITHM_RSA_PAD_ANSI,
+                 SC_ALGORITHM_RSA_PAD_ISO9796};
+-            for (i = 0; i < sizeof decipher_flags; i++) {
++            for (i = 0; i < sizeof decipher_flags/sizeof *decipher_flags; i++) {
+                 sc_pkcs15_decipher(p15card, obj, decipher_flags[i],
+                         in, in_len, buf, sizeof buf);
+             }
+@@ -221,7 +221,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
+ 
+             int wrap_flags[] = {0, SC_ALGORITHM_AES_ECB, SC_ALGORITHM_AES_CBC_PAD,
+                 SC_ALGORITHM_AES_CBC};
+-            for (i = 0; i < sizeof wrap_flags; i++) {
++            for (i = 0; i < sizeof wrap_flags/sizeof *wrap_flags; i++) {
+                 struct sc_pkcs15_object target_key;
+                 sc_pkcs15_unwrap(p15card, obj, &target_key, wrap_flags[i],
+                         in, in_len, param, param_len);
+@@ -244,7 +244,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
+                 SC_ALGORITHM_GOSTR3410_RAW, SC_ALGORITHM_GOSTR3410_HASH_GOSTR3411,
+                 SC_ALGORITHM_GOSTR3410_HASHES,
+             };
+-            for (i = 0; i < sizeof signature_flags; i++) {
++            for (i = 0; i < sizeof signature_flags/sizeof *signature_flags; i++) {
+                 sc_pkcs15_compute_signature(p15card, obj, signature_flags[i],
+                         in, in_len, buf, sizeof buf);
+             }

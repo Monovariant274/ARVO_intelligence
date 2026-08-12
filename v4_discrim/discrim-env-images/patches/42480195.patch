@@ -1,0 +1,13 @@
+diff --git a/src/libopensc/card-coolkey.c b/src/libopensc/card-coolkey.c
+index 5854e3a..e89c179 100644
+--- a/src/libopensc/card-coolkey.c
++++ b/src/libopensc/card-coolkey.c
+@@ -750,7 +750,7 @@ coolkey_compare_id(const void * a, const void *b)
+ 	if (a == NULL || b == NULL)
+ 		return 1;
+ 	return ((sc_cardctl_coolkey_object_t *)a)->id
+-	    == ((sc_cardctl_coolkey_object_t *)b)->id;
++	    != ((sc_cardctl_coolkey_object_t *)b)->id;
+ }
+ 
+ /* For SimCList autocopy, we need to know the size of the data elements */

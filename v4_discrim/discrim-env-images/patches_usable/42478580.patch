@@ -1,0 +1,19 @@
+diff --git a/xmlreader.c b/xmlreader.c
+index 9229c18..b505f16 100644
+--- a/xmlreader.c
++++ b/xmlreader.c
+@@ -367,10 +367,10 @@ xmlTextReaderFreeNodeList(xmlTextReaderPtr reader, xmlNodePtr cur) {
+ 	return;
+     }
+     while (1) {
+-        while ((cur->children != NULL) &&
+-               (cur->children->parent == cur) &&
+-               (cur->type != XML_DTD_NODE) &&
+-               (cur->type != XML_ENTITY_REF_NODE)) {
++        while ((cur->type != XML_DTD_NODE) &&
++               (cur->type != XML_ENTITY_REF_NODE) &&
++               (cur->children != NULL) &&
++               (cur->children->parent == cur)) {
+             cur = cur->children;
+             depth += 1;
+         }

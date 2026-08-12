@@ -1,0 +1,27 @@
+diff --git a/fuzz/corpus/fuzz_filecfg_protocols/domain.txt b/fuzz/corpus/fuzz_filecfg_protocols/domain.txt
+new file mode 100644
+index 0000000..b2101c8
+--- /dev/null
++++ b/fuzz/corpus/fuzz_filecfg_protocols/domain.txt
+@@ -0,0 +1 @@
++ip:www.ntop.org@ntop
+diff --git a/fuzz/corpus/fuzz_filecfg_protocols/domain_ipv6.txt b/fuzz/corpus/fuzz_filecfg_protocols/domain_ipv6.txt
+new file mode 100644
+index 0000000..232d57d
+--- /dev/null
++++ b/fuzz/corpus/fuzz_filecfg_protocols/domain_ipv6.txt
+@@ -0,0 +1 @@
++ipv6:www.ntop.org@ntop
+diff --git a/src/lib/ndpi_main.c b/src/lib/ndpi_main.c
+index 5b00c84..b14297c 100644
+--- a/src/lib/ndpi_main.c
++++ b/src/lib/ndpi_main.c
+@@ -2768,7 +2768,7 @@ static int ndpi_add_host_ip_subprotocol(struct ndpi_detection_module_struct *ndp
+     /* Check if the IP address is symbolic or numeric */
+     unsigned int d[4];
+     char tail[16] = { '\0' };
+-    int c = sscanf(value, "%3u.%3u.%3u.%3u%s", &d[0], &d[1], &d[2], &d[3], tail);
++    int c = sscanf(value, "%3u.%3u.%3u.%3u%15s", &d[0], &d[1], &d[2], &d[3], tail);
+ 
+     if ((c != 4) || tail[0]) {
+       /* This might be a symbolic IPv4 address */

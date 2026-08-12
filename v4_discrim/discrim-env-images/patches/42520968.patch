@@ -1,0 +1,18 @@
+diff --git a/psi/zfsample.c b/psi/zfsample.c
+index 791f24b4b..6bbadfd75 100644
+--- a/psi/zfsample.c
++++ b/psi/zfsample.c
+@@ -1,4 +1,4 @@
+-/* Copyright (C) 2001-2022 Artifex Software, Inc.
++
+    All Rights Reserved.
+ 
+    This software is provided AS-IS with no warranty, either express or
+@@ -504,6 +504,7 @@ sampled_data_continue(i_ctx_t *i_ctx_p)
+              * hope.
+              */
+             push(-stack_depth_adjust);
++            esp -= estack_storage;
+             return_error(gs_error_undefinedresult);
+         }
+     }

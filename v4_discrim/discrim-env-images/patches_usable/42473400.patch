@@ -1,0 +1,41 @@
+diff --git a/src/pcre2_compile.c b/src/pcre2_compile.c
+index 1edcf1a..5a6f88c 100644
+--- a/src/pcre2_compile.c
++++ b/src/pcre2_compile.c
+@@ -1596,6 +1596,7 @@ else
+       {
+       uint32_t xc;
+       
++      if (ptr >= ptrend) break;
+       if (*ptr == CHAR_LEFT_CURLY_BRACKET && 
+           (extra_options & PCRE2_EXTRA_ALT_BSUX) != 0)
+         {
+diff --git a/testdata/testinput5 b/testdata/testinput5
+index b48d27a..2c4e847 100644
+--- a/testdata/testinput5
++++ b/testdata/testinput5
+@@ -817,6 +817,9 @@
+ /^\u{0000000000010ffff}/utf,extra_alt_bsux
+     \x{10ffff}
+ 
++/\u/utf,alt_bsux
++    \\u
++
+ /^a+[a\x{200}]/B,utf
+     aa
+ 
+diff --git a/testdata/testoutput5 b/testdata/testoutput5
+index 2bcb39f..23438dd 100644
+--- a/testdata/testoutput5
++++ b/testdata/testoutput5
+@@ -1738,6 +1738,10 @@ Failed: error 173 at offset 6: disallowed Unicode code point (>= 0xd800 && <= 0x
+     \x{10ffff}
+  0: \x{10ffff}
+ 
++/\u/utf,alt_bsux
++    \\u
++ 0: u
++
+ /^a+[a\x{200}]/B,utf
+ ------------------------------------------------------------------
+         Bra

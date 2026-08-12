@@ -1,0 +1,50 @@
+diff --git a/src/json.hpp b/src/json.hpp
+index 4515ca6..76824cf 100644
+--- a/src/json.hpp
++++ b/src/json.hpp
+@@ -6871,6 +6871,12 @@ class basic_json
+         {
+             throw std::out_of_range("len+offset out of range");
+         }
++
++
++        if (len + offset > size)
++        {
++            throw std::out_of_range("len+offset out of range");
++        }
+     }
+ 
+     /*!
+diff --git a/src/json.hpp.re2c b/src/json.hpp.re2c
+index 6d649db..10bfaf5 100644
+--- a/src/json.hpp.re2c
++++ b/src/json.hpp.re2c
+@@ -6871,6 +6871,12 @@ class basic_json
+         {
+             throw std::out_of_range("len+offset out of range");
+         }
++
++
++        if (len + offset > size)
++        {
++            throw std::out_of_range("len+offset out of range");
++        }
+     }
+ 
+     /*!
+diff --git a/test/src/unit-regression.cpp b/test/src/unit-regression.cpp
+index 1e720dd..033041a 100644
+--- a/test/src/unit-regression.cpp
++++ b/test/src/unit-regression.cpp
+@@ -540,4 +540,11 @@ TEST_CASE("regression tests")
+         CHECK(j.is_number_float());
+         CHECK(j.dump() == "1.66020696663386e+20");
+     }
++
++    SECTION("issue #405 - Heap-buffer-overflow (OSS-Fuzz issue 342)")
++    {
++
++        std::vector<uint8_t> vec {0x65, 0xf5, 0x0a, 0x48, 0x21};
++        CHECK_THROWS_AS(json::from_cbor(vec), std::out_of_range);
++    }
+ }

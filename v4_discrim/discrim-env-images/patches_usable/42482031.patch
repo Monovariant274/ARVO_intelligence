@@ -1,0 +1,15 @@
+diff --git a/libvips/foreign/matrixload.c b/libvips/foreign/matrixload.c
+index 305c177..d9606b8 100644
+--- a/libvips/foreign/matrixload.c
++++ b/libvips/foreign/matrixload.c
+@@ -236,9 +236,9 @@ vips_foreign_load_matrix_load( VipsForeignLoad *load )
+ 				x < load->out->Xsize;
+ 			x++, p = q )
+ 			if( vips_strtod( p, &matrix->linebuf[x] ) ) {
+-				g_free( line );
+ 				vips_error( class->nickname, 
+ 					_( "bad number \"%s\"" ), p );
++				g_free( line );
+ 				return( -1 );
+ 			}
+ 

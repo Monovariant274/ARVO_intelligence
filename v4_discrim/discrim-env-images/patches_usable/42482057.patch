@@ -1,0 +1,35 @@
+diff --git a/src/pcre2_study.c b/src/pcre2_study.c
+index 02d1c08..fc29969 100644
+--- a/src/pcre2_study.c
++++ b/src/pcre2_study.c
+@@ -824,7 +824,7 @@ if (caseless)
+       (void)PRIV(ord2utf)(c, buff);
+       SET_BIT(buff[0]);
+       }
+-    else SET_BIT(c);    
++    else if (c < 256) SET_BIT(c);
+ #else  /* 16-bit or 32-bit mode */
+     if (c > 0xff) SET_BIT(0xff); else SET_BIT(c);
+ #endif
+diff --git a/testdata/testinput5 b/testdata/testinput5
+index d90b66d..b3fcfef 100644
+--- a/testdata/testinput5
++++ b/testdata/testinput5
+@@ -2179,4 +2179,6 @@
+ 
+ /\p{Any}*xyz/I
+ 
++/(|ß)7/caseless,ucp
++
+ # End of testinput5
+diff --git a/testdata/testoutput5 b/testdata/testoutput5
+index ecf01fb..5bdf873 100644
+--- a/testdata/testoutput5
++++ b/testdata/testoutput5
+@@ -4938,4 +4938,6 @@ Overall options: anchored
+ Last code unit = 'z'
+ Subject length lower bound = 3
+ 
++/(|ß)7/caseless,ucp
++
+ # End of testinput5

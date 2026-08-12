@@ -1,0 +1,85 @@
+diff --git a/ChangeLog.md b/ChangeLog.md
+index 30ea755..9c8c4c7 100644
+--- a/ChangeLog.md
++++ b/ChangeLog.md
+@@ -1,3 +1,12 @@
++# usbredir-0.11.0 - 10 Aug 2021
++
++- !40 Fixes use-after-free on usbredirparser serialization
++- !25 Fixes memory leak in usbredirparser
++- !32 Fixes build in MacOS related to visibility of exported symbols
++- !36 Adds usbredirfilter_free function
++- !29 Adds Fuzzing for Filters
++- !34 Improvements to usbredirfilter_string_to_rules()
++
+ # usbredir-0.10.0 - 27 May 2021
+ 
+ - !23 Fixes 0.9.0 regression in bulk transfer message size
+diff --git a/meson.build b/meson.build
+index 8b80742..6e773a7 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1,5 +1,5 @@
+ project('usbredir', 'c', 'cpp',
+-    version: '0.10.0',
++    version: '0.11.0',
+     license: 'LGPLv2.1+',
+     meson_version : '>= 0.53',
+     default_options : [
+diff --git a/usbredirparser/meson.build b/usbredirparser/meson.build
+index 0902fa7..0077669 100644
+--- a/usbredirparser/meson.build
++++ b/usbredirparser/meson.build
+@@ -1,8 +1,8 @@
+ # so verison, see:
+ # http://www.gnu.org/software/libtool/manual/html_node/Updating-version-info.html
+-usbredir_parser_current = 1
+-usbredir_parser_revision = 3
+-usbredir_parser_age = 0
++usbredir_parser_current = 2
++usbredir_parser_revision = 0
++usbredir_parser_age = 1
+ usbredir_parser_so_version = '@0@.@1@.@2@'.format(
+     usbredir_parser_current - usbredir_parser_age,
+     usbredir_parser_age,
+diff --git a/usbredirparser/usbredirparser.c b/usbredirparser/usbredirparser.c
+index 774e2b7..784f2e1 100644
+--- a/usbredirparser/usbredirparser.c
++++ b/usbredirparser/usbredirparser.c
+@@ -21,6 +21,7 @@
+ #include "config.h"
+ 
+ #include <stdbool.h>
++#include <stddef.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <stdarg.h>
+@@ -1656,8 +1657,9 @@ int usbredirparser_serialize(struct usbredirparser *parser_pub,
+     struct usbredirparser_priv *parser =
+         (struct usbredirparser_priv *)parser_pub;
+     struct usbredirparser_buf *wbuf;
+-    uint8_t *write_buf_count_pos, *state = NULL, *pos = NULL;
++    uint8_t *state = NULL, *pos = NULL;
+     uint32_t write_buf_count = 0, len, remain = 0;
++    ptrdiff_t write_buf_count_pos;
+ 
+     *state_dest = NULL;
+     *state_len = 0;
+@@ -1702,7 +1704,7 @@ int usbredirparser_serialize(struct usbredirparser *parser_pub,
+                        parser->data, parser->data_read, "packet-data"))
+         return -1;
+ 
+-    write_buf_count_pos = pos;
++    write_buf_count_pos = pos - state;
+     /* To be replaced with write_buf_count later */
+     if (serialize_int(parser, &state, &pos, &remain, 0, "write_buf_count"))
+         return -1;
+@@ -1717,7 +1719,7 @@ int usbredirparser_serialize(struct usbredirparser *parser_pub,
+         wbuf = wbuf->next;
+     }
+     /* Patch in write_buf_count */
+-    memcpy(write_buf_count_pos, &write_buf_count, sizeof(int32_t));
++    memcpy(state + write_buf_count_pos, &write_buf_count, sizeof(int32_t));
+ 
+     /* Patch in length */
+     len = pos - state;

@@ -1,0 +1,26 @@
+diff --git a/bfd/ChangeLog b/bfd/ChangeLog
+index c60fe8c7..3b252e11 100644
+--- a/bfd/ChangeLog
++++ b/bfd/ChangeLog
+@@ -1,3 +1,7 @@
++2020-03-11  Alan Modra  <amodra@gmail.com>
++
++
++
+ 2020-03-11  Alan Modra  <amodra@gmail.com>
+ 
+ 	* elf64-ppc.c (ppc64_elf_inline_plt): Do increment rel in for loop.
+diff --git a/bfd/som.c b/bfd/som.c
+index 3aa3d60b..5676f0f5 100644
+--- a/bfd/som.c
++++ b/bfd/som.c
+@@ -2197,6 +2197,9 @@ setup_sections (bfd *abfd,
+ 	  som_swap_subspace_dictionary_in (&ext_subspace, &subspace);
+ 
+ 	  /* Setup the subspace name string.  */
++	  if (subspace.name >= file_hdr->space_strings_size)
++	    goto error_return;
++
+ 	  subspace_name = subspace.name + space_strings;
+ 
+ 	  amt = strlen (subspace_name) + 1;

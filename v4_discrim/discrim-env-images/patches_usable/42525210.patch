@@ -1,0 +1,49 @@
+diff --git a/buf.c b/buf.c
+index f876ea9..fbaf926 100644
+--- a/buf.c
++++ b/buf.c
+@@ -1100,6 +1100,10 @@ xmlBufSetInputBaseCur(xmlBufPtr buf, xmlParserInputPtr input,
+                       size_t base, size_t cur) {
+     if (input == NULL)
+         return(-1);
++
++
++
++
+     if ((buf == NULL) || (buf->error)) {
+         input->base = input->cur = input->end = BAD_CAST "";
+         return(-1);
+diff --git a/encoding.c b/encoding.c
+index 0a1b486..3d461cd 100644
+--- a/encoding.c
++++ b/encoding.c
+@@ -2143,8 +2143,10 @@ xmlCharEncInput(xmlParserInputBufferPtr input, int flush)
+         toconv = 64 * 1024;
+     written = xmlBufAvail(out);
+     if (toconv * 2 >= written) {
+-        if (xmlBufGrow(out, toconv * 2) < 0)
++        if (xmlBufGrow(out, toconv * 2) < 0) {
++            input->error = XML_ERR_NO_MEMORY;
+             return(XML_ENC_ERR_MEMORY);
++        }
+         written = xmlBufAvail(out);
+     }
+     if ((written > 128 * 1024) && (flush == 0))
+diff --git a/parserInternals.c b/parserInternals.c
+index bc65c63..5c267cd 100644
+--- a/parserInternals.c
++++ b/parserInternals.c
+@@ -566,8 +566,12 @@ xmlParserGrow(xmlParserCtxtPtr ctxt) {
+     ret = xmlParserInputBufferGrow(buf, INPUT_CHUNK);
+     xmlBufSetInputBaseCur(buf->buffer, in, 0, curBase);
+ 
+-    if (ret < 0)
++    if (ret < 0) {
+         xmlFatalErr(ctxt, buf->error, NULL);
++
++        if (buf->error == XML_ERR_NO_MEMORY)
++            xmlHaltParser(ctxt);
++    }
+ 
+     return(ret);
+ }

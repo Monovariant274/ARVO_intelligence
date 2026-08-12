@@ -1,0 +1,53 @@
+diff --git a/include/avif/internal.h b/include/avif/internal.h
+index c237866..9042a85 100644
+--- a/include/avif/internal.h
++++ b/include/avif/internal.h
+@@ -220,6 +220,7 @@ avifBool avifROStreamReadU32(avifROStream * stream, uint32_t * v);
+ avifBool avifROStreamReadUX8(avifROStream * stream, uint64_t * v, uint64_t factor); // Reads a factor*8 sized uint, saves in v
+ avifBool avifROStreamReadU64(avifROStream * stream, uint64_t * v);
+ avifBool avifROStreamReadString(avifROStream * stream, char * output, size_t outputSize);
++avifBool avifROStreamReadBoxHeaderPartial(avifROStream * stream, avifBoxHeader * header);
+ avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header);
+ avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * version, uint32_t * flags); // version and flags ptrs are both optional
+ avifBool avifROStreamReadAndEnforceVersion(avifROStream * stream, uint8_t enforcedVersion); // currently discards flags
+diff --git a/src/read.c b/src/read.c
+index 1196436..be53466 100644
+--- a/src/read.c
++++ b/src/read.c
+@@ -2048,7 +2048,7 @@ static avifResult avifParse(avifDecoder * decoder)
+         // Parse the header, and find out how many bytes it actually was
+         BEGIN_STREAM(headerStream, headerContents.data, headerContents.size);
+         avifBoxHeader header;
+-        CHECK(avifROStreamReadBoxHeader(&headerStream, &header));
++        CHECK(avifROStreamReadBoxHeaderPartial(&headerStream, &header));
+         parseOffset += headerStream.offset;
+ 
+         // Try to get the remainder of the box, if necessary
+diff --git a/src/stream.c b/src/stream.c
+index bc8a7b4..7d521f0 100644
+--- a/src/stream.c
++++ b/src/stream.c
+@@ -143,7 +143,7 @@ avifBool avifROStreamReadString(avifROStream * stream, char * output, size_t out
+     return AVIF_TRUE;
+ }
+ 
+-avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header)
++avifBool avifROStreamReadBoxHeaderPartial(avifROStream * stream, avifBoxHeader * header)
+ {
+     size_t startOffset = stream->offset;
+ 
+@@ -168,6 +168,14 @@ avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header
+     return AVIF_TRUE;
+ }
+ 
++avifBool avifROStreamReadBoxHeader(avifROStream * stream, avifBoxHeader * header)
++{
++    if (!avifROStreamReadBoxHeaderPartial(stream, header)) {
++        return AVIF_FALSE;
++    }
++    return (header->size <= avifROStreamRemainingBytes(stream));
++}
++
+ avifBool avifROStreamReadVersionAndFlags(avifROStream * stream, uint8_t * version, uint32_t * flags)
+ {
+     uint8_t versionAndFlags[4];

@@ -1,0 +1,50 @@
+diff --git a/rutil/ParseBuffer.cxx b/rutil/ParseBuffer.cxx
+index b0e711f..db9c0d2 100644
+--- a/rutil/ParseBuffer.cxx
++++ b/rutil/ParseBuffer.cxx
+@@ -857,7 +857,7 @@ ParseBuffer::qVal()
+          return 0;
+       }
+       
+-      if (*mPosition == '.')
++      if (!eof() && *mPosition == '.')
+       {
+          skipChar();
+          
+diff --git a/rutil/test/testParseBuffer.cxx b/rutil/test/testParseBuffer.cxx
+index e8b8a7d..3647604 100644
+--- a/rutil/test/testParseBuffer.cxx
++++ b/rutil/test/testParseBuffer.cxx
+@@ -387,6 +387,32 @@ main(int argc, char** argv)
+       assert(*pb.position() == 'Z');
+    }
+    
++   {
++      char buf[] = "1.000";
++      ParseBuffer pb(buf, strlen(buf));
++      assert(pb.qVal() == 1000);
++   }
++
++   {
++      const char buf[] = {'1'};
++      const Data data(Data::Share, buf, sizeof(buf));
++      ParseBuffer pb(data);
++      assert(pb.qVal() == 1000);
++   }
++
++   {
++      const char buf[] = {'1', '.'};
++      const Data data(Data::Share, buf, sizeof(buf));
++      ParseBuffer pb(data);
++      assert(pb.qVal() == 1000);
++   }
++
++   {
++      char buf[] = "0.800";
++      ParseBuffer pb(buf, strlen(buf));
++      assert(pb.qVal() == 800);
++   }
++
+    {
+       char buf[] = "17 ";
+       ParseBuffer pb(buf, strlen(buf));   

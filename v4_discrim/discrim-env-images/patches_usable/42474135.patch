@@ -1,0 +1,12 @@
+diff --git a/src/hb-ot-cff-common.hh b/src/hb-ot-cff-common.hh
+index c645953..61e615c 100644
+--- a/src/hb-ot-cff-common.hh
++++ b/src/hb-ot-cff-common.hh
+@@ -525,6 +525,7 @@ struct FDArray : CFFIndexOf<COUNT, FontDict>
+     for (unsigned i = 0; i < fontDicts.length; i++)
+       if (fdmap.includes (i))
+       {
++      	if (unlikely (fid >= fdCount)) return_trace (false);
+ 	CFFIndexOf<COUNT, FontDict>::set_offset_at (fid++, offset);
+ 	offset += FontDict::calculate_serialized_size (fontDicts[i], opszr);
+       }

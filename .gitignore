@@ -7,3 +7,6 @@ data_*/
 .claude/
 *.log
 runs/
+v4_discrim/high_delta_trajectories/
+v4_discrim/high_delta_trajectories.tar.gz
+v4_discrim/discrim-env-images/ctx/tree/

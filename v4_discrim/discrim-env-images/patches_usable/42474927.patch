@@ -1,0 +1,12 @@
+diff --git a/libwget/iri.c b/libwget/iri.c
+index 6d50f3e..46e4f19 100644
+--- a/libwget/iri.c
++++ b/libwget/iri.c
+@@ -254,6 +254,7 @@ static char *_iri_unescape_inline(char *src, int ctype)
+ 				*d++ = '\'';
+ 				s += 6;
+ 				ret = src;
++				continue;
+ 			}
+ 		} else if (*s == '#') {
+ 			uint32_t value = 0;

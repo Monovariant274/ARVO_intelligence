@@ -1,0 +1,15 @@
+diff --git a/poppler/Parser.cc b/poppler/Parser.cc
+index 8774541..2cf2bd1 100644
+--- a/poppler/Parser.cc
++++ b/poppler/Parser.cc
+@@ -230,6 +230,10 @@ Stream *Parser::makeStream(Object &&dict, Guchar *fileKey,
+     length = 0;
+   }
+ 
++
++
++  entry = xref ? xref->getEntry(objNum, false) : nullptr;
++
+   // check for length in damaged file
+   if (xref && xref->getStreamEnd(pos, &endPos)) {
+     length = endPos - pos;

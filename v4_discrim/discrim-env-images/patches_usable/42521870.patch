@@ -1,0 +1,179 @@
+diff --git a/README.md b/README.md
+index f24f882..b214a19 100644
+--- a/README.md
++++ b/README.md
+@@ -287,6 +287,11 @@ int main() {
+     uint32_t expectedsize = roaring_bitmap_portable_size_in_bytes(r1);
+     char *serializedbytes = malloc(expectedsize);
+     roaring_bitmap_portable_serialize(r1, serializedbytes);
++
++
++
++
++
+     roaring_bitmap_t *t = roaring_bitmap_portable_deserialize(serializedbytes);
+     assert(roaring_bitmap_equals(r1, t));  // what we recover is equal
+     roaring_bitmap_free(t);
+@@ -298,6 +303,9 @@ int main() {
+            expectedsize);  // sizeofbitmap would be zero if no bitmap were found
+     // we can also read the bitmap "safely" by specifying a byte size limit:
+     t = roaring_bitmap_portable_deserialize_safe(serializedbytes, expectedsize);
++
++
++
+     assert(roaring_bitmap_equals(r1, t));  // what we recover is equal
+     roaring_bitmap_free(t);
+ 
+@@ -422,7 +430,10 @@ int main() {
+     uint32_t expectedsize = r1.getSizeInBytes();
+     char *serializedbytes = new char[expectedsize];
+     r1.write(serializedbytes);
+-    Roaring t = Roaring::read(serializedbytes);
++
++
++
++    Roaring t = Roaring::readSafe(serializedbytes, expectedsize);
+     assert(r1 == t);
+     delete[] serializedbytes;
+ 
+diff --git a/cpp/roaring.hh b/cpp/roaring.hh
+index d48ebda..2e04995 100644
+--- a/cpp/roaring.hh
++++ b/cpp/roaring.hh
+@@ -567,7 +567,18 @@ public:
+     /**
+      * Read a bitmap from a serialized version, reading no more than maxbytes
+      * bytes.  This is meant to be compatible with the Java and Go versions.
+-     *
++
++
++
++
++
++
++
++
++
++
++
++
+      */
+     static Roaring readSafe(const char *buf, size_t maxbytes) {
+         roaring_bitmap_t * r =
+diff --git a/fuzz/croaring_fuzzer.c b/fuzz/croaring_fuzzer.c
+index 00d2cf4..27f7aa3 100644
+--- a/fuzz/croaring_fuzzer.c
++++ b/fuzz/croaring_fuzzer.c
+@@ -19,32 +19,11 @@
+ #include <stdlib.h>
+ #include "roaring/roaring.h"
+ 
+-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size){
+-    roaring_statistics_t stats;
+-    bool answer = true;
++int LLVMFuzzerTestOneInput(const char *data, size_t size) {
++
+     roaring_bitmap_t* bitmap = roaring_bitmap_portable_deserialize_safe(data, size);
+     if(bitmap) {
+-        /*
+-        uint64_t card1 = roaring_bitmap_get_cardinality(bitmap);
+-        roaring_bitmap_statistics(bitmap, &stats);
+-        unsigned universe_size = stats.max_value + 1;
+-        roaring_bitmap_t *inverted = roaring_bitmap_flip(bitmap, 0U, universe_size);
+-        if(inverted) {
+-            roaring_bitmap_t *double_inverted = roaring_bitmap_flip(inverted, 0U, universe_size);
+-            if(double_inverted)
+-            {
+-                answer = (roaring_bitmap_get_cardinality(inverted) + roaring_bitmap_get_cardinality(bitmap) == universe_size);
+-                if (answer) answer = roaring_bitmap_equals(bitmap, double_inverted);
+-                if (!answer) {
+-                    printf("Bad flip\n\nbitmap1:\n");
+-                    roaring_bitmap_printf_describe(bitmap);  // debug
+-                    printf("\n\nflipped:\n");
+-                    roaring_bitmap_printf_describe(inverted);  // debug
+-                }
+-                roaring_bitmap_free(double_inverted);
+-            }
+-            roaring_bitmap_free(inverted);
+-        }*/
++
+         roaring_bitmap_free(bitmap);
+     }
+     return 0;
+diff --git a/fuzz/croaring_fuzzer_cc.cc b/fuzz/croaring_fuzzer_cc.cc
+index e54b0bd..1c1e39e 100644
+--- a/fuzz/croaring_fuzzer_cc.cc
++++ b/fuzz/croaring_fuzzer_cc.cc
+@@ -129,17 +129,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+ 
+   // Safe read from serialized
+   std::vector<char> read_buffer = fdp.ConsumeBytes<char>(100);
+-  std::vector<char> write_buffer = {0};
+-  try {
++  {
+     roaring::Roaring read_safely =
+         roaring::Roaring::readSafe(read_buffer.data(), read_buffer.size());
+-    write_buffer.resize(read_safely.getSizeInBytes());
+-    read_safely.write(write_buffer.data(), fdp.ConsumeBool());
+-    assert(write_buffer == read_buffer);
+-  } catch (const std::runtime_error &) {
+-    // Do nothing.
++
++
++
+   }
+ 
++
++  std::size_t expected_size_in_bytes = b.getSizeInBytes();
++  std::vector<char> buffer(expected_size_in_bytes);
++  std::size_t size_in_bytes = b.write(buffer.data());
++  assert(expected_size_in_bytes == size_in_bytes);
++  roaring::Roaring bread = roaring::Roaring::readSafe(buffer.data(), size_in_bytes);
++  assert(bread == b);
++
+   f.toString();
+ 
+   volatile int unused = 0;
+diff --git a/include/roaring/roaring.h b/include/roaring/roaring.h
+index 9fad8ec..04291c4 100644
+--- a/include/roaring/roaring.h
++++ b/include/roaring/roaring.h
+@@ -525,6 +525,15 @@ roaring_bitmap_t *roaring_bitmap_portable_deserialize(const char *buf);
+  * This is meant to be compatible with the Java and Go versions:
+  * https://github.com/RoaringBitmap/RoaringFormatSpec
+  *
++
++
++
++
++
++
++
++
++
+  * This function is endian-sensitive. If you have a big-endian system (e.g., a mainframe IBM s390x),
+  * the data format is going to be big-endian and not compatible with little-endian systems.
+  */
+diff --git a/tests/cpp_example2.cpp b/tests/cpp_example2.cpp
+index 8e2b3cf..cab1924 100644
+--- a/tests/cpp_example2.cpp
++++ b/tests/cpp_example2.cpp
+@@ -73,7 +73,10 @@ int main() {
+     uint32_t expectedsize = r1.getSizeInBytes();
+     char *serializedbytes = new char[expectedsize];
+     r1.write(serializedbytes);
+-    Roaring t = Roaring::read(serializedbytes);
++
++
++
++    Roaring t = Roaring::readSafe(serializedbytes, expectedsize);
+     assert_true(r1 == t);
+     delete[] serializedbytes;
+ 
+@@ -98,5 +101,6 @@ int main() {
+     Roaring rogue(5, manyvalues);
+     Roaring::const_iterator j = rogue.begin();
+     j.equalorlarger(4);  // *j == 4
++
+     return EXIT_SUCCESS;
+ }

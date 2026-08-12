@@ -1,0 +1,3248 @@
+diff --git a/Changelog b/Changelog
+index c41b22c..837f794 100644
+--- a/Changelog
++++ b/Changelog
+@@ -68,6 +68,9 @@ version <next>:
+ - XBM parser
+ - xbm_pipe demuxer
+ - colorize filter
++- CRI parser
++- aexciter audio filter
++- exposure video filter
+ 
+ 
+ version 4.3:
+diff --git a/doc/APIchanges b/doc/APIchanges
+index 1332694..4753463 100644
+--- a/doc/APIchanges
++++ b/doc/APIchanges
+@@ -15,6 +15,9 @@ libavutil:     2017-10-21
+ 
+ API changes, most recent first:
+ 
++2021-02-xx - xxxxxxxxxx - lavu 56.xx.100 - common.h
++  Add FFABS64U()
++
+ 2021-01-26 - xxxxxxxxxx - lavu 56.64.100 - common.h
+   Add FFABSU()
+ 
+diff --git a/doc/encoders.texi b/doc/encoders.texi
+index c2ba7d3..8fb573c 100644
+--- a/doc/encoders.texi
++++ b/doc/encoders.texi
+@@ -1684,6 +1684,17 @@ Enable interintra compound. Default is true.
+ @item enable-smooth-interintra (@emph{boolean}) (Requires libaom >= v2.0.0)
+ Enable smooth interintra mode. Default is true.
+ 
++@item aom-params
++Set libaom options using a list of @var{key}=@var{value} pairs separated
++by ":". For a list of supported options, see @command{aomenc --help} under the
++section "AV1 Specific Options".
++
++For example to specify libaom encoding options with @option{-aom-params}:
++
++@example
++ffmpeg -i input -c:v libaom-av1 -b:v 500K -aom-params tune=psnr:enable-tpl-model=1 output.mp4
++@end example
++
+ @end table
+ 
+ @section libsvtav1
+diff --git a/doc/filters.texi b/doc/filters.texi
+index af46b99..3bc9a69 100644
+--- a/doc/filters.texi
++++ b/doc/filters.texi
+@@ -656,44 +656,44 @@ Samples detected as impulsive noise are replaced by interpolated samples using
+ autoregressive modelling.
+ 
+ @table @option
+-@item w
++@item window, w
+ Set window size, in milliseconds. Allowed range is from @code{10} to
+ @code{100}. Default value is @code{55} milliseconds.
+ This sets size of window which will be processed at once.
+ 
+-@item o
++@item overlap, o
+ Set window overlap, in percentage of window size. Allowed range is from
+ @code{50} to @code{95}. Default value is @code{75} percent.
+ Setting this to a very high value increases impulsive noise removal but makes
+ whole process much slower.
+ 
+-@item a
++@item arorder, a
+ Set autoregression order, in percentage of window size. Allowed range is from
+ @code{0} to @code{25}. Default value is @code{2} percent. This option also
+ controls quality of interpolated samples using neighbour good samples.
+ 
+-@item t
++@item threshold, t
+ Set threshold value. Allowed range is from @code{1} to @code{100}.
+ Default value is @code{2}.
+ This controls the strength of impulsive noise which is going to be removed.
+ The lower value, the more samples will be detected as impulsive noise.
+ 
+-@item b
++@item burst, b
+ Set burst fusion, in percentage of window size. Allowed range is @code{0} to
+ @code{10}. Default value is @code{2}.
+ If any two samples detected as noise are spaced less than this value then any
+ sample between those two samples will be also detected as noise.
+ 
+-@item m
++@item method, m
+ Set overlap method.
+ 
+ It accepts the following values:
+ @table @option
+-@item a
++@item add, a
+ Select overlap-add method. Even not interpolated samples are slightly
+ changed with this method.
+ 
+-@item s
++@item save, s
+ Select overlap-save method. Not interpolated samples remain unchanged.
+ @end table
+ 
+@@ -707,38 +707,38 @@ Samples detected as clipped are replaced by interpolated samples using
+ autoregressive modelling.
+ 
+ @table @option
+-@item w
++@item window, w
+ Set window size, in milliseconds. Allowed range is from @code{10} to @code{100}.
+ Default value is @code{55} milliseconds.
+ This sets size of window which will be processed at once.
+ 
+-@item o
++@item overlap, o
+ Set window overlap, in percentage of window size. Allowed range is from @code{50}
+ to @code{95}. Default value is @code{75} percent.
+ 
+-@item a
++@item arorder, a
+ Set autoregression order, in percentage of window size. Allowed range is from
+ @code{0} to @code{25}. Default value is @code{8} percent. This option also controls
+ quality of interpolated samples using neighbour good samples.
+ 
+-@item t
++@item threshold, t
+ Set threshold value. Allowed range is from @code{1} to @code{100}.
+ Default value is @code{10}. Higher values make clip detection less aggressive.
+ 
+-@item n
++@item hsize, n
+ Set size of histogram used to detect clips. Allowed range is from @code{100} to @code{9999}.
+ Default value is @code{1000}. Higher values make clip detection less aggressive.
+ 
+-@item m
++@item method, m
+ Set overlap method.
+ 
+ It accepts the following values:
+ @table @option
+-@item a
++@item add, a
+ Select overlap-add method. Even not interpolated samples are slightly changed
+ with this method.
+ 
+-@item s
++@item save, s
+ Select overlap-save method. Not interpolated samples remain unchanged.
+ @end table
+ 
+@@ -1003,6 +1003,62 @@ aeval=val(0)|-val(1)
+ @end example
+ @end itemize
+ 
++@section aexciter
++
++An exciter is used to produce high sound that is not present in the
++original signal. This is done by creating harmonic distortions of the
++signal which are restricted in range and added to the original signal.
++An Exciter raises the upper end of an audio signal without simply raising
++the higher frequencies like an equalizer would do to create a more
++"crisp" or "brilliant" sound.
++
++The filter accepts the following options:
++
++@table @option
++@item level_in
++Set input level prior processing of signal.
++Allowed range is from 0 to 64.
++Default value is 1.
++
++@item level_out
++Set output level after processing of signal.
++Allowed range is from 0 to 64.
++Default value is 1.
++
++@item amount
++Set the amount of harmonics added to original signal.
++Allowed range is from 0 to 64.
++Default value is 1.
++
++@item drive
++Set the amount of newly created harmonics.
++Allowed range is from 0.1 to 10.
++Default value is 8.5.
++
++@item blend
++Set the octave of newly created harmonics.
++Allowed range is from -10 to 10.
++Default value is 0.
++
++@item freq
++Set the lower frequency limit of producing harmonics in Hz.
++Allowed range is from 2000 to 12000 Hz.
++Default is 7500 Hz.
++
++@item ceil
++Set the upper frequency limit of producing harmonics.
++Allowed range is from 9999 to 20000 Hz.
++If value is lower than 10000 Hz no limit is applied.
++
++@item listen
++Mute the original signal and output only added harmonics.
++By default is disabled.
++@end table
++
++@subsection Commands
++
++This filter supports the all above options as @ref{commands}.
++
+ @anchor{afade}
+ @section afade
+ 
+@@ -9257,6 +9313,10 @@ Save Gnuplot script of the curves in specified file.
+ To avoid some filtergraph syntax conflicts, each key points list need to be
+ defined using the following syntax: @code{x0/y0 x1/y1 x2/y2 ...}.
+ 
++@subsection Commands
++
++This filter supports same @ref{commands} as options.
++
+ @subsection Examples
+ 
+ @itemize
+@@ -9354,6 +9414,10 @@ Set display number format. Can be @code{hex}, or @code{dec}. Default is @code{he
+ Set pixel components to display. By default all pixel components are displayed.
+ @end table
+ 
++@subsection Commands
++
++This filter supports same @ref{commands} as options excluding @code{size} option.
++
+ @section dblur
+ Apply Directional blur filter.
+ 
+@@ -9486,6 +9550,10 @@ e.g. banding detection threshold is triggered for all color components.
+ The default is disabled.
+ @end table
+ 
++@subsection Commands
++
++This filter supports the all above options as @ref{commands}.
++
+ @section deblock
+ 
+ Remove blocking artifacts from input video.
+@@ -11307,6 +11375,25 @@ Six-point interpolation.
+ @subsection Commands
+ This filter supports same @ref{commands} as options.
+ 
++@section exposure
++Adjust exposure of the video stream.
++
++The filter accepts the following options:
++
++@table @option
++@item exposure
++Set the exposure correction in EV. Allowed range is from -3.0 to 3.0 EV
++Default value is 0 EV.
++
++@item black
++Set the black level correction. Allowed range is from -1.0 to 1.0.
++Default value is 0.
++@end table
++
++@subsection Commands
++
++This filter supports same @ref{commands} as options.
++
+ @section extractplanes
+ 
+ Extract color channel components from input video stream into
+@@ -14110,6 +14197,10 @@ expression
+ 
+ All expressions default to "val".
+ 
++@subsection Commands
++
++This filter supports same @ref{commands} as options.
++
+ @subsection Examples
+ 
+ @itemize
+@@ -14395,6 +14486,10 @@ average, output frame will be completely filled with value set by @var{fill} opt
+ Typically useful for scene changes when used in combination with @code{tblend} filter.
+ @end table
+ 
++@subsection Commands
++
++This filter supports the all above options as @ref{commands}.
++
+ @section mcdeint
+ 
+ Apply motion-compensation deinterlacing.
+@@ -14772,6 +14867,10 @@ It accepts the following option:
+ With value 1, it negates the alpha component, if present. Default value is 0.
+ @end table
+ 
++@subsection Commands
++
++This filter supports same @ref{commands} as options.
++
+ @anchor{nlmeans}
+ @section nlmeans
+ 
+@@ -19152,6 +19251,10 @@ The timestamp expressed in seconds. It's NAN if the input timestamp is unknown.
+ the position in the file of the input frame, NAN if unknown
+ @end table
+ 
++@subsection Commands
++
++This filter supports the all above options as @ref{commands}.
++
+ @section swapuv
+ Swap U & V plane.
+ 
+diff --git a/libavcodec/Makefile b/libavcodec/Makefile
+index 8820e9c..77a4b8c 100644
+--- a/libavcodec/Makefile
++++ b/libavcodec/Makefile
+@@ -1084,6 +1084,7 @@ OBJS-$(CONFIG_AVS3_PARSER)             += avs3_parser.o
+ OBJS-$(CONFIG_BMP_PARSER)              += bmp_parser.o
+ OBJS-$(CONFIG_CAVSVIDEO_PARSER)        += cavs_parser.o
+ OBJS-$(CONFIG_COOK_PARSER)             += cook_parser.o
++OBJS-$(CONFIG_CRI_PARSER)              += cri_parser.o
+ OBJS-$(CONFIG_DCA_PARSER)              += dca_parser.o dca_exss.o dca.o
+ OBJS-$(CONFIG_DIRAC_PARSER)            += dirac_parser.o
+ OBJS-$(CONFIG_DNXHD_PARSER)            += dnxhd_parser.o dnxhddata.o
+diff --git a/libavcodec/argo.c b/libavcodec/argo.c
+index 6b4d449..7358d10 100644
+--- a/libavcodec/argo.c
++++ b/libavcodec/argo.c
+@@ -565,7 +565,7 @@ static int decode_rle(AVCodecContext *avctx, AVFrame *frame)
+     GetByteContext *gb = &s->gb;
+     const int w = frame->width;
+     const int h = frame->height;
+-    const int l = frame->linesize[0] / 4;
++    const int l = frame->linesize[0];
+     uint8_t *dst = frame->data[0];
+     int pos = 0, y = 0;
+ 
+diff --git a/libavcodec/cri_parser.c b/libavcodec/cri_parser.c
+new file mode 100644
+index 0000000..9790747
+--- /dev/null
++++ b/libavcodec/cri_parser.c
+@@ -0,0 +1,105 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#include "libavutil/bswap.h"
++#include "libavutil/common.h"
++
++#include "parser.h"
++
++typedef struct CRIParser {
++    ParseContext pc;
++    int count;
++    int chunk;
++    int read_bytes;
++    int skip_bytes;
++} CRIParser;
++
++#define KEY (((uint64_t)'\1' << 56) | ((uint64_t)'\0' << 48) | \
++             ((uint64_t)'\0' << 40) | ((uint64_t)'\0' << 32) | \
++             ((uint64_t)'\4' << 24) | ((uint64_t)'\0' << 16) | \
++             ((uint64_t)'\0' <<  8) | ((uint64_t)'\0' <<  0))
++
++static int cri_parse(AVCodecParserContext *s, AVCodecContext *avctx,
++                     const uint8_t **poutbuf, int *poutbuf_size,
++                     const uint8_t *buf, int buf_size)
++{
++    CRIParser *bpc = s->priv_data;
++    uint64_t state = bpc->pc.state64;
++    int next = END_NOT_FOUND, i = 0;
++
++    s->pict_type = AV_PICTURE_TYPE_I;
++    s->key_frame = 1;
++    s->duration  = 1;
++
++
++
++
++    for (; i < buf_size; i++) {
++        state = (state << 8) | buf[i];
++        bpc->read_bytes++;
++
++        if (bpc->skip_bytes > 0) {
++            bpc->skip_bytes--;
++            if (bpc->skip_bytes == 0)
++                bpc->read_bytes = 0;
++        } else {
++            if (state != KEY)
++                continue;
++        }
++
++        if (bpc->skip_bytes == 0 && bpc->read_bytes >= 8) {
++            bpc->skip_bytes = av_bswap32(state & 0xFFFFFFFF);
++            bpc->chunk = state >> 32;
++            bpc->read_bytes = 0;
++            bpc->count++;
++        }
++
++        if (bpc->chunk == 0x01000000 && bpc->skip_bytes == 4 &&
++            bpc->read_bytes == 0 && bpc->count > 1) {
++            next = i - 7;
++            break;
++        }
++    }
++
++    bpc->pc.state64 = state;
++    if (ff_combine_frame(&bpc->pc, next, &buf, &buf_size) < 0) {
++
++
++        return buf_size;
++    }
++
++
++
++
++    return next;
++}
++
++AVCodecParser ff_cri_parser = {
++    .codec_ids      = { AV_CODEC_ID_CRI },
++    .priv_data_size = sizeof(CRIParser),
++    .parser_parse   = cri_parse,
++    .parser_close   = ff_parse_close,
++};
+diff --git a/libavcodec/fitsdec.c b/libavcodec/fitsdec.c
+index 32a79cd..802aa5b 100644
+--- a/libavcodec/fitsdec.c
++++ b/libavcodec/fitsdec.c
+@@ -63,7 +63,7 @@ static int fill_data_min_max(const uint8_t *ptr8, FITSHeader *header, const uint
+     int i, j;
+ 
+     header->data_min = DBL_MAX;
+-    header->data_max = DBL_MIN;
++    header->data_max = -DBL_MAX;
+     switch (header->bitpix) {
+ #define CASE_N(a, t, rd) \
+     case a: \
+diff --git a/libavcodec/g722enc.c b/libavcodec/g722enc.c
+index 9357f17..9e2ebf6 100644
+--- a/libavcodec/g722enc.c
++++ b/libavcodec/g722enc.c
+@@ -64,19 +64,6 @@ static av_cold int g722_encode_init(AVCodecContext * avctx)
+     c->band[1].scale_factor = 2;
+     c->prev_samples_pos = 22;
+ 
+-    if (avctx->trellis) {
+-        int frontier = 1 << avctx->trellis;
+-        int max_paths = frontier * FREEZE_INTERVAL;
+-        int i;
+-        for (i = 0; i < 2; i++) {
+-            c->paths[i] = av_mallocz_array(max_paths, sizeof(**c->paths));
+-            c->node_buf[i] = av_mallocz_array(frontier, 2 * sizeof(**c->node_buf));
+-            c->nodep_buf[i] = av_mallocz_array(frontier, 2 * sizeof(**c->nodep_buf));
+-            if (!c->paths[i] || !c->node_buf[i] || !c->nodep_buf[i])
+-                return AVERROR(ENOMEM);
+-        }
+-    }
+-
+     if (avctx->frame_size) {
+         /* validate frame size */
+         if (avctx->frame_size & 1 || avctx->frame_size > MAX_FRAME_SIZE) {
+@@ -110,6 +97,18 @@ static av_cold int g722_encode_init(AVCodecContext * avctx)
+                    avctx->trellis);
+             avctx->trellis = new_trellis;
+         }
++        if (avctx->trellis) {
++            int frontier = 1 << avctx->trellis;
++            int max_paths = frontier * FREEZE_INTERVAL;
++
++            for (int i = 0; i < 2; i++) {
++                c->paths[i]     = av_calloc(max_paths, sizeof(**c->paths));
++                c->node_buf[i]  = av_calloc(frontier, 2 * sizeof(**c->node_buf));
++                c->nodep_buf[i] = av_calloc(frontier, 2 * sizeof(**c->nodep_buf));
++                if (!c->paths[i] || !c->node_buf[i] || !c->nodep_buf[i])
++                    return AVERROR(ENOMEM);
++            }
++        }
+     }
+ 
+     ff_g722dsp_init(&c->dsp);
+diff --git a/libavcodec/hevc_sei.c b/libavcodec/hevc_sei.c
+index 227560c..c881c43 100644
+--- a/libavcodec/hevc_sei.c
++++ b/libavcodec/hevc_sei.c
+@@ -463,6 +463,8 @@ static int decode_nal_sei_message(GetBitContext *gb, void *logctx, HEVCSEI *s,
+         byte          = get_bits(gb, 8);
+         payload_size += byte;
+     }
++    if (get_bits_left(gb) < 8LL*payload_size)
++        return AVERROR_INVALIDDATA;
+     if (nal_unit_type == HEVC_NAL_SEI_PREFIX) {
+         return decode_nal_sei_prefix(gb, logctx, s, ps, payload_type, payload_size);
+     } else { /* nal_unit_type == NAL_SEI_SUFFIX */
+diff --git a/libavcodec/jpeg2000dec.c b/libavcodec/jpeg2000dec.c
+index 624542c..63edbcd 100644
+--- a/libavcodec/jpeg2000dec.c
++++ b/libavcodec/jpeg2000dec.c
+@@ -2342,8 +2342,12 @@ static int jp2_find_codestream(Jpeg2000DecoderContext *s)
+                 return 0;
+             }
+             atom_size = bytestream2_get_be32u(&s->g);
++            if (atom_size < 16 || (int64_t)bytestream2_tell(&s->g) + atom_size - 16 > INT_MAX)
++                return AVERROR_INVALIDDATA;
+             atom_end  = bytestream2_tell(&s->g) + atom_size - 16;
+         } else {
++            if (atom_size <  8 || (int64_t)bytestream2_tell(&s->g) + atom_size -  8 > INT_MAX)
++                return AVERROR_INVALIDDATA;
+             atom_end  = bytestream2_tell(&s->g) + atom_size -  8;
+         }
+ 
+diff --git a/libavcodec/jpeglsdec.c b/libavcodec/jpeglsdec.c
+index ef97bdb..69980ea 100644
+--- a/libavcodec/jpeglsdec.c
++++ b/libavcodec/jpeglsdec.c
+@@ -149,7 +149,7 @@ static inline int ls_get_code_regular(GetBitContext *gb, JLSState *state, int Q)
+ {
+     int k, ret;
+ 
+-    for (k = 0; (state->N[Q] << k) < state->A[Q]; k++)
++    for (k = 0; ((unsigned)state->N[Q] << k) < state->A[Q]; k++)
+         ;
+ 
+ #ifdef JLS_BROKEN
+diff --git a/libavcodec/libaomenc.c b/libavcodec/libaomenc.c
+index 342d088..9a26b5f 100644
+--- a/libavcodec/libaomenc.c
++++ b/libavcodec/libaomenc.c
+@@ -124,6 +124,7 @@ typedef struct AOMEncoderContext {
+     int enable_diff_wtd_comp;
+     int enable_dist_wtd_comp;
+     int enable_dual_filter;
++    AVDictionary *aom_params;
+ } AOMContext;
+ 
+ static const char *const ctlidstr[] = {
+@@ -874,6 +875,20 @@ static av_cold int aom_init(AVCodecContext *avctx,
+         codecctl_int(avctx, AV1E_SET_ENABLE_INTRABC, ctx->enable_intrabc);
+ #endif
+ 
++#if AOM_ENCODER_ABI_VERSION >= 23
++    {
++        AVDictionaryEntry *en = NULL;
++
++        while ((en = av_dict_get(ctx->aom_params, "", en, AV_DICT_IGNORE_SUFFIX))) {
++            int ret = aom_codec_set_option(&ctx->encoder, en->key, en->value);
++            if (ret != AOM_CODEC_OK) {
++                log_encoder_error(avctx, en->key);
++                return AVERROR_EXTERNAL;
++            }
++        }
++    }
++#endif
++
+     // provide dummy value to initialize wrapper, values will be updated each _encode()
+     aom_img_wrap(&ctx->rawimg, img_fmt, avctx->width, avctx->height, 1,
+                  (unsigned char*)1);
+@@ -1299,6 +1314,9 @@ static const AVOption options[] = {
+     { "enable-masked-comp",           "Enable masked compound",                            OFFSET(enable_masked_comp),           AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, VE},
+     { "enable-interintra-comp",       "Enable interintra compound",                        OFFSET(enable_interintra_comp),       AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, VE},
+     { "enable-smooth-interintra",     "Enable smooth interintra mode",                     OFFSET(enable_smooth_interintra),     AV_OPT_TYPE_BOOL, {.i64 = -1}, -1, 1, VE},
++#if AOM_ENCODER_ABI_VERSION >= 23
++    { "aom-params",                   "Set libaom options using a :-separated list of key=value pairs", OFFSET(aom_params), AV_OPT_TYPE_DICT, { 0 }, 0, 0, VE },
++#endif
+     { NULL },
+ };
+ 
+diff --git a/libavcodec/mjpegdec.c b/libavcodec/mjpegdec.c
+index 8876afd..fa4c607 100644
+--- a/libavcodec/mjpegdec.c
++++ b/libavcodec/mjpegdec.c
+@@ -2606,19 +2606,12 @@ eoi_parser:
+ 
+             frame->pkt_dts = s->pkt->dts;
+ 
+-            if (!s->lossless) {
++            if (!s->lossless && avctx->debug & FF_DEBUG_QP) {
+                 int qp = FFMAX3(s->qscale[0],
+                                 s->qscale[1],
+                                 s->qscale[2]);
+-                int qpw = (s->width + 15) / 16;
+-                AVBufferRef *qp_table_buf = av_buffer_alloc(qpw);
+-                if (qp_table_buf) {
+-                    memset(qp_table_buf->data, qp, qpw);
+-                    av_frame_set_qp_table(frame, qp_table_buf, 0, FF_QSCALE_TYPE_MPEG1);
+-                }
+ 
+-                if(avctx->debug & FF_DEBUG_QP)
+-                    av_log(avctx, AV_LOG_DEBUG, "QP: %d\n", qp);
++                av_log(avctx, AV_LOG_DEBUG, "QP: %d\n", qp);
+             }
+ 
+             goto the_end;
+diff --git a/libavcodec/mobiclip.c b/libavcodec/mobiclip.c
+index 94368c2..a150914 100644
+--- a/libavcodec/mobiclip.c
++++ b/libavcodec/mobiclip.c
+@@ -848,7 +848,7 @@ static int predict_intra(AVCodecContext *avctx, AVFrame *frame, int ax, int ay,
+             uint8_t *left = frame->data[plane] + ay * frame->linesize[plane] + FFMAX(ax - 1, 0);
+             int bottommost = frame->data[plane][(ay + size - 1) * frame->linesize[plane] + FFMAX(ax - 1, 0)];
+             int rightmost = frame->data[plane][FFMAX(ay - 1, 0) * frame->linesize[plane] + ax + size - 1];
+-            int avg = (bottommost + rightmost + 1) / 2 + 2 * get_se_golomb(gb);
++            int avg = (bottommost + rightmost + 1) / 2 + 2 * av_clip(get_se_golomb(gb), -(1<<16), 1<<16);
+             int r6 = adjust(avg - bottommost, size);
+             int r9 = adjust(avg - rightmost, size);
+             int shift = adjust(size, size) == 8 ? 3 : 2;
+diff --git a/libavcodec/mpegvideo_motion.c b/libavcodec/mpegvideo_motion.c
+index 58cdecf..427bc96 100644
+--- a/libavcodec/mpegvideo_motion.c
++++ b/libavcodec/mpegvideo_motion.c
+@@ -21,8 +21,6 @@
+  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
+  */
+ 
+-#include <string.h>
+-
+ #include "libavutil/avassert.h"
+ #include "libavutil/internal.h"
+ #include "libavutil/mem_internal.h"
+@@ -31,11 +29,8 @@
+ #include "h261.h"
+ #include "mpegutils.h"
+ #include "mpegvideo.h"
+-#include "mjpegenc.h"
+-#include "msmpeg4.h"
+ #include "qpeldsp.h"
+ #include "wmv2.h"
+-#include <limits.h>
+ 
+ static void gmc1_motion(MpegEncContext *s,
+                         uint8_t *dest_y, uint8_t *dest_cb, uint8_t *dest_cr,
+@@ -213,16 +208,16 @@ static inline int hpel_motion(MpegEncContext *s,
+         dxy |= (motion_y & 1) << 1;
+     src += src_y * s->linesize + src_x;
+ 
+-        if ((unsigned)src_x >= FFMAX(s->h_edge_pos - (motion_x & 1) - 7, 0) ||
+-            (unsigned)src_y >= FFMAX(s->v_edge_pos - (motion_y & 1) - 7, 0)) {
+-            s->vdsp.emulated_edge_mc(s->sc.edge_emu_buffer, src,
+-                                     s->linesize, s->linesize,
+-                                     9, 9,
+-                                     src_x, src_y,
+-                                     s->h_edge_pos, s->v_edge_pos);
+-            src = s->sc.edge_emu_buffer;
+-            emu = 1;
+-        }
++    if ((unsigned)src_x >= FFMAX(s->h_edge_pos - (motion_x & 1) - 7, 0) ||
++        (unsigned)src_y >= FFMAX(s->v_edge_pos - (motion_y & 1) - 7, 0)) {
++        s->vdsp.emulated_edge_mc(s->sc.edge_emu_buffer, src,
++                                 s->linesize, s->linesize,
++                                 9, 9,
++                                 src_x, src_y,
++                                 s->h_edge_pos, s->v_edge_pos);
++        src = s->sc.edge_emu_buffer;
++        emu = 1;
++    }
+     pix_op[dxy](dest, src, s->linesize, 8);
+     return emu;
+ }
+@@ -306,9 +301,9 @@ void mpeg_motion_internal(MpegEncContext *s,
+ 
+     if ((unsigned)src_x >= FFMAX(s->h_edge_pos - (motion_x & 1) - 15   , 0) ||
+         (unsigned)src_y >= FFMAX(   v_edge_pos - (motion_y & 1) - h + 1, 0)) {
+-        if (is_mpeg12 ||
+-            s->codec_id == AV_CODEC_ID_MPEG2VIDEO ||
+-            s->codec_id == AV_CODEC_ID_MPEG1VIDEO) {
++        if (is_mpeg12 || (CONFIG_SMALL &&
++                          (s->codec_id == AV_CODEC_ID_MPEG2VIDEO ||
++                           s->codec_id == AV_CODEC_ID_MPEG1VIDEO))) {
+             av_log(s->avctx, AV_LOG_DEBUG,
+                    "MPEG motion vector out of boundary (%d %d)\n", src_x,
+                    src_y);
+@@ -853,7 +848,7 @@ static av_always_inline void mpv_motion_internal(MpegEncContext *s,
+ 
+     switch (s->mv_type) {
+     case MV_TYPE_16X16:
+-        if (s->mcsel) {
++        if (!is_mpeg12 && s->mcsel) {
+             if (s->real_sprite_warping_points == 1) {
+                 gmc1_motion(s, dest_y, dest_cb, dest_cr,
+                             ref_picture);
+@@ -915,60 +910,63 @@ static av_always_inline void mpv_motion_internal(MpegEncContext *s,
+         }
+         break;
+     case MV_TYPE_16X8:
+-        for (i = 0; i < 2; i++) {
+-            uint8_t **ref2picture;
++        if (CONFIG_SMALL || is_mpeg12) {
++            for (i = 0; i < 2; i++) {
++                uint8_t **ref2picture;
++
++                if ((s->picture_structure == s->field_select[dir][i] + 1 ||
++                     s->pict_type == AV_PICTURE_TYPE_B || s->first_field) &&
++                    ref_picture[0]) {
++                    ref2picture = ref_picture;
++                } else {
++                    ref2picture = s->current_picture_ptr->f->data;
++                }
+ 
+-            if ((s->picture_structure == s->field_select[dir][i] + 1
+-                || s->pict_type == AV_PICTURE_TYPE_B || s->first_field) && ref_picture[0]) {
+-                ref2picture = ref_picture;
+-            } else {
+-                ref2picture = s->current_picture_ptr->f->data;
++                mpeg_motion(s, dest_y, dest_cb, dest_cr,
++                            s->field_select[dir][i],
++                            ref2picture, pix_op,
++                            s->mv[dir][i][0], s->mv[dir][i][1],
++                            8, 1, (mb_y & ~1) + i);
++
++                dest_y  += 16 * s->linesize;
++                dest_cb += (16 >> s->chroma_y_shift) * s->uvlinesize;
++                dest_cr += (16 >> s->chroma_y_shift) * s->uvlinesize;
+             }
+-
+-            mpeg_motion(s, dest_y, dest_cb, dest_cr,
+-                        s->field_select[dir][i],
+-                        ref2picture, pix_op,
+-                        s->mv[dir][i][0], s->mv[dir][i][1],
+-                        8, 1, (mb_y & ~1) + i);
+-
+-            dest_y  += 16 * s->linesize;
+-            dest_cb += (16 >> s->chroma_y_shift) * s->uvlinesize;
+-            dest_cr += (16 >> s->chroma_y_shift) * s->uvlinesize;
++            break;
+         }
+-        break;
+     case MV_TYPE_DMV:
+-        if (s->picture_structure == PICT_FRAME) {
+-            for (i = 0; i < 2; i++) {
+-                int j;
+-                for (j = 0; j < 2; j++)
+-                    mpeg_motion_field(s, dest_y, dest_cb, dest_cr,
+-                                      j, j ^ i, ref_picture, pix_op,
+-                                      s->mv[dir][2 * i + j][0],
+-                                      s->mv[dir][2 * i + j][1], 8, mb_y);
+-                pix_op = s->hdsp.avg_pixels_tab;
+-            }
+-        } else {
+-            if (!ref_picture[0]) {
+-                ref_picture = s->current_picture_ptr->f->data;
+-            }
+-            for (i = 0; i < 2; i++) {
+-                mpeg_motion(s, dest_y, dest_cb, dest_cr,
+-                            s->picture_structure != i + 1,
+-                            ref_picture, pix_op,
+-                            s->mv[dir][2 * i][0], s->mv[dir][2 * i][1],
+-                            16, 0, mb_y >> 1);
+-
+-                // after put we make avg of the same block
+-                pix_op = s->hdsp.avg_pixels_tab;
+-
+-                /* opposite parity is always in the same frame if this is
+-                 * second field */
+-                if (!s->first_field) {
++        if (CONFIG_SMALL || is_mpeg12) {
++            if (s->picture_structure == PICT_FRAME) {
++                for (i = 0; i < 2; i++) {
++                    for (int j = 0; j < 2; j++)
++                        mpeg_motion_field(s, dest_y, dest_cb, dest_cr,
++                                          j, j ^ i, ref_picture, pix_op,
++                                          s->mv[dir][2 * i + j][0],
++                                          s->mv[dir][2 * i + j][1], 8, mb_y);
++                    pix_op = s->hdsp.avg_pixels_tab;
++                }
++            } else {
++                if (!ref_picture[0]) {
+                     ref_picture = s->current_picture_ptr->f->data;
+                 }
++                for (i = 0; i < 2; i++) {
++                    mpeg_motion(s, dest_y, dest_cb, dest_cr,
++                                s->picture_structure != i + 1,
++                                ref_picture, pix_op,
++                                s->mv[dir][2 * i][0], s->mv[dir][2 * i][1],
++                                16, 0, mb_y >> 1);
++
++
++                    pix_op = s->hdsp.avg_pixels_tab;
++
++
++
++                    if (!s->first_field)
++                        ref_picture = s->current_picture_ptr->f->data;
++                }
+             }
++            break;
+         }
+-        break;
+     default: av_assert2(0);
+     }
+ }
+diff --git a/libavcodec/parsers.c b/libavcodec/parsers.c
+index 93af25a..f8cfa1c 100644
+--- a/libavcodec/parsers.c
++++ b/libavcodec/parsers.c
+@@ -33,6 +33,7 @@ extern AVCodecParser ff_avs3_parser;
+ extern AVCodecParser ff_bmp_parser;
+ extern AVCodecParser ff_cavsvideo_parser;
+ extern AVCodecParser ff_cook_parser;
++extern AVCodecParser ff_cri_parser;
+ extern AVCodecParser ff_dca_parser;
+ extern AVCodecParser ff_dirac_parser;
+ extern AVCodecParser ff_dnxhd_parser;
+diff --git a/libavcodec/version.h b/libavcodec/version.h
+index 21e6fbf..afd54a8 100644
+--- a/libavcodec/version.h
++++ b/libavcodec/version.h
+@@ -28,7 +28,7 @@
+ #include "libavutil/version.h"
+ 
+ #define LIBAVCODEC_VERSION_MAJOR  58
+-#define LIBAVCODEC_VERSION_MINOR 121
++#define LIBAVCODEC_VERSION_MINOR 122
+ #define LIBAVCODEC_VERSION_MICRO 100
+ 
+ #define LIBAVCODEC_VERSION_INT  AV_VERSION_INT(LIBAVCODEC_VERSION_MAJOR, \
+diff --git a/libavfilter/Makefile b/libavfilter/Makefile
+index 3ec28df..a34683e 100644
+--- a/libavfilter/Makefile
++++ b/libavfilter/Makefile
+@@ -46,6 +46,7 @@ OBJS-$(CONFIG_ADERIVATIVE_FILTER)            += af_aderivative.o
+ OBJS-$(CONFIG_AECHO_FILTER)                  += af_aecho.o
+ OBJS-$(CONFIG_AEMPHASIS_FILTER)              += af_aemphasis.o
+ OBJS-$(CONFIG_AEVAL_FILTER)                  += aeval.o
++OBJS-$(CONFIG_AEXCITER_FILTER)               += af_aexciter.o
+ OBJS-$(CONFIG_AFADE_FILTER)                  += af_afade.o
+ OBJS-$(CONFIG_AFFTDN_FILTER)                 += af_afftdn.o
+ OBJS-$(CONFIG_AFFTFILT_FILTER)               += af_afftfilt.o
+@@ -258,6 +259,7 @@ OBJS-$(CONFIG_EROSION_FILTER)                += vf_neighbor.o
+ OBJS-$(CONFIG_EROSION_OPENCL_FILTER)         += vf_neighbor_opencl.o opencl.o \
+                                                 opencl/neighbor.o
+ OBJS-$(CONFIG_ESTDIF_FILTER)                 += vf_estdif.o
++OBJS-$(CONFIG_EXPOSURE_FILTER)               += vf_exposure.o
+ OBJS-$(CONFIG_EXTRACTPLANES_FILTER)          += vf_extractplanes.o
+ OBJS-$(CONFIG_FADE_FILTER)                   += vf_fade.o
+ OBJS-$(CONFIG_FFTDNOIZ_FILTER)               += vf_fftdnoiz.o
+diff --git a/libavfilter/af_adeclick.c b/libavfilter/af_adeclick.c
+index e86a1f7..c8a41cd 100644
+--- a/libavfilter/af_adeclick.c
++++ b/libavfilter/af_adeclick.c
+@@ -92,13 +92,21 @@ typedef struct AudioDeclickContext {
+ #define AF AV_OPT_FLAG_AUDIO_PARAM|AV_OPT_FLAG_FILTERING_PARAM
+ 
+ static const AVOption adeclick_options[] = {
++    { "window", "set window size",     OFFSET(w),         AV_OPT_TYPE_DOUBLE, {.dbl=55}, 10,  100, AF },
+     { "w", "set window size",          OFFSET(w),         AV_OPT_TYPE_DOUBLE, {.dbl=55}, 10,  100, AF },
++    { "overlap", "set window overlap", OFFSET(overlap),   AV_OPT_TYPE_DOUBLE, {.dbl=75}, 50,   95, AF },
+     { "o", "set window overlap",       OFFSET(overlap),   AV_OPT_TYPE_DOUBLE, {.dbl=75}, 50,   95, AF },
++    { "arorder", "set autoregression order", OFFSET(ar),  AV_OPT_TYPE_DOUBLE, {.dbl=2},   0,   25, AF },
+     { "a", "set autoregression order", OFFSET(ar),        AV_OPT_TYPE_DOUBLE, {.dbl=2},   0,   25, AF },
++    { "threshold", "set threshold",    OFFSET(threshold), AV_OPT_TYPE_DOUBLE, {.dbl=2},   1,  100, AF },
+     { "t", "set threshold",            OFFSET(threshold), AV_OPT_TYPE_DOUBLE, {.dbl=2},   1,  100, AF },
++    { "burst", "set burst fusion",     OFFSET(burst),     AV_OPT_TYPE_DOUBLE, {.dbl=2},   0,   10, AF },
+     { "b", "set burst fusion",         OFFSET(burst),     AV_OPT_TYPE_DOUBLE, {.dbl=2},   0,   10, AF },
++    { "method", "set overlap method",  OFFSET(method),    AV_OPT_TYPE_INT,    {.i64=0},   0,    1, AF, "m" },
+     { "m", "set overlap method",       OFFSET(method),    AV_OPT_TYPE_INT,    {.i64=0},   0,    1, AF, "m" },
++    { "add", "overlap-add",            0,                 AV_OPT_TYPE_CONST,  {.i64=0},   0,    0, AF, "m" },
+     { "a", "overlap-add",              0,                 AV_OPT_TYPE_CONST,  {.i64=0},   0,    0, AF, "m" },
++    { "save", "overlap-save",          0,                 AV_OPT_TYPE_CONST,  {.i64=1},   0,    0, AF, "m" },
+     { "s", "overlap-save",             0,                 AV_OPT_TYPE_CONST,  {.i64=1},   0,    0, AF, "m" },
+     { NULL }
+ };
+@@ -769,14 +777,22 @@ AVFilter ff_af_adeclick = {
+ };
+ 
+ static const AVOption adeclip_options[] = {
+-    { "w", "set window size",          OFFSET(w),              AV_OPT_TYPE_DOUBLE, {.dbl=55},     10,  100, AF },
+-    { "o", "set window overlap",       OFFSET(overlap),        AV_OPT_TYPE_DOUBLE, {.dbl=75},     50,   95, AF },
+-    { "a", "set autoregression order", OFFSET(ar),             AV_OPT_TYPE_DOUBLE, {.dbl=8},       0,   25, AF },
+-    { "t", "set threshold",            OFFSET(threshold),      AV_OPT_TYPE_DOUBLE, {.dbl=10},      1,  100, AF },
+-    { "n", "set histogram size",       OFFSET(nb_hbins),       AV_OPT_TYPE_INT,    {.i64=1000},  100, 9999, AF },
+-    { "m", "set overlap method",       OFFSET(method),         AV_OPT_TYPE_INT,    {.i64=0},       0,    1, AF, "m" },
+-    { "a", "overlap-add",              0,                      AV_OPT_TYPE_CONST,  {.i64=0},       0,    0, AF, "m" },
+-    { "s", "overlap-save",             0,                      AV_OPT_TYPE_CONST,  {.i64=1},       0,    0, AF, "m" },
++    { "window", "set window size",     OFFSET(w),         AV_OPT_TYPE_DOUBLE, {.dbl=55},     10,  100, AF },
++    { "w", "set window size",          OFFSET(w),         AV_OPT_TYPE_DOUBLE, {.dbl=55},     10,  100, AF },
++    { "overlap", "set window overlap", OFFSET(overlap),   AV_OPT_TYPE_DOUBLE, {.dbl=75},     50,   95, AF },
++    { "o", "set window overlap",       OFFSET(overlap),   AV_OPT_TYPE_DOUBLE, {.dbl=75},     50,   95, AF },
++    { "arorder", "set autoregression order", OFFSET(ar),  AV_OPT_TYPE_DOUBLE, {.dbl=8},       0,   25, AF },
++    { "a", "set autoregression order", OFFSET(ar),        AV_OPT_TYPE_DOUBLE, {.dbl=8},       0,   25, AF },
++    { "threshold", "set threshold",    OFFSET(threshold), AV_OPT_TYPE_DOUBLE, {.dbl=10},      1,  100, AF },
++    { "t", "set threshold",            OFFSET(threshold), AV_OPT_TYPE_DOUBLE, {.dbl=10},      1,  100, AF },
++    { "hsize", "set histogram size",   OFFSET(nb_hbins),  AV_OPT_TYPE_INT,    {.i64=1000},  100, 9999, AF },
++    { "n", "set histogram size",       OFFSET(nb_hbins),  AV_OPT_TYPE_INT,    {.i64=1000},  100, 9999, AF },
++    { "method", "set overlap method",  OFFSET(method),    AV_OPT_TYPE_INT,    {.i64=0},       0,    1, AF, "m" },
++    { "m", "set overlap method",       OFFSET(method),    AV_OPT_TYPE_INT,    {.i64=0},       0,    1, AF, "m" },
++    { "add", "overlap-add",            0,                 AV_OPT_TYPE_CONST,  {.i64=0},       0,    0, AF, "m" },
++    { "a", "overlap-add",              0,                 AV_OPT_TYPE_CONST,  {.i64=0},       0,    0, AF, "m" },
++    { "save", "overlap-save",          0,                 AV_OPT_TYPE_CONST,  {.i64=1},       0,    0, AF, "m" },
++    { "s", "overlap-save",             0,                 AV_OPT_TYPE_CONST,  {.i64=1},       0,    0, AF, "m" },
+     { NULL }
+ };
+ 
+diff --git a/libavfilter/af_aexciter.c b/libavfilter/af_aexciter.c
+new file mode 100644
+index 0000000..f09c999
+--- /dev/null
++++ b/libavfilter/af_aexciter.c
+@@ -0,0 +1,317 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#include "libavutil/opt.h"
++#include "avfilter.h"
++#include "internal.h"
++#include "audio.h"
++
++typedef struct ChannelParams {
++    double blend_old, drive_old;
++    double rdrive, rbdr, kpa, kpb, kna, knb, ap,
++           an, imr, kc, srct, sq, pwrq;
++    double prev_med, prev_out;
++
++    double hp[5], lp[5];
++    double hw[4][2], lw[2][2];
++} ChannelParams;
++
++typedef struct AExciterContext {
++    const AVClass *class;
++
++    double level_in;
++    double level_out;
++    double amount;
++    double drive;
++    double blend;
++    double freq;
++    double ceil;
++    int listen;
++
++    ChannelParams *cp;
++} AExciterContext;
++
++#define OFFSET(x) offsetof(AExciterContext, x)
++#define A AV_OPT_FLAG_AUDIO_PARAM|AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
++
++static const AVOption aexciter_options[] = {
++    { "level_in",  "set level in",    OFFSET(level_in),  AV_OPT_TYPE_DOUBLE, {.dbl=1},           0, 64, A },
++    { "level_out", "set level out",   OFFSET(level_out), AV_OPT_TYPE_DOUBLE, {.dbl=1},           0, 64, A },
++    { "amount", "set amount",         OFFSET(amount),    AV_OPT_TYPE_DOUBLE, {.dbl=1},           0, 64, A },
++    { "drive", "set harmonics",       OFFSET(drive),     AV_OPT_TYPE_DOUBLE, {.dbl=8.5},       0.1, 10, A },
++    { "blend", "set blend harmonics", OFFSET(blend),     AV_OPT_TYPE_DOUBLE, {.dbl=0},         -10, 10, A },
++    { "freq", "set scope",            OFFSET(freq),      AV_OPT_TYPE_DOUBLE, {.dbl=7500},  2000, 12000, A },
++    { "ceil", "set ceiling",          OFFSET(ceil),      AV_OPT_TYPE_DOUBLE, {.dbl=9999},  9999, 20000, A },
++    { "listen", "enable listen mode", OFFSET(listen),    AV_OPT_TYPE_BOOL,   {.i64=0},        0,     1, A },
++    { NULL }
++};
++
++AVFILTER_DEFINE_CLASS(aexciter);
++
++static inline double M(double x)
++{
++    return (fabs(x) > 0.00000001) ? x : 0.0;
++}
++
++static inline double D(double x)
++{
++    x = fabs(x);
++
++    return (x > 0.00000001) ? sqrt(x) : 0.0;
++}
++
++static void set_params(ChannelParams *p,
++                       double blend, double drive,
++                       double srate, double freq,
++                       double ceil)
++{
++    double a0, a1, a2, b0, b1, b2, w0, alpha;
++
++    p->rdrive = 12.0 / drive;
++    p->rbdr = p->rdrive / (10.5 - blend) * 780.0 / 33.0;
++    p->kpa = D(2.0 * (p->rdrive*p->rdrive) - 1.0) + 1.0;
++    p->kpb = (2.0 - p->kpa) / 2.0;
++    p->ap = ((p->rdrive*p->rdrive) - p->kpa + 1.0) / 2.0;
++    p->kc = p->kpa / D(2.0 * D(2.0 * (p->rdrive*p->rdrive) - 1.0) - 2.0 * p->rdrive*p->rdrive);
++
++    p->srct = (0.1 * srate) / (0.1 * srate + 1.0);
++    p->sq = p->kc*p->kc + 1.0;
++    p->knb = -1.0 * p->rbdr / D(p->sq);
++    p->kna = 2.0 * p->kc * p->rbdr / D(p->sq);
++    p->an = p->rbdr*p->rbdr / p->sq;
++    p->imr = 2.0 * p->knb + D(2.0 * p->kna + 4.0 * p->an - 1.0);
++    p->pwrq = 2.0 / (p->imr + 1.0);
++
++    w0 = 2 * M_PI * freq / srate;
++    alpha = sin(w0) / (2. * 0.707);
++    a0 =   1 + alpha;
++    a1 =  -2 * cos(w0);
++    a2 =   1 - alpha;
++    b0 =  (1 + cos(w0)) / 2;
++    b1 = -(1 + cos(w0));
++    b2 =  (1 + cos(w0)) / 2;
++
++    p->hp[0] =-a1 / a0;
++    p->hp[1] =-a2 / a0;
++    p->hp[2] = b0 / a0;
++    p->hp[3] = b1 / a0;
++    p->hp[4] = b2 / a0;
++
++    w0 = 2 * M_PI * ceil / srate;
++    alpha = sin(w0) / (2. * 0.707);
++    a0 =  1 + alpha;
++    a1 = -2 * cos(w0);
++    a2 =  1 - alpha;
++    b0 = (1 - cos(w0)) / 2;
++    b1 =  1 - cos(w0);
++    b2 = (1 - cos(w0)) / 2;
++
++    p->lp[0] =-a1 / a0;
++    p->lp[1] =-a2 / a0;
++    p->lp[2] = b0 / a0;
++    p->lp[3] = b1 / a0;
++    p->lp[4] = b2 / a0;
++}
++
++static double bprocess(double in, const double *const c,
++                       double *w1, double *w2)
++{
++    double out = c[2] * in + *w1;
++
++
++
++
++    return out;
++}
++
++static double distortion_process(AExciterContext *s, ChannelParams *p, double in)
++{
++    double proc = in, med;
++
++    proc = bprocess(proc, p->hp, &p->hw[0][0], &p->hw[0][1]);
++    proc = bprocess(proc, p->hp, &p->hw[1][0], &p->hw[1][1]);
++
++    if (proc >= 0.0) {
++        med = (D(p->ap + proc * (p->kpa - proc)) + p->kpb) * p->pwrq;
++    } else {
++        med = (D(p->an - proc * (p->kna + proc)) + p->knb) * p->pwrq * -1.0;
++    }
++
++    proc = p->srct * (med - p->prev_med + p->prev_out);
++    p->prev_med = M(med);
++    p->prev_out = M(proc);
++
++    proc = bprocess(proc, p->hp, &p->hw[2][0], &p->hw[2][1]);
++    proc = bprocess(proc, p->hp, &p->hw[3][0], &p->hw[3][1]);
++
++    if (s->ceil >= 10000.) {
++        proc = bprocess(proc, p->lp, &p->lw[0][0], &p->lw[0][1]);
++        proc = bprocess(proc, p->lp, &p->lw[1][0], &p->lw[1][1]);
++    }
++
++    return proc;
++}
++
++static int filter_frame(AVFilterLink *inlink, AVFrame *in)
++{
++    AVFilterContext *ctx = inlink->dst;
++    AExciterContext *s = ctx->priv;
++    AVFilterLink *outlink = ctx->outputs[0];
++    AVFrame *out;
++    const double *src = (const double *)in->data[0];
++    const double level_in = s->level_in;
++    const double level_out = s->level_out;
++    const double amount = s->amount;
++    const double listen = 1.0 - s->listen;
++    double *dst;
++
++    if (av_frame_is_writable(in)) {
++        out = in;
++    } else {
++        out = ff_get_audio_buffer(inlink, in->nb_samples);
++        if (!out) {
++            av_frame_free(&in);
++            return AVERROR(ENOMEM);
++        }
++        av_frame_copy_props(out, in);
++    }
++
++    dst = (double *)out->data[0];
++    for (int n = 0; n < in->nb_samples; n++) {
++        for (int c = 0; c < inlink->channels; c++) {
++            double sample = src[c] * level_in;
++
++            sample = distortion_process(s, &s->cp[c], sample);
++            sample = sample * amount + listen * src[c];
++
++            sample *= level_out;
++            if (ctx->is_disabled)
++                dst[c] = src[c];
++            else
++                dst[c] = sample;
++        }
++
++        src += inlink->channels;
++        dst += inlink->channels;
++    }
++
++    if (in != out)
++        av_frame_free(&in);
++
++    return ff_filter_frame(outlink, out);
++}
++
++static int query_formats(AVFilterContext *ctx)
++{
++    AVFilterFormats *formats;
++    AVFilterChannelLayouts *layouts;
++    static const enum AVSampleFormat sample_fmts[] = {
++        AV_SAMPLE_FMT_DBL,
++        AV_SAMPLE_FMT_NONE
++    };
++    int ret;
++
++    layouts = ff_all_channel_counts();
++    if (!layouts)
++        return AVERROR(ENOMEM);
++    ret = ff_set_common_channel_layouts(ctx, layouts);
++    if (ret < 0)
++        return ret;
++
++    formats = ff_make_format_list(sample_fmts);
++    if (!formats)
++        return AVERROR(ENOMEM);
++    ret = ff_set_common_formats(ctx, formats);
++    if (ret < 0)
++        return ret;
++
++    formats = ff_all_samplerates();
++    if (!formats)
++        return AVERROR(ENOMEM);
++    return ff_set_common_samplerates(ctx, formats);
++}
++
++static av_cold void uninit(AVFilterContext *ctx)
++{
++    AExciterContext *s = ctx->priv;
++
++    av_freep(&s->cp);
++}
++
++static int config_input(AVFilterLink *inlink)
++{
++    AVFilterContext *ctx = inlink->dst;
++    AExciterContext *s = ctx->priv;
++
++    if (!s->cp)
++        s->cp = av_calloc(inlink->channels, sizeof(*s->cp));
++    if (!s->cp)
++        return AVERROR(ENOMEM);
++
++    for (int i = 0; i < inlink->channels; i++)
++        set_params(&s->cp[i], s->blend, s->drive, inlink->sample_rate,
++                   s->freq, s->ceil);
++
++    return 0;
++}
++
++static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
++                           char *res, int res_len, int flags)
++{
++    AVFilterLink *inlink = ctx->inputs[0];
++    int ret;
++
++    ret = ff_filter_process_command(ctx, cmd, args, res, res_len, flags);
++    if (ret < 0)
++        return ret;
++
++    return config_input(inlink);
++}
++
++static const AVFilterPad avfilter_af_aexciter_inputs[] = {
++    {
++        .name         = "default",
++        .type         = AVMEDIA_TYPE_AUDIO,
++        .config_props = config_input,
++        .filter_frame = filter_frame,
++    },
++    { NULL }
++};
++
++static const AVFilterPad avfilter_af_aexciter_outputs[] = {
++    {
++        .name = "default",
++        .type = AVMEDIA_TYPE_AUDIO,
++    },
++    { NULL }
++};
++
++AVFilter ff_af_aexciter = {
++    .name          = "aexciter",
++    .description   = NULL_IF_CONFIG_SMALL("Enhance high frequency part of audio."),
++    .priv_size     = sizeof(AExciterContext),
++    .priv_class    = &aexciter_class,
++    .uninit        = uninit,
++    .query_formats = query_formats,
++    .inputs        = avfilter_af_aexciter_inputs,
++    .outputs       = avfilter_af_aexciter_outputs,
++    .process_command = process_command,
++    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL,
++};
+diff --git a/libavfilter/af_arnndn.c b/libavfilter/af_arnndn.c
+index d38daca..049865b 100644
+--- a/libavfilter/af_arnndn.c
++++ b/libavfilter/af_arnndn.c
+@@ -185,9 +185,9 @@ static void rnnoise_model_free(RNNModel *model)
+     av_free(model);
+ }
+ 
+-static RNNModel *rnnoise_model_from_file(FILE *f)
++static int rnnoise_model_from_file(FILE *f, RNNModel **rnn)
+ {
+-    RNNModel *ret;
++    RNNModel *ret = NULL;
+     DenseLayer *input_dense;
+     GRULayer *vad_gru;
+     GRULayer *noise_gru;
+@@ -197,17 +197,17 @@ static RNNModel *rnnoise_model_from_file(FILE *f)
+     int in;
+ 
+     if (fscanf(f, "rnnoise-nu model file version %d\n", &in) != 1 || in != 1)
+-        return NULL;
++        return AVERROR_INVALIDDATA;
+ 
+     ret = av_calloc(1, sizeof(RNNModel));
+     if (!ret)
+-        return NULL;
++        return AVERROR(ENOMEM);
+ 
+ #define ALLOC_LAYER(type, name) \
+     name = av_calloc(1, sizeof(type)); \
+     if (!name) { \
+         rnnoise_model_free(ret); \
+-        return NULL; \
++        return AVERROR(ENOMEM); \
+     } \
+     ret->name = name
+ 
+@@ -221,7 +221,7 @@ static RNNModel *rnnoise_model_from_file(FILE *f)
+ #define INPUT_VAL(name) do { \
+     if (fscanf(f, "%d", &in) != 1 || in < 0 || in > 128) { \
+         rnnoise_model_free(ret); \
+-        return NULL; \
++        return AVERROR(EINVAL); \
+     } \
+     name = in; \
+     } while (0)
+@@ -245,13 +245,13 @@ static RNNModel *rnnoise_model_from_file(FILE *f)
+     float *values = av_calloc((len), sizeof(float)); \
+     if (!values) { \
+         rnnoise_model_free(ret); \
+-        return NULL; \
++        return AVERROR(ENOMEM); \
+     } \
+     name = values; \
+     for (int i = 0; i < (len); i++) { \
+         if (fscanf(f, "%d", &in) != 1) { \
+             rnnoise_model_free(ret); \
+-            return NULL; \
++            return AVERROR(EINVAL); \
+         } \
+         values[i] = in; \
+     } \
+@@ -261,7 +261,7 @@ static RNNModel *rnnoise_model_from_file(FILE *f)
+     float *values = av_calloc(FFALIGN((len0), 4) * FFALIGN((len1), 4) * (len2), sizeof(float)); \
+     if (!values) { \
+         rnnoise_model_free(ret); \
+-        return NULL; \
++        return AVERROR(ENOMEM); \
+     } \
+     name = values; \
+     for (int k = 0; k < (len0); k++) { \
+@@ -269,7 +269,7 @@ static RNNModel *rnnoise_model_from_file(FILE *f)
+             for (int j = 0; j < (len1); j++) { \
+                 if (fscanf(f, "%d", &in) != 1) { \
+                     rnnoise_model_free(ret); \
+-                    return NULL; \
++                    return AVERROR(EINVAL); \
+                 } \
+                 values[j * (len2) * FFALIGN((len0), 4) + i * FFALIGN((len0), 4) + k] = in; \
+             } \
+@@ -277,13 +277,24 @@ static RNNModel *rnnoise_model_from_file(FILE *f)
+     } \
+     } while (0)
+ 
++#define NEW_LINE() do { \
++    int c; \
++    while ((c = fgetc(f)) != EOF) { \
++        if (c == '\n') \
++        break; \
++    } \
++    } while (0)
++
+ #define INPUT_DENSE(name) do { \
+     INPUT_VAL(name->nb_inputs); \
+     INPUT_VAL(name->nb_neurons); \
+     ret->name ## _size = name->nb_neurons; \
+     INPUT_ACTIVATION(name->activation); \
++    NEW_LINE(); \
+     INPUT_ARRAY(name->input_weights, name->nb_inputs * name->nb_neurons); \
++    NEW_LINE(); \
+     INPUT_ARRAY(name->bias, name->nb_neurons); \
++    NEW_LINE(); \
+     } while (0)
+ 
+ #define INPUT_GRU(name) do { \
+@@ -291,9 +302,13 @@ static RNNModel *rnnoise_model_from_file(FILE *f)
+     INPUT_VAL(name->nb_neurons); \
+     ret->name ## _size = name->nb_neurons; \
+     INPUT_ACTIVATION(name->activation); \
++    NEW_LINE(); \
+     INPUT_ARRAY3(name->input_weights, name->nb_inputs, name->nb_neurons, 3); \
++    NEW_LINE(); \
+     INPUT_ARRAY3(name->recurrent_weights, name->nb_neurons, name->nb_neurons, 3); \
++    NEW_LINE(); \
+     INPUT_ARRAY(name->bias, name->nb_neurons * 3); \
++    NEW_LINE(); \
+     } while (0)
+ 
+     INPUT_DENSE(input_dense);
+@@ -305,10 +320,12 @@ static RNNModel *rnnoise_model_from_file(FILE *f)
+ 
+     if (vad_output->nb_neurons != 1) {
+         rnnoise_model_free(ret);
+-        return NULL;
++        return AVERROR(EINVAL);
+     }
+ 
+-    return ret;
++
++
++    return 0;
+ }
+ 
+ static int query_formats(AVFilterContext *ctx)
+@@ -1468,18 +1485,21 @@ static int activate(AVFilterContext *ctx)
+ static int open_model(AVFilterContext *ctx, RNNModel **model)
+ {
+     AudioRNNContext *s = ctx->priv;
++    int ret;
+     FILE *f;
+ 
+     if (!s->model_name)
+         return AVERROR(EINVAL);
+     f = av_fopen_utf8(s->model_name, "r");
+-    if (!f)
++    if (!f) {
++        av_log(ctx, AV_LOG_ERROR, "Failed to open model file: %s\n", s->model_name);
+         return AVERROR(EINVAL);
++    }
+ 
+-    *model = rnnoise_model_from_file(f);
++    ret = rnnoise_model_from_file(f, model);
+     fclose(f);
+-    if (!*model)
+-        return AVERROR(EINVAL);
++    if (!*model || ret < 0)
++        return ret;
+ 
+     return 0;
+ }
+diff --git a/libavfilter/allfilters.c b/libavfilter/allfilters.c
+index 73d859c..bc40cc0 100644
+--- a/libavfilter/allfilters.c
++++ b/libavfilter/allfilters.c
+@@ -39,6 +39,7 @@ extern AVFilter ff_af_aderivative;
+ extern AVFilter ff_af_aecho;
+ extern AVFilter ff_af_aemphasis;
+ extern AVFilter ff_af_aeval;
++extern AVFilter ff_af_aexciter;
+ extern AVFilter ff_af_afade;
+ extern AVFilter ff_af_afftdn;
+ extern AVFilter ff_af_afftfilt;
+@@ -243,6 +244,7 @@ extern AVFilter ff_vf_eq;
+ extern AVFilter ff_vf_erosion;
+ extern AVFilter ff_vf_erosion_opencl;
+ extern AVFilter ff_vf_estdif;
++extern AVFilter ff_vf_exposure;
+ extern AVFilter ff_vf_extractplanes;
+ extern AVFilter ff_vf_fade;
+ extern AVFilter ff_vf_fftdnoiz;
+diff --git a/libavfilter/version.h b/libavfilter/version.h
+index 4392419..47d73f8 100644
+--- a/libavfilter/version.h
++++ b/libavfilter/version.h
+@@ -30,7 +30,7 @@
+ #include "libavutil/version.h"
+ 
+ #define LIBAVFILTER_VERSION_MAJOR   7
+-#define LIBAVFILTER_VERSION_MINOR 103
++#define LIBAVFILTER_VERSION_MINOR 105
+ #define LIBAVFILTER_VERSION_MICRO 100
+ 
+ 
+diff --git a/libavfilter/vf_curves.c b/libavfilter/vf_curves.c
+index 883cc1c..3524fef 100644
+--- a/libavfilter/vf_curves.c
++++ b/libavfilter/vf_curves.c
+@@ -69,8 +69,10 @@ typedef struct CurvesContext {
+     uint8_t rgba_map[4];
+     int step;
+     char *plot_filename;
++    int saved_plot;
+     int is_16bit;
+     int depth;
++    int parsed_psfile;
+ 
+     int (*filter_slice)(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs);
+ } CurvesContext;
+@@ -80,20 +82,20 @@ typedef struct ThreadData {
+ } ThreadData;
+ 
+ #define OFFSET(x) offsetof(CurvesContext, x)
+-#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
++#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
+ static const AVOption curves_options[] = {
+     { "preset", "select a color curves preset", OFFSET(preset), AV_OPT_TYPE_INT, {.i64=PRESET_NONE}, PRESET_NONE, NB_PRESETS-1, FLAGS, "preset_name" },
+-        { "none",               NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_NONE},                 INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "color_negative",     NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_COLOR_NEGATIVE},       INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "cross_process",      NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_CROSS_PROCESS},        INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "darker",             NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_DARKER},               INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "increase_contrast",  NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_INCREASE_CONTRAST},    INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "lighter",            NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_LIGHTER},              INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "linear_contrast",    NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_LINEAR_CONTRAST},      INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "medium_contrast",    NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_MEDIUM_CONTRAST},      INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "negative",           NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_NEGATIVE},             INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "strong_contrast",    NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_STRONG_CONTRAST},      INT_MIN, INT_MAX, FLAGS, "preset_name" },
+-        { "vintage",            NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_VINTAGE},              INT_MIN, INT_MAX, FLAGS, "preset_name" },
++        { "none",               NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_NONE},                 0, 0, FLAGS, "preset_name" },
++        { "color_negative",     NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_COLOR_NEGATIVE},       0, 0, FLAGS, "preset_name" },
++        { "cross_process",      NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_CROSS_PROCESS},        0, 0, FLAGS, "preset_name" },
++        { "darker",             NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_DARKER},               0, 0, FLAGS, "preset_name" },
++        { "increase_contrast",  NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_INCREASE_CONTRAST},    0, 0, FLAGS, "preset_name" },
++        { "lighter",            NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_LIGHTER},              0, 0, FLAGS, "preset_name" },
++        { "linear_contrast",    NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_LINEAR_CONTRAST},      0, 0, FLAGS, "preset_name" },
++        { "medium_contrast",    NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_MEDIUM_CONTRAST},      0, 0, FLAGS, "preset_name" },
++        { "negative",           NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_NEGATIVE},             0, 0, FLAGS, "preset_name" },
++        { "strong_contrast",    NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_STRONG_CONTRAST},      0, 0, FLAGS, "preset_name" },
++        { "vintage",            NULL, 0, AV_OPT_TYPE_CONST, {.i64=PRESET_VINTAGE},              0, 0, FLAGS, "preset_name" },
+     { "master","set master points coordinates",OFFSET(comp_points_str[NB_COMP]), AV_OPT_TYPE_STRING, {.str=NULL}, .flags = FLAGS },
+     { "m",     "set master points coordinates",OFFSET(comp_points_str[NB_COMP]), AV_OPT_TYPE_STRING, {.str=NULL}, .flags = FLAGS },
+     { "red",   "set red points coordinates",   OFFSET(comp_points_str[0]), AV_OPT_TYPE_STRING, {.str=NULL}, .flags = FLAGS },
+@@ -486,10 +488,11 @@ static av_cold int curves_init(AVFilterContext *ctx)
+         }
+     }
+ 
+-    if (curves->psfile) {
++    if (curves->psfile && !curves->parsed_psfile) {
+         ret = parse_psfile(ctx, curves->psfile);
+         if (ret < 0)
+             return ret;
++        curves->parsed_psfile = 1;
+     }
+ 
+     if (curves->preset != PRESET_NONE) {
+@@ -504,6 +507,7 @@ static av_cold int curves_init(AVFilterContext *ctx)
+         SET_COMP_IF_NOT_SET(1, g);
+         SET_COMP_IF_NOT_SET(2, b);
+         SET_COMP_IF_NOT_SET(3, master);
++        curves->preset = PRESET_NONE;
+     }
+ 
+     return 0;
+@@ -664,7 +668,8 @@ static int config_input(AVFilterLink *inlink)
+     curves->filter_slice = desc->flags & AV_PIX_FMT_FLAG_PLANAR ? filter_slice_planar : filter_slice_packed;
+ 
+     for (i = 0; i < NB_COMP + 1; i++) {
+-        curves->graph[i] = av_mallocz_array(curves->lut_size, sizeof(*curves->graph[0]));
++        if (!curves->graph[i])
++            curves->graph[i] = av_mallocz_array(curves->lut_size, sizeof(*curves->graph[0]));
+         if (!curves->graph[i])
+             return AVERROR(ENOMEM);
+         ret = parse_points_str(ctx, comp_points + i, curves->comp_points_str[i], curves->lut_size);
+@@ -699,8 +704,10 @@ static int config_input(AVFilterLink *inlink)
+         }
+     }
+ 
+-    if (curves->plot_filename)
++    if (curves->plot_filename && !curves->saved_plot) {
+         dump_curves(curves->plot_filename, curves->graph, comp_points, curves->lut_size);
++        curves->saved_plot = 1;
++    }
+ 
+     for (i = 0; i < NB_COMP + 1; i++) {
+         struct keypoint *point = comp_points[i];
+@@ -743,6 +750,42 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
+     return ff_filter_frame(outlink, out);
+ }
+ 
++static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
++                           char *res, int res_len, int flags)
++{
++    CurvesContext *curves = ctx->priv;
++    int ret;
++
++    if (!strcmp(cmd, "plot")) {
++        curves->saved_plot = 0;
++    } else if (!strcmp(cmd, "all") || !strcmp(cmd, "preset") || !strcmp(cmd, "psfile")) {
++        if (!strcmp(cmd, "psfile"))
++            curves->parsed_psfile = 0;
++        av_freep(&curves->comp_points_str_all);
++        av_freep(&curves->comp_points_str[0]);
++        av_freep(&curves->comp_points_str[1]);
++        av_freep(&curves->comp_points_str[2]);
++        av_freep(&curves->comp_points_str[NB_COMP]);
++    } else if (!strcmp(cmd, "red") || !strcmp(cmd, "r")) {
++        av_freep(&curves->comp_points_str[0]);
++    } else if (!strcmp(cmd, "green") || !strcmp(cmd, "g")) {
++        av_freep(&curves->comp_points_str[1]);
++    } else if (!strcmp(cmd, "blue") || !strcmp(cmd, "b")) {
++        av_freep(&curves->comp_points_str[2]);
++    } else if (!strcmp(cmd, "master") || !strcmp(cmd, "m")) {
++        av_freep(&curves->comp_points_str[NB_COMP]);
++    }
++
++    ret = ff_filter_process_command(ctx, cmd, args, res, res_len, flags);
++    if (ret < 0)
++        return ret;
++
++    ret = curves_init(ctx);
++    if (ret < 0)
++        return ret;
++    return config_input(ctx->inputs[0]);
++}
++
+ static av_cold void curves_uninit(AVFilterContext *ctx)
+ {
+     int i;
+@@ -781,4 +824,5 @@ AVFilter ff_vf_curves = {
+     .outputs       = curves_outputs,
+     .priv_class    = &curves_class,
+     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
++    .process_command = process_command,
+ };
+diff --git a/libavfilter/vf_datascope.c b/libavfilter/vf_datascope.c
+index a561cc5..440cf57 100644
+--- a/libavfilter/vf_datascope.c
++++ b/libavfilter/vf_datascope.c
+@@ -61,18 +61,18 @@ typedef struct DatascopeContext {
+ static const AVOption datascope_options[] = {
+     { "size", "set output size", OFFSET(ow),   AV_OPT_TYPE_IMAGE_SIZE, {.str="hd720"}, 0, 0, FLAGS },
+     { "s",    "set output size", OFFSET(ow),   AV_OPT_TYPE_IMAGE_SIZE, {.str="hd720"}, 0, 0, FLAGS },
+-    { "x",    "set x offset", OFFSET(x),    AV_OPT_TYPE_INT, {.i64=0}, 0, INT_MAX, FLAGS },
+-    { "y",    "set y offset", OFFSET(y),    AV_OPT_TYPE_INT, {.i64=0}, 0, INT_MAX, FLAGS },
+-    { "mode", "set scope mode", OFFSET(mode), AV_OPT_TYPE_INT, {.i64=0}, 0, 2, FLAGS, "mode" },
+-    {   "mono",   NULL, 0, AV_OPT_TYPE_CONST, {.i64=0}, 0, 0, FLAGS, "mode" },
+-    {   "color",  NULL, 0, AV_OPT_TYPE_CONST, {.i64=1}, 0, 0, FLAGS, "mode" },
+-    {   "color2", NULL, 0, AV_OPT_TYPE_CONST, {.i64=2}, 0, 0, FLAGS, "mode" },
+-    { "axis",    "draw column/row numbers", OFFSET(axis), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGS },
+-    { "opacity", "set background opacity", OFFSET(opacity), AV_OPT_TYPE_FLOAT, {.dbl=0.75}, 0, 1, FLAGS },
+-    { "format", "set display number format", OFFSET(dformat), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGS, "format" },
+-    {   "hex",  NULL, 0, AV_OPT_TYPE_CONST, {.i64=0}, 0, 0, FLAGS, "format" },
+-    {   "dec",  NULL, 0, AV_OPT_TYPE_CONST, {.i64=1}, 0, 0, FLAGS, "format" },
+-    { "components", "set components to display", OFFSET(components), AV_OPT_TYPE_INT, {.i64=15}, 1, 15, FLAGS },
++    { "x",    "set x offset", OFFSET(x),    AV_OPT_TYPE_INT, {.i64=0}, 0, INT_MAX, FLAGSR },
++    { "y",    "set y offset", OFFSET(y),    AV_OPT_TYPE_INT, {.i64=0}, 0, INT_MAX, FLAGSR },
++    { "mode", "set scope mode", OFFSET(mode), AV_OPT_TYPE_INT, {.i64=0}, 0, 2, FLAGSR, "mode" },
++    {   "mono",   NULL, 0, AV_OPT_TYPE_CONST, {.i64=0}, 0, 0, FLAGSR, "mode" },
++    {   "color",  NULL, 0, AV_OPT_TYPE_CONST, {.i64=1}, 0, 0, FLAGSR, "mode" },
++    {   "color2", NULL, 0, AV_OPT_TYPE_CONST, {.i64=2}, 0, 0, FLAGSR, "mode" },
++    { "axis",    "draw column/row numbers", OFFSET(axis), AV_OPT_TYPE_BOOL, {.i64=0}, 0, 1, FLAGSR },
++    { "opacity", "set background opacity", OFFSET(opacity), AV_OPT_TYPE_FLOAT, {.dbl=0.75}, 0, 1, FLAGSR },
++    { "format", "set display number format", OFFSET(dformat), AV_OPT_TYPE_INT, {.i64=0}, 0, 1, FLAGSR, "format" },
++    {   "hex",  NULL, 0, AV_OPT_TYPE_CONST, {.i64=0}, 0, 0, FLAGSR, "format" },
++    {   "dec",  NULL, 0, AV_OPT_TYPE_CONST, {.i64=1}, 0, 0, FLAGSR, "format" },
++    { "components", "set components to display", OFFSET(components), AV_OPT_TYPE_INT, {.i64=15}, 1, 15, FLAGSR },
+     { NULL }
+ };
+ 
+@@ -419,6 +419,18 @@ static int config_output(AVFilterLink *outlink)
+     return 0;
+ }
+ 
++static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
++                           char *res, int res_len, int flags)
++{
++    int ret;
++
++    ret = ff_filter_process_command(ctx, cmd, args, res, res_len, flags);
++    if (ret < 0)
++        return ret;
++
++    return config_input(ctx->inputs[0]);
++}
++
+ static const AVFilterPad inputs[] = {
+     {
+         .name         = "default",
+@@ -447,6 +459,7 @@ AVFilter ff_vf_datascope = {
+     .inputs        = inputs,
+     .outputs       = outputs,
+     .flags         = AVFILTER_FLAG_SLICE_THREADS,
++    .process_command = process_command,
+ };
+ 
+ typedef struct PixscopeContext {
+diff --git a/libavfilter/vf_deband.c b/libavfilter/vf_deband.c
+index 330792f..c05225d 100644
+--- a/libavfilter/vf_deband.c
++++ b/libavfilter/vf_deband.c
+@@ -49,7 +49,7 @@ typedef struct DebandContext {
+ } DebandContext;
+ 
+ #define OFFSET(x) offsetof(DebandContext, x)
+-#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
++#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
+ 
+ static const AVOption deband_options[] = {
+     { "1thr",      "set 1st plane threshold", OFFSET(threshold[0]), AV_OPT_TYPE_FLOAT, {.dbl=0.02},  0.00003,     0.5, FLAGS },
+@@ -117,7 +117,7 @@ static int query_formats(AVFilterContext *ctx)
+ 
+ static float frand(int x, int y)
+ {
+-    const float r = sinf(x * 12.9898 + y * 78.233) * 43758.545;
++    const float r = sinf(x * 12.9898f + y * 78.233f) * 43758.545f;
+ 
+     return r - floorf(r);
+ }
+@@ -389,8 +389,10 @@ static int config_input(AVFilterLink *inlink)
+     s->thr[2] = ((1 << desc->comp[2].depth) - 1) * s->threshold[2];
+     s->thr[3] = ((1 << desc->comp[3].depth) - 1) * s->threshold[3];
+ 
+-    s->x_pos = av_malloc(s->planewidth[0] * s->planeheight[0] * sizeof(*s->x_pos));
+-    s->y_pos = av_malloc(s->planewidth[0] * s->planeheight[0] * sizeof(*s->y_pos));
++    if (!s->x_pos)
++        s->x_pos = av_malloc(s->planewidth[0] * s->planeheight[0] * sizeof(*s->x_pos));
++    if (!s->y_pos)
++        s->y_pos = av_malloc(s->planewidth[0] * s->planeheight[0] * sizeof(*s->y_pos));
+     if (!s->x_pos || !s->y_pos)
+         return AVERROR(ENOMEM);
+ 
+@@ -432,6 +434,17 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
+     return ff_filter_frame(outlink, out);
+ }
+ 
++static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
++                           char *res, int res_len, int flags)
++{
++    int ret = ff_filter_process_command(ctx, cmd, args, res, res_len, flags);
++
++    if (ret < 0)
++        return ret;
++
++    return config_input(ctx->inputs[0]);
++}
++
+ static av_cold void uninit(AVFilterContext *ctx)
+ {
+     DebandContext *s = ctx->priv;
+@@ -468,4 +481,5 @@ AVFilter ff_vf_deband = {
+     .inputs        = avfilter_vf_deband_inputs,
+     .outputs       = avfilter_vf_deband_outputs,
+     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
++    .process_command = process_command,
+ };
+diff --git a/libavfilter/vf_exposure.c b/libavfilter/vf_exposure.c
+new file mode 100644
+index 0000000..b7ad075
+--- /dev/null
++++ b/libavfilter/vf_exposure.c
+@@ -0,0 +1,144 @@
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++
++#include <float.h>
++
++#include "libavutil/opt.h"
++#include "libavutil/imgutils.h"
++#include "avfilter.h"
++#include "formats.h"
++#include "internal.h"
++#include "video.h"
++
++typedef struct ExposureContext {
++    const AVClass *class;
++
++    float exposure;
++    float black;
++
++    float scale;
++    int (*do_slice)(AVFilterContext *s, void *arg,
++                    int jobnr, int nb_jobs);
++} ExposureContext;
++
++static int exposure_slice(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
++{
++    ExposureContext *s = ctx->priv;
++    AVFrame *frame = arg;
++    const int width = frame->width;
++    const int height = frame->height;
++    const int slice_start = (height * jobnr) / nb_jobs;
++    const int slice_end = (height * (jobnr + 1)) / nb_jobs;
++    const float black = s->black;
++    const float scale = s->scale;
++
++    for (int p = 0; p < 3; p++) {
++        const int linesize = frame->linesize[p] / 4;
++        float *ptr = (float *)frame->data[p] + slice_start * linesize;
++        for (int y = slice_start; y < slice_end; y++) {
++            for (int x = 0; x < width; x++)
++                ptr[x] = (ptr[x] - black) * scale;
++
++            ptr += linesize;
++        }
++    }
++
++    return 0;
++}
++
++static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
++{
++    AVFilterContext *ctx = inlink->dst;
++    ExposureContext *s = ctx->priv;
++
++    s->scale = 1.f / (exp2f(-s->exposure) - s->black);
++    ctx->internal->execute(ctx, s->do_slice, frame, NULL,
++                           FFMIN(frame->height, ff_filter_get_nb_threads(ctx)));
++
++    return ff_filter_frame(ctx->outputs[0], frame);
++}
++
++static av_cold int query_formats(AVFilterContext *ctx)
++{
++    static const enum AVPixelFormat pixel_fmts[] = {
++        AV_PIX_FMT_GBRPF32, AV_PIX_FMT_GBRAPF32,
++        AV_PIX_FMT_NONE
++    };
++
++    AVFilterFormats *formats = NULL;
++
++    formats = ff_make_format_list(pixel_fmts);
++    if (!formats)
++        return AVERROR(ENOMEM);
++
++    return ff_set_common_formats(ctx, formats);
++}
++
++static av_cold int config_input(AVFilterLink *inlink)
++{
++    AVFilterContext *ctx = inlink->dst;
++    ExposureContext *s = ctx->priv;
++
++    s->do_slice = exposure_slice;
++
++    return 0;
++}
++
++static const AVFilterPad exposure_inputs[] = {
++    {
++        .name           = "default",
++        .type           = AVMEDIA_TYPE_VIDEO,
++        .needs_writable = 1,
++        .filter_frame   = filter_frame,
++        .config_props   = config_input,
++    },
++    { NULL }
++};
++
++static const AVFilterPad exposure_outputs[] = {
++    {
++        .name = "default",
++        .type = AVMEDIA_TYPE_VIDEO,
++    },
++    { NULL }
++};
++
++#define OFFSET(x) offsetof(ExposureContext, x)
++#define VF AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
++
++static const AVOption exposure_options[] = {
++    { "exposure", "set the exposure correction",    OFFSET(exposure), AV_OPT_TYPE_FLOAT, {.dbl=0}, -3, 3, VF },
++    { "black",    "set the black level correction", OFFSET(black),    AV_OPT_TYPE_FLOAT, {.dbl=0}, -1, 1, VF },
++    { NULL }
++};
++
++AVFILTER_DEFINE_CLASS(exposure);
++
++AVFilter ff_vf_exposure = {
++    .name          = "exposure",
++    .description   = NULL_IF_CONFIG_SMALL("Adjust exposure of the video stream."),
++    .priv_size     = sizeof(ExposureContext),
++    .priv_class    = &exposure_class,
++    .query_formats = query_formats,
++    .inputs        = exposure_inputs,
++    .outputs       = exposure_outputs,
++    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
++    .process_command = ff_filter_process_command,
++};
+diff --git a/libavfilter/vf_framepack.c b/libavfilter/vf_framepack.c
+index b5d877c..3da80cf 100644
+--- a/libavfilter/vf_framepack.c
++++ b/libavfilter/vf_framepack.c
+@@ -44,6 +44,7 @@
+ typedef struct FramepackContext {
+     const AVClass *class;
+ 
++    int depth;
+     const AVPixFmtDescriptor *pix_desc; ///< agreed pixel format
+ 
+     enum AVStereo3DType format;         ///< frame pack type output
+@@ -52,9 +53,29 @@ typedef struct FramepackContext {
+ } FramepackContext;
+ 
+ static const enum AVPixelFormat formats_supported[] = {
+-    AV_PIX_FMT_YUV420P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV444P,
+-    AV_PIX_FMT_YUV410P,  AV_PIX_FMT_YUVA420P, AV_PIX_FMT_YUVJ420P,
+-    AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVJ440P,
++    AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAY9,
++    AV_PIX_FMT_GRAY10, AV_PIX_FMT_GRAY12, AV_PIX_FMT_GRAY14,
++    AV_PIX_FMT_GRAY16,
++    AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
++    AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
++    AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV444P,
++    AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P,
++    AV_PIX_FMT_YUVJ440P, AV_PIX_FMT_YUVJ444P,
++    AV_PIX_FMT_YUVJ411P,
++    AV_PIX_FMT_YUV420P9, AV_PIX_FMT_YUV422P9, AV_PIX_FMT_YUV444P9,
++    AV_PIX_FMT_YUV420P10, AV_PIX_FMT_YUV422P10, AV_PIX_FMT_YUV444P10,
++    AV_PIX_FMT_YUV440P10,
++    AV_PIX_FMT_YUV444P12, AV_PIX_FMT_YUV422P12, AV_PIX_FMT_YUV420P12,
++    AV_PIX_FMT_YUV440P12,
++    AV_PIX_FMT_YUV444P14, AV_PIX_FMT_YUV422P14, AV_PIX_FMT_YUV420P14,
++    AV_PIX_FMT_YUV420P16, AV_PIX_FMT_YUV422P16, AV_PIX_FMT_YUV444P16,
++    AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRP9, AV_PIX_FMT_GBRP10,
++    AV_PIX_FMT_GBRP12, AV_PIX_FMT_GBRP14, AV_PIX_FMT_GBRP16,
++    AV_PIX_FMT_YUVA420P,  AV_PIX_FMT_YUVA422P,   AV_PIX_FMT_YUVA444P,
++    AV_PIX_FMT_YUVA444P9, AV_PIX_FMT_YUVA444P10, AV_PIX_FMT_YUVA444P12, AV_PIX_FMT_YUVA444P16,
++    AV_PIX_FMT_YUVA422P9, AV_PIX_FMT_YUVA422P10, AV_PIX_FMT_YUVA422P12, AV_PIX_FMT_YUVA422P16,
++    AV_PIX_FMT_YUVA420P9, AV_PIX_FMT_YUVA420P10, AV_PIX_FMT_YUVA420P16,
++    AV_PIX_FMT_GBRAP,     AV_PIX_FMT_GBRAP10,    AV_PIX_FMT_GBRAP12,    AV_PIX_FMT_GBRAP16,
+     AV_PIX_FMT_NONE
+ };
+ 
+@@ -113,6 +134,7 @@ static int config_output(AVFilterLink *outlink)
+     s->pix_desc = av_pix_fmt_desc_get(outlink->format);
+     if (!s->pix_desc)
+         return AVERROR_BUG;
++    s->depth = s->pix_desc->comp[0].depth;
+ 
+     // modify output properties as needed
+     switch (s->format) {
+@@ -149,7 +171,7 @@ static void horizontal_frame_pack(AVFilterLink *outlink,
+     FramepackContext *s = ctx->priv;
+     int i, plane;
+ 
+-    if (interleaved) {
++    if (interleaved && s->depth <= 8) {
+         const uint8_t *leftp  = s->input_views[LEFT]->data[0];
+         const uint8_t *rightp = s->input_views[RIGHT]->data[0];
+         uint8_t *dstp         = out->data[0];
+@@ -184,17 +206,53 @@ static void horizontal_frame_pack(AVFilterLink *outlink,
+                 }
+             }
+         }
++    } else if (interleaved && s->depth > 8) {
++        const uint16_t *leftp  = (const uint16_t *)s->input_views[LEFT]->data[0];
++        const uint16_t *rightp = (const uint16_t *)s->input_views[RIGHT]->data[0];
++        uint16_t *dstp         = (uint16_t *)out->data[0];
++        int length = out->width / 2;
++        int lines  = out->height;
++
++        for (plane = 0; plane < s->pix_desc->nb_components; plane++) {
++            if (plane == 1 || plane == 2) {
++                length = AV_CEIL_RSHIFT(out->width / 2, s->pix_desc->log2_chroma_w);
++                lines  = AV_CEIL_RSHIFT(out->height,    s->pix_desc->log2_chroma_h);
++            }
++            for (i = 0; i < lines; i++) {
++                int j;
++                leftp  = (const uint16_t *)s->input_views[LEFT]->data[plane] +
++                         s->input_views[LEFT]->linesize[plane] * i / 2;
++                rightp = (const uint16_t *)s->input_views[RIGHT]->data[plane] +
++                         s->input_views[RIGHT]->linesize[plane] * i / 2;
++                dstp   = (uint16_t *)out->data[plane] + out->linesize[plane] * i / 2;
++                for (j = 0; j < length; j++) {
++
++                    if ((s->pix_desc->log2_chroma_w ||
++                         s->pix_desc->log2_chroma_h) &&
++                        (plane == 1 || plane == 2)) {
++
++
++                    } else {
++
++
++                    }
++                    leftp += 1;
++                    rightp += 1;
++                }
++            }
++        }
+     } else {
+         for (i = 0; i < 2; i++) {
++            const int psize = 1 + (s->depth > 8);
+             const uint8_t *src[4];
+             uint8_t *dst[4];
+-            int sub_w = s->input_views[i]->width >> s->pix_desc->log2_chroma_w;
++            int sub_w = psize * s->input_views[i]->width >> s->pix_desc->log2_chroma_w;
+ 
+             src[0] = s->input_views[i]->data[0];
+             src[1] = s->input_views[i]->data[1];
+             src[2] = s->input_views[i]->data[2];
+ 
+-            dst[0] = out->data[0] + i * s->input_views[i]->width;
++            dst[0] = out->data[0] + i * s->input_views[i]->width * psize;
+             dst[1] = out->data[1] + i * sub_w;
+             dst[2] = out->data[2] + i * sub_w;
+ 
+diff --git a/libavfilter/vf_lagfun.c b/libavfilter/vf_lagfun.c
+index 0d5b619..36b19b3 100644
+--- a/libavfilter/vf_lagfun.c
++++ b/libavfilter/vf_lagfun.c
+@@ -30,16 +30,16 @@
+ 
+ typedef struct LagfunContext {
+     const AVClass *class;
+-    const AVPixFmtDescriptor *desc;
+     float decay;
+     int planes;
+ 
+     int depth;
+     int nb_planes;
+     int linesize[4];
+-    int height[4];
++    int planewidth[4];
++    int planeheight[4];
+ 
+-    AVFrame *old;
++    float *old[4];
+ 
+     int (*lagfun)(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs);
+ } LagfunContext;
+@@ -74,100 +74,87 @@ static int query_formats(AVFilterContext *ctx)
+ }
+ 
+ typedef struct ThreadData {
+-    AVFrame *in, *out, *old;
++    AVFrame *in, *out;
+ } ThreadData;
+ 
+-static int lagfun_frame8(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
+-{
+-    LagfunContext *s = ctx->priv;
+-    const float decay = s->decay;
+-    ThreadData *td = arg;
+-    AVFrame *in = td->in;
+-    AVFrame *out = td->out;
+-    AVFrame *old = td->old;
+-
+-    for (int p = 0; p < s->nb_planes; p++) {
+-        const int slice_start = (s->height[p] * jobnr) / nb_jobs;
+-        const int slice_end = (s->height[p] * (jobnr+1)) / nb_jobs;
+-        const uint8_t *src = in->data[p] + slice_start * in->linesize[p];
+-        const uint8_t *osrc = old->data[p] + slice_start * old->linesize[p];
+-        uint8_t *dst = out->data[p] + slice_start * out->linesize[p];
+-
+-        if (!((1 << p) & s->planes)) {
+-            av_image_copy_plane(dst, out->linesize[p],
+-                                src, in->linesize[p],
+-                                s->linesize[p], slice_end - slice_start);
+-            continue;
+-        }
+-
+-        for (int y = slice_start; y < slice_end; y++) {
+-            for (int x = 0; x < s->linesize[p]; x++)
+-                dst[x] = FFMAX(src[x], osrc[x] * decay);
+-
+-            src += in->linesize[p];
+-            osrc += old->linesize[p];
+-            dst += out->linesize[p];
+-        }
+-    }
+-
+-    return 0;
++#define LAGFUN(name, type)                                                \
++static int lagfun_frame##name(AVFilterContext *ctx, void *arg,            \
++                              int jobnr, int nb_jobs)                     \
++{                                                                         \
++    LagfunContext *s = ctx->priv;                                         \
++    const float decay = s->decay;                                         \
++    ThreadData *td = arg;                                                 \
++    AVFrame *in = td->in;                                                 \
++    AVFrame *out = td->out;                                               \
++                                                                          \
++    for (int p = 0; p < s->nb_planes; p++) {                              \
++        const int slice_start = (s->planeheight[p] * jobnr) / nb_jobs;    \
++        const int slice_end = (s->planeheight[p] * (jobnr+1)) / nb_jobs;  \
++        const type *src = (const type *)in->data[p] +                     \
++                          slice_start * in->linesize[p] / sizeof(type);   \
++        float *osrc = s->old[p] + slice_start * s->planewidth[p];         \
++        type *dst = (type *)out->data[p] +                                \
++                    slice_start * out->linesize[p] / sizeof(type);        \
++                                                                          \
++        if (!((1 << p) & s->planes)) {                                    \
++            av_image_copy_plane((uint8_t *)dst, out->linesize[p],         \
++                                (const uint8_t *)src, in->linesize[p],    \
++                                s->linesize[p], slice_end - slice_start); \
++            continue;                                                     \
++        }                                                                 \
++                                                                          \
++        for (int y = slice_start; y < slice_end; y++) {                   \
++            for (int x = 0; x < s->planewidth[p]; x++) {                  \
++                float v = FFMAX(src[x], osrc[x] * decay);                 \
++                                                                          \
++                osrc[x] = v;                                              \
++                if (ctx->is_disabled) {                                   \
++                    dst[x] = src[x];                                      \
++                } else {                                                  \
++                    dst[x] = lrintf(v);                                   \
++                }                                                         \
++            }                                                             \
++                                                                          \
++            src += in->linesize[p] / sizeof(type);                        \
++            osrc += s->planewidth[p];                                     \
++            dst += out->linesize[p] / sizeof(type);                       \
++        }                                                                 \
++    }                                                                     \
++                                                                          \
++    return 0;                                                             \
+ }
+ 
+-static int lagfun_frame16(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs)
+-{
+-    LagfunContext *s = ctx->priv;
+-    const float decay = s->decay;
+-    ThreadData *td = arg;
+-    AVFrame *in = td->in;
+-    AVFrame *out = td->out;
+-    AVFrame *old = td->old;
+-
+-    for (int p = 0; p < s->nb_planes; p++) {
+-        const int slice_start = (s->height[p] * jobnr) / nb_jobs;
+-        const int slice_end = (s->height[p] * (jobnr+1)) / nb_jobs;
+-        const uint16_t *src = (const uint16_t *)in->data[p] + slice_start * in->linesize[p] / 2;
+-        const uint16_t *osrc = (const uint16_t *)old->data[p] + slice_start * old->linesize[p] / 2;
+-        uint16_t *dst = (uint16_t *)out->data[p] + slice_start * out->linesize[p] / 2;
+-
+-        if (!((1 << p) & s->planes)) {
+-            av_image_copy_plane((uint8_t *)dst, out->linesize[p],
+-                                (uint8_t *)src, in->linesize[p],
+-                                s->linesize[p], slice_end - slice_start);
+-            continue;
+-        }
+-
+-        for (int y = slice_start; y < slice_end; y++) {
+-            for (int x = 0; x < s->linesize[p] / 2; x++)
+-                dst[x] = FFMAX(src[x], osrc[x] * decay);
+-
+-            src += in->linesize[p] / 2;
+-            osrc += old->linesize[p] / 2;
+-            dst += out->linesize[p] / 2;
+-        }
+-    }
+-
+-    return 0;
+-}
++LAGFUN(8, uint8_t)
++LAGFUN(16, uint16_t)
+ 
+ static int config_output(AVFilterLink *outlink)
+ {
+     AVFilterContext *ctx = outlink->src;
+     LagfunContext *s = ctx->priv;
+     AVFilterLink *inlink = ctx->inputs[0];
++    const AVPixFmtDescriptor *desc;
+     int ret;
+ 
+-    s->desc = av_pix_fmt_desc_get(outlink->format);
+-    if (!s->desc)
++    desc = av_pix_fmt_desc_get(outlink->format);
++    if (!desc)
+         return AVERROR_BUG;
+     s->nb_planes = av_pix_fmt_count_planes(outlink->format);
+-    s->depth = s->desc->comp[0].depth;
++    s->depth = desc->comp[0].depth;
+     s->lagfun = s->depth <= 8 ? lagfun_frame8 : lagfun_frame16;
+ 
+     if ((ret = av_image_fill_linesizes(s->linesize, inlink->format, inlink->w)) < 0)
+         return ret;
+ 
+-    s->height[1] = s->height[2] = AV_CEIL_RSHIFT(inlink->h, s->desc->log2_chroma_h);
+-    s->height[0] = s->height[3] = inlink->h;
++    s->planewidth[1]  = s->planewidth[2]  = AV_CEIL_RSHIFT(inlink->w, desc->log2_chroma_w);
++    s->planewidth[0]  = s->planewidth[3]  = inlink->w;
++    s->planeheight[1] = s->planeheight[2] = AV_CEIL_RSHIFT(inlink->h, desc->log2_chroma_h);
++    s->planeheight[0] = s->planeheight[3] = inlink->h;
++
++    for (int p = 0; p < s->nb_planes; p++) {
++        s->old[p] = av_calloc(s->planewidth[p] * s->planeheight[p], sizeof(*s->old[0]));
++        if (!s->old[p])
++            return AVERROR(ENOMEM);
++    }
+ 
+     return 0;
+ }
+@@ -180,11 +167,6 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
+     ThreadData td;
+     AVFrame *out;
+ 
+-    if (!s->old) {
+-        s->old = av_frame_clone(in);
+-        return ff_filter_frame(outlink, in);
+-    }
+-
+     out = ff_get_video_buffer(outlink, outlink->w, outlink->h);
+     if (!out) {
+         av_frame_free(&in);
+@@ -194,12 +176,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
+ 
+     td.out = out;
+     td.in = in;
+-    td.old = s->old;
+-    ctx->internal->execute(ctx, s->lagfun, &td, NULL, FFMIN(s->height[1], ff_filter_get_nb_threads(ctx)));
++    ctx->internal->execute(ctx, s->lagfun, &td, NULL, FFMIN(s->planeheight[1], ff_filter_get_nb_threads(ctx)));
+ 
+-    av_frame_free(&s->old);
+     av_frame_free(&in);
+-    s->old = av_frame_clone(out);
+     return ff_filter_frame(outlink, out);
+ }
+ 
+@@ -207,7 +186,8 @@ static av_cold void uninit(AVFilterContext *ctx)
+ {
+     LagfunContext *s = ctx->priv;
+ 
+-    av_frame_free(&s->old);
++    for (int p = 0; p < s->nb_planes; p++)
++        av_freep(&s->old[p]);
+ }
+ 
+ #define OFFSET(x) offsetof(LagfunContext, x)
+@@ -248,6 +228,6 @@ AVFilter ff_vf_lagfun = {
+     .uninit        = uninit,
+     .outputs       = outputs,
+     .inputs        = inputs,
+-    .flags         = AVFILTER_FLAG_SLICE_THREADS,
++    .flags         = AVFILTER_FLAG_SLICE_THREADS | AVFILTER_FLAG_SUPPORT_TIMELINE_INTERNAL,
+     .process_command = ff_filter_process_command,
+ };
+diff --git a/libavfilter/vf_lut.c b/libavfilter/vf_lut.c
+index 1fdc5e1..1a94e1c 100644
+--- a/libavfilter/vf_lut.c
++++ b/libavfilter/vf_lut.c
+@@ -81,7 +81,7 @@ typedef struct LutContext {
+ #define A 3
+ 
+ #define OFFSET(x) offsetof(LutContext, x)
+-#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
++#define FLAGS AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
+ 
+ static const AVOption options[] = {
+     { "c0", "set component #0 expression", OFFSET(comp_expr_str[0]),  AV_OPT_TYPE_STRING, { .str = "clipval" }, .flags = FLAGS },
+@@ -566,6 +566,17 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
+     return ff_filter_frame(outlink, out);
+ }
+ 
++static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
++                           char *res, int res_len, int flags)
++{
++    int ret = ff_filter_process_command(ctx, cmd, args, res, res_len, flags);
++
++    if (ret < 0)
++        return ret;
++
++    return config_props(ctx->inputs[0]);
++}
++
+ static const AVFilterPad inputs[] = {
+     { .name         = "default",
+       .type         = AVMEDIA_TYPE_VIDEO,
+@@ -592,7 +603,9 @@ static const AVFilterPad outputs[] = {
+         .query_formats = query_formats,                                 \
+         .inputs        = inputs,                                        \
+         .outputs       = outputs,                                       \
+-        .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,        \
++        .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC |       \
++                         AVFILTER_FLAG_SLICE_THREADS,                   \
++        .process_command = process_command,                             \
+     }
+ 
+ #if CONFIG_LUT_FILTER
+@@ -654,17 +667,12 @@ AVFILTER_DEFINE_CLASS(negate);
+ static av_cold int negate_init(AVFilterContext *ctx)
+ {
+     LutContext *s = ctx->priv;
+-    int i;
+-
+-    av_log(ctx, AV_LOG_DEBUG, "negate_alpha:%d\n", s->negate_alpha);
+ 
+-    for (i = 0; i < 4; i++) {
++    for (int i = 0; i < 4; i++) {
+         s->comp_expr_str[i] = av_strdup((i == 3 && !s->negate_alpha) ?
+                                           "val" : "negval");
+-        if (!s->comp_expr_str[i]) {
+-            uninit(ctx);
++        if (!s->comp_expr_str[i])
+             return AVERROR(ENOMEM);
+-        }
+     }
+ 
+     return 0;
+diff --git a/libavfilter/vf_maskfun.c b/libavfilter/vf_maskfun.c
+index 4ceb21b..55a4c57 100644
+--- a/libavfilter/vf_maskfun.c
++++ b/libavfilter/vf_maskfun.c
+@@ -47,14 +47,14 @@ typedef struct MaskFunContext {
+ } MaskFunContext;
+ 
+ #define OFFSET(x) offsetof(MaskFunContext, x)
+-#define VF AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM
++#define VFT AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
+ 
+ static const AVOption maskfun_options[] = {
+-    { "low",    "set low threshold",  OFFSET(low),    AV_OPT_TYPE_INT, {.i64=10},  0, UINT16_MAX, VF },
+-    { "high",   "set high threshold", OFFSET(high),   AV_OPT_TYPE_INT, {.i64=10},  0, UINT16_MAX, VF },
+-    { "planes", "set planes",         OFFSET(planes), AV_OPT_TYPE_INT, {.i64=0xF}, 0, 0xF,        VF },
+-    { "fill",   "set fill value",     OFFSET(fill),   AV_OPT_TYPE_INT, {.i64=0},   0, UINT16_MAX, VF },
+-    { "sum",    "set sum value",      OFFSET(sum),    AV_OPT_TYPE_INT, {.i64=10},  0, UINT16_MAX, VF },
++    { "low",    "set low threshold",  OFFSET(low),    AV_OPT_TYPE_INT, {.i64=10},  0, UINT16_MAX, VFT },
++    { "high",   "set high threshold", OFFSET(high),   AV_OPT_TYPE_INT, {.i64=10},  0, UINT16_MAX, VFT },
++    { "planes", "set planes",         OFFSET(planes), AV_OPT_TYPE_INT, {.i64=0xF}, 0, 0xF,        VFT },
++    { "fill",   "set fill value",     OFFSET(fill),   AV_OPT_TYPE_INT, {.i64=0},   0, UINT16_MAX, VFT },
++    { "sum",    "set sum value",      OFFSET(sum),    AV_OPT_TYPE_INT, {.i64=10},  0, UINT16_MAX, VFT },
+     { NULL }
+ };
+ 
+@@ -182,6 +182,45 @@ static int maskfun##name(AVFilterContext *ctx, void *arg,    \
+ MASKFUN(8, uint8_t, 1)
+ MASKFUN(16, uint16_t, 2)
+ 
++static void fill_frame(AVFilterContext *ctx)
++{
++    MaskFunContext *s = ctx->priv;
++
++    s->fill = FFMIN(s->fill, s->max);
++    if (s->depth == 8) {
++        for (int p = 0; p < s->nb_planes; p++) {
++            uint8_t *dst = s->empty->data[p];
++
++            for (int y = 0; y < s->height[p]; y++) {
++                memset(dst, s->fill, s->width[p]);
++                dst += s->empty->linesize[p];
++            }
++        }
++    } else {
++        for (int p = 0; p < s->nb_planes; p++) {
++            uint16_t *dst = (uint16_t *)s->empty->data[p];
++
++            for (int y = 0; y < s->height[p]; y++) {
++                for (int x = 0; x < s->width[p]; x++)
++                    dst[x] = s->fill;
++                dst += s->empty->linesize[p] / 2;
++            }
++        }
++    }
++}
++
++static void set_max_sum(AVFilterContext *ctx)
++{
++    MaskFunContext *s = ctx->priv;
++
++    s->max_sum = 0;
++    for (int p = 0; p < s->nb_planes; p++) {
++        if (!((1 << p) & s->planes))
++            continue;
++        s->max_sum += (uint64_t)s->sum * s->width[p] * s->height[p];
++    }
++}
++
+ static int config_input(AVFilterLink *inlink)
+ {
+     AVFilterContext *ctx = inlink->dst;
+@@ -203,7 +242,6 @@ static int config_input(AVFilterLink *inlink)
+ 
+     s->depth = desc->comp[0].depth;
+     s->max = (1 << s->depth) - 1;
+-    s->fill = FFMIN(s->fill, s->max);
+ 
+     if (s->depth == 8) {
+         s->maskfun = maskfun8;
+@@ -217,33 +255,30 @@ static int config_input(AVFilterLink *inlink)
+     if (!s->empty)
+         return AVERROR(ENOMEM);
+ 
+-    if (s->depth == 8) {
+-        for (int p = 0; p < s->nb_planes; p++) {
+-            uint8_t *dst = s->empty->data[p];
++    fill_frame(ctx);
+ 
+-            for (int y = 0; y < s->height[p]; y++) {
+-                memset(dst, s->fill, s->width[p]);
+-                dst += s->empty->linesize[p];
+-            }
+-        }
+-    } else {
+-        for (int p = 0; p < s->nb_planes; p++) {
+-            uint16_t *dst = (uint16_t *)s->empty->data[p];
++    set_max_sum(ctx);
+ 
+-            for (int y = 0; y < s->height[p]; y++) {
+-                for (int x = 0; x < s->width[p]; x++)
+-                    dst[x] = s->fill;
+-                dst += s->empty->linesize[p] / 2;
+-            }
+-        }
+-    }
++    return 0;
++}
+ 
+-    s->max_sum = 0;
+-    for (int p = 0; p < s->nb_planes; p++) {
+-        if (!((1 << p) & s->planes))
+-            continue;
+-        s->max_sum += (uint64_t)s->sum * s->width[p] * s->height[p];
+-    }
++static int process_command(AVFilterContext *ctx, const char *cmd, const char *args,
++                           char *res, int res_len, int flags)
++{
++    MaskFunContext *s = ctx->priv;
++    int fill = s->fill;
++    int sum = s->sum;
++    int ret;
++
++    ret = ff_filter_process_command(ctx, cmd, args, res, res_len, flags);
++    if (ret < 0)
++        return ret;
++
++    if (sum != s->sum)
++        set_max_sum(ctx);
++
++    if (fill != s->fill)
++        fill_frame(ctx);
+ 
+     return 0;
+ }
+@@ -284,4 +319,5 @@ AVFilter ff_vf_maskfun = {
+     .outputs       = maskfun_outputs,
+     .priv_class    = &maskfun_class,
+     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC | AVFILTER_FLAG_SLICE_THREADS,
++    .process_command = process_command,
+ };
+diff --git a/libavfilter/vf_pp.c b/libavfilter/vf_pp.c
+index 29ab777..19a0f9f 100644
+--- a/libavfilter/vf_pp.c
++++ b/libavfilter/vf_pp.c
+@@ -145,7 +145,6 @@ static int pp_filter_frame(AVFilterLink *inlink, AVFrame *inbuf)
+     if (ret < 0) {
+         av_frame_free(&inbuf);
+         av_frame_free(&outbuf);
+-        av_freep(&qp_table);
+         return ret;
+     }
+ 
+diff --git a/libavfilter/vf_swaprect.c b/libavfilter/vf_swaprect.c
+index cf9c298..66bed16 100644
+--- a/libavfilter/vf_swaprect.c
++++ b/libavfilter/vf_swaprect.c
+@@ -43,7 +43,7 @@ typedef struct SwapRectContext {
+ } SwapRectContext;
+ 
+ #define OFFSET(x) offsetof(SwapRectContext, x)
+-#define FLAGS AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_FILTERING_PARAM
++#define FLAGS AV_OPT_FLAG_VIDEO_PARAM|AV_OPT_FLAG_FILTERING_PARAM|AV_OPT_FLAG_RUNTIME_PARAM
+ static const AVOption swaprect_options[] = {
+     { "w",  "set rect width",                     OFFSET(w),  AV_OPT_TYPE_STRING, {.str="w/2"}, 0, 0, .flags = FLAGS },
+     { "h",  "set rect height",                    OFFSET(h),  AV_OPT_TYPE_STRING, {.str="h/2"}, 0, 0, .flags = FLAGS },
+@@ -253,4 +253,5 @@ AVFilter ff_vf_swaprect = {
+     .inputs        = inputs,
+     .outputs       = outputs,
+     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
++    .process_command = ff_filter_process_command,
+ };
+diff --git a/libavfilter/vf_thumbnail.c b/libavfilter/vf_thumbnail.c
+index ac04615..e49b70c 100644
+--- a/libavfilter/vf_thumbnail.c
++++ b/libavfilter/vf_thumbnail.c
+@@ -28,6 +28,7 @@
+  */
+ 
+ #include "libavutil/opt.h"
++#include "libavutil/pixdesc.h"
+ #include "avfilter.h"
+ #include "internal.h"
+ 
+@@ -44,6 +45,9 @@ typedef struct ThumbContext {
+     int n_frames;               ///< number of frames for analysis
+     struct thumb_frame *frames; ///< the n_frames frames
+     AVRational tb;              ///< copy of the input timebase to ease access
++
++    int planewidth[4];
++    int planeheight[4];
+ } ThumbContext;
+ 
+ #define OFFSET(x) offsetof(ThumbContext, x)
+@@ -140,14 +144,55 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *frame)
+     // keep a reference of each frame
+     s->frames[s->n].buf = frame;
+ 
+-    // update current frame RGB histogram
+-    for (j = 0; j < inlink->h; j++) {
+-        for (i = 0; i < inlink->w; i++) {
+-            hist[0*256 + p[i*3    ]]++;
+-            hist[1*256 + p[i*3 + 1]]++;
+-            hist[2*256 + p[i*3 + 2]]++;
++
++    switch (inlink->format) {
++    case AV_PIX_FMT_RGB24:
++    case AV_PIX_FMT_BGR24:
++        for (j = 0; j < inlink->h; j++) {
++            for (i = 0; i < inlink->w; i++) {
++                hist[0*256 + p[i*3    ]]++;
++                hist[1*256 + p[i*3 + 1]]++;
++                hist[2*256 + p[i*3 + 2]]++;
++            }
++            p += frame->linesize[0];
++        }
++        break;
++    case AV_PIX_FMT_RGB0:
++    case AV_PIX_FMT_BGR0:
++    case AV_PIX_FMT_RGBA:
++    case AV_PIX_FMT_BGRA:
++        for (j = 0; j < inlink->h; j++) {
++            for (i = 0; i < inlink->w; i++) {
++                hist[0*256 + p[i*4    ]]++;
++                hist[1*256 + p[i*4 + 1]]++;
++                hist[2*256 + p[i*4 + 2]]++;
++            }
++            p += frame->linesize[0];
++        }
++        break;
++    case AV_PIX_FMT_0RGB:
++    case AV_PIX_FMT_0BGR:
++    case AV_PIX_FMT_ARGB:
++    case AV_PIX_FMT_ABGR:
++        for (j = 0; j < inlink->h; j++) {
++            for (i = 0; i < inlink->w; i++) {
++                hist[0*256 + p[i*4 + 1]]++;
++                hist[1*256 + p[i*4 + 2]]++;
++                hist[2*256 + p[i*4 + 3]]++;
++            }
++            p += frame->linesize[0];
+         }
+-        p += frame->linesize[0];
++        break;
++    default:
++        for (int plane = 0; plane < 3; plane++) {
++            const uint8_t *p = frame->data[plane];
++            for (j = 0; j < s->planeheight[plane]; j++) {
++                for (i = 0; i < s->planewidth[plane]; i++)
++                    hist[256*plane + p[i]]++;
++                p += frame->linesize[plane];
++            }
++        }
++        break;
+     }
+ 
+     // no selection until the buffer of N frames is filled up
+@@ -188,8 +233,14 @@ static int config_props(AVFilterLink *inlink)
+ {
+     AVFilterContext *ctx = inlink->dst;
+     ThumbContext *s = ctx->priv;
++    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(inlink->format);
+ 
+     s->tb = inlink->time_base;
++    s->planewidth[1]  = s->planewidth[2]  = AV_CEIL_RSHIFT(inlink->w, desc->log2_chroma_w);
++    s->planewidth[0]  = s->planewidth[3]  = inlink->w;
++    s->planeheight[1] = s->planeheight[2] = AV_CEIL_RSHIFT(inlink->h, desc->log2_chroma_h);
++    s->planeheight[0] = s->planeheight[3] = inlink->h;
++
+     return 0;
+ }
+ 
+@@ -197,6 +248,18 @@ static int query_formats(AVFilterContext *ctx)
+ {
+     static const enum AVPixelFormat pix_fmts[] = {
+         AV_PIX_FMT_RGB24, AV_PIX_FMT_BGR24,
++        AV_PIX_FMT_RGBA,  AV_PIX_FMT_BGRA,
++        AV_PIX_FMT_RGB0,  AV_PIX_FMT_BGR0,
++        AV_PIX_FMT_ABGR,  AV_PIX_FMT_ARGB,
++        AV_PIX_FMT_0BGR,  AV_PIX_FMT_0RGB,
++        AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
++        AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
++        AV_PIX_FMT_YUV440P, AV_PIX_FMT_YUV444P,
++        AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P,
++        AV_PIX_FMT_YUVJ440P, AV_PIX_FMT_YUVJ444P,
++        AV_PIX_FMT_YUVJ411P,
++        AV_PIX_FMT_YUVA420P, AV_PIX_FMT_YUVA422P, AV_PIX_FMT_YUVA444P,
++        AV_PIX_FMT_GBRP, AV_PIX_FMT_GBRAP,
+         AV_PIX_FMT_NONE
+     };
+     AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
+diff --git a/libavfilter/vf_zscale.c b/libavfilter/vf_zscale.c
+index 8059061..57199a0 100644
+--- a/libavfilter/vf_zscale.c
++++ b/libavfilter/vf_zscale.c
+@@ -301,7 +301,7 @@ static int config_props(AVFilterLink *outlink)
+     } else
+         outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
+ 
+-    av_log(ctx, AV_LOG_VERBOSE, "w:%d h:%d fmt:%s sar:%d/%d -> w:%d h:%d fmt:%s sar:%d/%d\n",
++    av_log(ctx, AV_LOG_TRACE, "w:%d h:%d fmt:%s sar:%d/%d -> w:%d h:%d fmt:%s sar:%d/%d\n",
+            inlink ->w, inlink ->h, av_get_pix_fmt_name( inlink->format),
+            inlink->sample_aspect_ratio.num, inlink->sample_aspect_ratio.den,
+            outlink->w, outlink->h, av_get_pix_fmt_name(outlink->format),
+diff --git a/libavformat/3dostr.c b/libavformat/3dostr.c
+index 2a35d66..534f205 100644
+--- a/libavformat/3dostr.c
++++ b/libavformat/3dostr.c
+@@ -103,7 +103,7 @@ static int threedostr_read_header(AVFormatContext *s)
+             st->codecpar->codec_type  = AVMEDIA_TYPE_AUDIO;
+             st->codecpar->sample_rate = avio_rb32(s->pb);
+             st->codecpar->channels    = avio_rb32(s->pb);
+-            if (st->codecpar->channels <= 0)
++            if (st->codecpar->channels <= 0 || st->codecpar->sample_rate <= 0)
+                 return AVERROR_INVALIDDATA;
+             codec                  = avio_rl32(s->pb);
+             avio_skip(s->pb, 4);
+diff --git a/libavformat/asfdec_f.c b/libavformat/asfdec_f.c
+index 8e48e45..b584f60 100644
+--- a/libavformat/asfdec_f.c
++++ b/libavformat/asfdec_f.c
+@@ -516,6 +516,8 @@ static int asf_read_stream_properties(AVFormatContext *s, int64_t size)
+         tag1                             = avio_rl32(pb);
+         avio_skip(pb, 20);
+         if (sizeX > 40) {
++            if (size < sizeX - 40)
++                return AVERROR_INVALIDDATA;
+             st->codecpar->extradata_size = ffio_limit(pb, sizeX - 40);
+             st->codecpar->extradata      = av_mallocz(st->codecpar->extradata_size +
+                                                    AV_INPUT_BUFFER_PADDING_SIZE);
+diff --git a/libavformat/avidec.c b/libavformat/avidec.c
+index 79000f3..547eb63 100644
+--- a/libavformat/avidec.c
++++ b/libavformat/avidec.c
+@@ -135,7 +135,7 @@ static inline int get_duration(AVIStream *ast, int len)
+     if (ast->sample_size)
+         return len;
+     else if (ast->dshow_block_align)
+-        return (len + ast->dshow_block_align - 1) / ast->dshow_block_align;
++        return (len + (int64_t)ast->dshow_block_align - 1) / ast->dshow_block_align;
+     else
+         return 1;
+ }
+diff --git a/libavformat/fitsenc.c b/libavformat/fitsenc.c
+index cc3999a..212c769 100644
+--- a/libavformat/fitsenc.c
++++ b/libavformat/fitsenc.c
+@@ -45,7 +45,8 @@ static int fits_write_header(AVFormatContext *s)
+  * @param lines_written to keep track of lines written so far
+  * @return 0
+  */
+-static int write_keyword_value(AVFormatContext *s, const char *keyword, int value, int *lines_written)
++static int write_keyword_value(AVFormatContext *s, const char *fmt,
++                               const char *keyword, void *value, int *lines_written)
+ {
+     int len, ret;
+     uint8_t header[80];
+@@ -57,7 +58,12 @@ static int write_keyword_value(AVFormatContext *s, const char *keyword, int valu
+     header[8] = '=';
+     header[9] = ' ';
+ 
+-    ret = snprintf(header + 10, 70, "%d", value);
++    if (!strcmp(fmt, "%d")) {
++        ret = snprintf(header + 10, 70, fmt, *(int *)value);
++    } else {
++        ret = snprintf(header + 10, 70, fmt, *(float *)value);
++    }
++
+     memset(&header[ret + 10], ' ', sizeof(header) - (ret + 10));
+ 
+     avio_write(s->pb, header, sizeof(header));
+@@ -72,16 +78,22 @@ static int write_image_header(AVFormatContext *s)
+     FITSContext *fitsctx = s->priv_data;
+     uint8_t buffer[80];
+     int bitpix, naxis, naxis3 = 1, bzero = 0, rgb = 0, lines_written = 0, lines_left;
++    int pcount = 0, gcount = 1;
++    float datamax, datamin;
+ 
+     switch (encctx->format) {
+         case AV_PIX_FMT_GRAY8:
+             bitpix = 8;
+             naxis = 2;
++            datamin = 0;
++            datamax = 255;
+             break;
+         case AV_PIX_FMT_GRAY16BE:
+             bitpix = 16;
+             naxis = 2;
+             bzero = 32768;
++            datamin = 0;
++            datamax = 65535;
+             break;
+         case AV_PIX_FMT_GBRP:
+         case AV_PIX_FMT_GBRAP:
+@@ -93,6 +105,8 @@ static int write_image_header(AVFormatContext *s)
+             } else {
+                 naxis3 = 4;
+             }
++            datamin = 0;
++            datamax = 255;
+             break;
+         case AV_PIX_FMT_GBRP16BE:
+         case AV_PIX_FMT_GBRAP16BE:
+@@ -105,6 +119,8 @@ static int write_image_header(AVFormatContext *s)
+                 naxis3 = 4;
+             }
+             bzero = 32768;
++            datamin = 0;
++            datamax = 65535;
+             break;
+         default:
+             return AVERROR(EINVAL);
+@@ -122,28 +138,31 @@ static int write_image_header(AVFormatContext *s)
+     }
+     lines_written++;
+ 
+-    write_keyword_value(s, "BITPIX", bitpix, &lines_written);         // no of bits per pixel
+-    write_keyword_value(s, "NAXIS", naxis, &lines_written);           // no of dimensions of image
+-    write_keyword_value(s, "NAXIS1", encctx->width, &lines_written);   // first dimension i.e. width
+-    write_keyword_value(s, "NAXIS2", encctx->height, &lines_written);  // second dimension i.e. height
++    write_keyword_value(s, "%d", "BITPIX", &bitpix, &lines_written);
++    write_keyword_value(s, "%d", "NAXIS", &naxis, &lines_written);
++    write_keyword_value(s, "%d", "NAXIS1", &encctx->width, &lines_written);
++    write_keyword_value(s, "%d", "NAXIS2", &encctx->height, &lines_written);
+ 
+     if (rgb)
+-        write_keyword_value(s, "NAXIS3", naxis3, &lines_written);     // third dimension to store RGBA planes
++        write_keyword_value(s, "%d", "NAXIS3", &naxis3, &lines_written);
+ 
+     if (!fitsctx->first_image) {
+-        write_keyword_value(s, "PCOUNT", 0, &lines_written);
+-        write_keyword_value(s, "GCOUNT", 1, &lines_written);
++        write_keyword_value(s, "%d", "PCOUNT", &pcount, &lines_written);
++        write_keyword_value(s, "%d", "GCOUNT", &gcount, &lines_written);
+     } else {
+         fitsctx->first_image = 0;
+     }
+ 
++    write_keyword_value(s, "%g", "DATAMIN", &datamin, &lines_written);
++    write_keyword_value(s, "%g", "DATAMAX", &datamax, &lines_written);
++
+     /*
+      * Since FITS does not support unsigned 16 bit integers,
+      * BZERO = 32768 is used to store unsigned 16 bit integers as
+      * signed integers so that it can be read properly.
+      */
+     if (bitpix == 16)
+-        write_keyword_value(s, "BZERO", bzero, &lines_written);
++        write_keyword_value(s, "%d", "BZERO", &bzero, &lines_written);
+ 
+     if (rgb) {
+         memcpy(buffer, "CTYPE3  = 'RGB     '", 20);
+diff --git a/libavformat/flvdec.c b/libavformat/flvdec.c
+index 943c027..30d1fcf 100644
+--- a/libavformat/flvdec.c
++++ b/libavformat/flvdec.c
+@@ -1174,7 +1174,7 @@ retry_duration:
+             avio_seek(s->pb, fsize - 3 - size, SEEK_SET);
+             if (size == avio_rb24(s->pb) + 11) {
+                 uint32_t ts = avio_rb24(s->pb);
+-                ts         |= avio_r8(s->pb) << 24;
++                ts         |= (unsigned)avio_r8(s->pb) << 24;
+                 if (ts)
+                     s->duration = ts * (int64_t)AV_TIME_BASE / 1000;
+                 else if (fsize >= 8 && fsize - 8 >= size) {
+diff --git a/libavformat/id3v2.c b/libavformat/id3v2.c
+index 97f6cc8..df11b54 100644
+--- a/libavformat/id3v2.c
++++ b/libavformat/id3v2.c
+@@ -605,7 +605,10 @@ static void read_apic(AVFormatContext *s, AVIOContext *pb, int taglen,
+ 
+     /* mimetype */
+     if (isv34) {
+-        taglen -= avio_get_str(pb, taglen, mimetype, sizeof(mimetype));
++        int ret = avio_get_str(pb, taglen, mimetype, sizeof(mimetype));
++        if (ret < 0 || ret >= taglen)
++            goto fail;
++        taglen -= ret;
+     } else {
+         if (avio_read(pb, mimetype, 3) < 0)
+             goto fail;
+diff --git a/libavformat/mov.c b/libavformat/mov.c
+index 8eacf2c..2fd1f2c 100644
+--- a/libavformat/mov.c
++++ b/libavformat/mov.c
+@@ -5557,6 +5557,10 @@ static int mov_read_st3d(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+         av_log(c->fc, AV_LOG_ERROR, "Empty stereoscopic video box\n");
+         return AVERROR_INVALIDDATA;
+     }
++
++    if (sc->stereo3d)
++        return AVERROR_INVALIDDATA;
++
+     avio_skip(pb, 4); /* version + flags */
+ 
+     mode = avio_r8(pb);
+@@ -7108,9 +7112,22 @@ static int mov_probe(const AVProbeData *p)
+     /* check file header */
+     offset = 0;
+     for (;;) {
++        int64_t size;
++        int minsize = 8;
+         /* ignore invalid offset */
+         if ((offset + 8) > (unsigned int)p->buf_size)
+             break;
++        size = AV_RB32(p->buf + offset);
++        if (size == 1 && offset + 16 > (unsigned int)p->buf_size) {
++            size = AV_RB64(p->buf+offset + 8);
++            minsize = 16;
++        } else if (size == 0) {
++            size = p->buf_size - offset;
++        }
++        if (size < minsize) {
++            offset += 4;
++            continue;
++        }
+         tag = AV_RL32(p->buf + offset + 4);
+         switch(tag) {
+         /* check for obvious tags */
+@@ -7120,12 +7137,7 @@ static int mov_probe(const AVProbeData *p)
+         case MKTAG('p','n','o','t'): /* detect movs with preview pics like ew.mov and april.mov */
+         case MKTAG('u','d','t','a'): /* Packet Video PVAuthor adds this and a lot of more junk */
+         case MKTAG('f','t','y','p'):
+-            if (AV_RB32(p->buf+offset) < 8 &&
+-                (AV_RB32(p->buf+offset) != 1 ||
+-                 offset + 12 > (unsigned int)p->buf_size ||
+-                 AV_RB64(p->buf+offset + 8) == 0)) {
+-                score = FFMAX(score, AVPROBE_SCORE_EXTENSION);
+-            } else if (tag == MKTAG('f','t','y','p') &&
++            if (tag == MKTAG('f','t','y','p') &&
+                        (   AV_RL32(p->buf + offset + 8) == MKTAG('j','p','2',' ')
+                         || AV_RL32(p->buf + offset + 8) == MKTAG('j','p','x',' ')
+                     )) {
+@@ -7133,7 +7145,6 @@ static int mov_probe(const AVProbeData *p)
+             } else {
+                 score = AVPROBE_SCORE_MAX;
+             }
+-            offset = FFMAX(4, AV_RB32(p->buf+offset)) + offset;
+             break;
+         /* those are more common words, so rate then a bit less */
+         case MKTAG('e','d','i','w'): /* xdcam files have reverted first tags */
+@@ -7142,7 +7153,6 @@ static int mov_probe(const AVProbeData *p)
+         case MKTAG('j','u','n','k'):
+         case MKTAG('p','i','c','t'):
+             score  = FFMAX(score, AVPROBE_SCORE_MAX - 5);
+-            offset = FFMAX(4, AV_RB32(p->buf+offset)) + offset;
+             break;
+         case MKTAG(0x82,0x82,0x7f,0x7d):
+         case MKTAG('s','k','i','p'):
+@@ -7150,11 +7160,9 @@ static int mov_probe(const AVProbeData *p)
+         case MKTAG('p','r','f','l'):
+             /* if we only find those cause probedata is too small at least rate them */
+             score  = FFMAX(score, AVPROBE_SCORE_EXTENSION);
+-            offset = FFMAX(4, AV_RB32(p->buf+offset)) + offset;
+             break;
+-        default:
+-            offset = FFMAX(4, AV_RB32(p->buf+offset)) + offset;
+         }
++        offset += size;
+     }
+     if (score > AVPROBE_SCORE_MAX - 50 && moov_offset != -1) {
+         /* moov atom in the header - we should make sure that this is not a
+diff --git a/libavformat/movenc.c b/libavformat/movenc.c
+index 372c042..62192e5 100644
+--- a/libavformat/movenc.c
++++ b/libavformat/movenc.c
+@@ -2025,7 +2025,6 @@ static int mov_write_clli_tag(AVIOContext *pb, MOVTrack *track)
+ 
+     side_data = av_stream_get_side_data(track->st, AV_PKT_DATA_CONTENT_LIGHT_LEVEL, NULL);
+     if (!side_data) {
+-        av_log(NULL, AV_LOG_VERBOSE, "Not writing 'clli' atom. No content light level info.\n");
+         return 0;
+     }
+     content_light_metadata = (const AVContentLightMetadata*)side_data;
+@@ -2052,7 +2051,6 @@ static int mov_write_mdcv_tag(AVIOContext *pb, MOVTrack *track)
+     side_data = av_stream_get_side_data(track->st, AV_PKT_DATA_MASTERING_DISPLAY_METADATA, NULL);
+     metadata = (const AVMasteringDisplayMetadata*)side_data;
+     if (!metadata || !metadata->has_primaries || !metadata->has_luminance) {
+-        av_log(NULL, AV_LOG_VERBOSE, "Not writing 'mdcv' atom. Missing mastering metadata.\n");
+         return 0;
+     }
+ 
+diff --git a/libavformat/mvdec.c b/libavformat/mvdec.c
+index c4fa980..f1f73e5 100644
+--- a/libavformat/mvdec.c
++++ b/libavformat/mvdec.c
+@@ -269,6 +269,8 @@ static void read_index(AVIOContext *pb, AVStream *st)
+         uint32_t pos  = avio_rb32(pb);
+         uint32_t size = avio_rb32(pb);
+         avio_skip(pb, 8);
++        if (avio_feof(pb))
++            return ;
+         av_add_index_entry(st, pos, timestamp, size, 0, AVINDEX_KEYFRAME);
+         if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+             timestamp += size / (st->codecpar->channels * 2LL);
+diff --git a/libavformat/rmdec.c b/libavformat/rmdec.c
+index 0f1560a..521b9d0 100644
+--- a/libavformat/rmdec.c
++++ b/libavformat/rmdec.c
+@@ -1290,8 +1290,11 @@ static int ivr_read_header(AVFormatContext *s)
+                 int j;
+ 
+                 av_log(s, AV_LOG_DEBUG, "%s = '0x", key);
+-                for (j = 0; j < len; j++)
++                for (j = 0; j < len; j++) {
++                    if (avio_feof(pb))
++                        return AVERROR_INVALIDDATA;
+                     av_log(s, AV_LOG_DEBUG, "%X", avio_r8(pb));
++                }
+                 av_log(s, AV_LOG_DEBUG, "'\n");
+             } else if (len == 4 && type == 3 && !strncmp(key, "Duration", tlen)) {
+                 st->duration = avio_rb32(pb);
+diff --git a/libavformat/samidec.c b/libavformat/samidec.c
+index 3070ef9..cf5076c 100644
+--- a/libavformat/samidec.c
++++ b/libavformat/samidec.c
+@@ -95,6 +95,11 @@ static int sami_read_header(AVFormatContext *s)
+                 const char *p = ff_smil_get_attr_ptr(buf.str, "Start");
+                 sub->pos      = pos;
+                 sub->pts      = p ? strtol(p, NULL, 10) : 0;
++                if (sub->pts <= INT64_MIN/2 || sub->pts >= INT64_MAX/2) {
++                    res = AVERROR_PATCHWELCOME;
++                    goto end;
++                }
++
+                 sub->duration = -1;
+             }
+         }
+diff --git a/libavformat/wavdec.c b/libavformat/wavdec.c
+index 256c36e..ef14450 100644
+--- a/libavformat/wavdec.c
++++ b/libavformat/wavdec.c
+@@ -71,7 +71,7 @@ static void set_spdif(AVFormatContext *s, WAVDemuxContext *wav)
+         int ret = ffio_ensure_seekback(s->pb, len);
+ 
+         if (ret >= 0) {
+-            uint8_t *buf = av_malloc(len);
++            uint8_t *buf = av_malloc(len + AV_INPUT_BUFFER_PADDING_SIZE);
+             if (!buf) {
+                 ret = AVERROR(ENOMEM);
+             } else {
+diff --git a/libavformat/wtvdec.c b/libavformat/wtvdec.c
+index 77908e6..7def9d2 100644
+--- a/libavformat/wtvdec.c
++++ b/libavformat/wtvdec.c
+@@ -794,7 +794,7 @@ static int parse_chunks(AVFormatContext *s, int mode, int64_t seekts, int *len_p
+ 
+         ff_get_guid(pb, &g);
+         len = avio_rl32(pb);
+-        if (len < 32) {
++        if (len < 32 || len > INT_MAX - 7) {
+             int ret;
+             if (avio_feof(pb))
+                 return AVERROR_EOF;
+@@ -953,6 +953,9 @@ static int parse_chunks(AVFormatContext *s, int mode, int64_t seekts, int *len_p
+         } else
+             av_log(s, AV_LOG_WARNING, "unsupported chunk:"FF_PRI_GUID"\n", FF_ARG_GUID(g));
+ 
++        if (avio_feof(pb))
++            break;
++
+         avio_skip(pb, WTV_PAD8(len) - consumed);
+     }
+     return AVERROR_EOF;
+diff --git a/libavutil/common.h b/libavutil/common.h
+index a60a558..aee353d 100644
+--- a/libavutil/common.h
++++ b/libavutil/common.h
+@@ -87,6 +87,7 @@
+  * As with many macros, this evaluates its argument twice.
+  */
+ #define FFABSU(a) ((a) <= 0 ? -(unsigned)(a) : (unsigned)(a))
++#define FFABS64U(a) ((a) <= 0 ? -(uint64_t)(a) : (uint64_t)(a))
+ 
+ /**
+  * Comparator.
+@@ -114,8 +115,72 @@
+ #   include "intmath.h"
+ #endif
+ 
+-/* Pull in unguarded fallback defines at the end of this file. */
+-#include "common.h"
++#ifndef av_ceil_log2
++#   define av_ceil_log2     av_ceil_log2_c
++#endif
++#ifndef av_clip
++#   define av_clip          av_clip_c
++#endif
++#ifndef av_clip64
++#   define av_clip64        av_clip64_c
++#endif
++#ifndef av_clip_uint8
++#   define av_clip_uint8    av_clip_uint8_c
++#endif
++#ifndef av_clip_int8
++#   define av_clip_int8     av_clip_int8_c
++#endif
++#ifndef av_clip_uint16
++#   define av_clip_uint16   av_clip_uint16_c
++#endif
++#ifndef av_clip_int16
++#   define av_clip_int16    av_clip_int16_c
++#endif
++#ifndef av_clipl_int32
++#   define av_clipl_int32   av_clipl_int32_c
++#endif
++#ifndef av_clip_intp2
++#   define av_clip_intp2    av_clip_intp2_c
++#endif
++#ifndef av_clip_uintp2
++#   define av_clip_uintp2   av_clip_uintp2_c
++#endif
++#ifndef av_mod_uintp2
++#   define av_mod_uintp2    av_mod_uintp2_c
++#endif
++#ifndef av_sat_add32
++#   define av_sat_add32     av_sat_add32_c
++#endif
++#ifndef av_sat_dadd32
++#   define av_sat_dadd32    av_sat_dadd32_c
++#endif
++#ifndef av_sat_sub32
++#   define av_sat_sub32     av_sat_sub32_c
++#endif
++#ifndef av_sat_dsub32
++#   define av_sat_dsub32    av_sat_dsub32_c
++#endif
++#ifndef av_sat_add64
++#   define av_sat_add64     av_sat_add64_c
++#endif
++#ifndef av_sat_sub64
++#   define av_sat_sub64     av_sat_sub64_c
++#endif
++#ifndef av_clipf
++#   define av_clipf         av_clipf_c
++#endif
++#ifndef av_clipd
++#   define av_clipd         av_clipd_c
++#endif
++#ifndef av_popcount
++#   define av_popcount      av_popcount_c
++#endif
++#ifndef av_popcount64
++#   define av_popcount64    av_popcount64_c
++#endif
++#ifndef av_parity
++#   define av_parity        av_parity_c
++#endif
+ 
+ #ifndef av_log2
+ av_const int av_log2(unsigned v);
+@@ -541,75 +606,3 @@ static av_always_inline av_const int av_parity_c(uint32_t v)
+ #endif /* HAVE_AV_CONFIG_H */
+ 
+ #endif /* AVUTIL_COMMON_H */
+-
+-/*
+- * The following definitions are outside the multiple inclusion guard
+- * to ensure they are immediately available in intmath.h.
+- */
+-
+-#ifndef av_ceil_log2
+-#   define av_ceil_log2     av_ceil_log2_c
+-#endif
+-#ifndef av_clip
+-#   define av_clip          av_clip_c
+-#endif
+-#ifndef av_clip64
+-#   define av_clip64        av_clip64_c
+-#endif
+-#ifndef av_clip_uint8
+-#   define av_clip_uint8    av_clip_uint8_c
+-#endif
+-#ifndef av_clip_int8
+-#   define av_clip_int8     av_clip_int8_c
+-#endif
+-#ifndef av_clip_uint16
+-#   define av_clip_uint16   av_clip_uint16_c
+-#endif
+-#ifndef av_clip_int16
+-#   define av_clip_int16    av_clip_int16_c
+-#endif
+-#ifndef av_clipl_int32
+-#   define av_clipl_int32   av_clipl_int32_c
+-#endif
+-#ifndef av_clip_intp2
+-#   define av_clip_intp2    av_clip_intp2_c
+-#endif
+-#ifndef av_clip_uintp2
+-#   define av_clip_uintp2   av_clip_uintp2_c
+-#endif
+-#ifndef av_mod_uintp2
+-#   define av_mod_uintp2    av_mod_uintp2_c
+-#endif
+-#ifndef av_sat_add32
+-#   define av_sat_add32     av_sat_add32_c
+-#endif
+-#ifndef av_sat_dadd32
+-#   define av_sat_dadd32    av_sat_dadd32_c
+-#endif
+-#ifndef av_sat_sub32
+-#   define av_sat_sub32     av_sat_sub32_c
+-#endif
+-#ifndef av_sat_dsub32
+-#   define av_sat_dsub32    av_sat_dsub32_c
+-#endif
+-#ifndef av_sat_add64
+-#   define av_sat_add64     av_sat_add64_c
+-#endif
+-#ifndef av_sat_sub64
+-#   define av_sat_sub64     av_sat_sub64_c
+-#endif
+-#ifndef av_clipf
+-#   define av_clipf         av_clipf_c
+-#endif
+-#ifndef av_clipd
+-#   define av_clipd         av_clipd_c
+-#endif
+-#ifndef av_popcount
+-#   define av_popcount      av_popcount_c
+-#endif
+-#ifndef av_popcount64
+-#   define av_popcount64    av_popcount64_c
+-#endif
+-#ifndef av_parity
+-#   define av_parity        av_parity_c
+-#endif
+diff --git a/libavutil/eval.c b/libavutil/eval.c
+index aaa8eb4..d0bada9 100644
+--- a/libavutil/eval.c
++++ b/libavutil/eval.c
+@@ -306,7 +306,7 @@ static double eval_expr(Parser *p, AVExpr *e)
+             double d = eval_expr(p, e->param[0]);
+             double d2 = eval_expr(p, e->param[1]);
+             switch (e->type) {
+-                case e_mod: return e->value * (d - floor((!CONFIG_FTRAPV || d2) ? d / d2 : d * INFINITY) * d2);
++                case e_mod: return e->value * (d - floor(d2 ? d / d2 : d * INFINITY) * d2);
+                 case e_gcd: return e->value * av_gcd(d,d2);
+                 case e_max: return e->value * (d >  d2 ?   d : d2);
+                 case e_min: return e->value * (d <  d2 ?   d : d2);
+diff --git a/libavutil/mathematics.c b/libavutil/mathematics.c
+index da0fc17..2de2b39 100644
+--- a/libavutil/mathematics.c
++++ b/libavutil/mathematics.c
+@@ -148,7 +148,7 @@ int av_compare_ts(int64_t ts_a, AVRational tb_a, int64_t ts_b, AVRational tb_b)
+ {
+     int64_t a = tb_a.num * (int64_t)tb_b.den;
+     int64_t b = tb_b.num * (int64_t)tb_a.den;
+-    if ((FFABS(ts_a)|a|FFABS(ts_b)|b) <= INT_MAX)
++    if ((FFABS64U(ts_a)|a|FFABS64U(ts_b)|b) <= INT_MAX)
+         return (ts_a*a > ts_b*b) - (ts_a*a < ts_b*b);
+     if (av_rescale_rnd(ts_a, a, b, AV_ROUND_DOWN) < ts_b)
+         return -1;
+diff --git a/libavutil/version.h b/libavutil/version.h
+index 21136e6..b216575 100644
+--- a/libavutil/version.h
++++ b/libavutil/version.h
+@@ -79,7 +79,7 @@
+  */
+ 
+ #define LIBAVUTIL_VERSION_MAJOR  56
+-#define LIBAVUTIL_VERSION_MINOR  64
++#define LIBAVUTIL_VERSION_MINOR  65
+ #define LIBAVUTIL_VERSION_MICRO 100
+ 
+ #define LIBAVUTIL_VERSION_INT   AV_VERSION_INT(LIBAVUTIL_VERSION_MAJOR, \
+diff --git a/tests/ref/fate/exif-image-embedded b/tests/ref/fate/exif-image-embedded
+index d9239b3..9ad073e 100644
+--- a/tests/ref/fate/exif-image-embedded
++++ b/tests/ref/fate/exif-image-embedded
+@@ -29,12 +29,6 @@ color_transfer=unknown
+ chroma_location=center
+ TAG:UserComment=AppleMark
+ 
+-[SIDE_DATA]
+-side_data_type=QP table data
+-[/SIDE_DATA]
+-[SIDE_DATA]
+-side_data_type=QP table properties
+-[/SIDE_DATA]
+ [/FRAME]
+ [FRAME]
+ media_type=audio
+diff --git a/tests/ref/fate/exif-image-jpg b/tests/ref/fate/exif-image-jpg
+index eb18ded..b266501 100644
+--- a/tests/ref/fate/exif-image-jpg
++++ b/tests/ref/fate/exif-image-jpg
+@@ -229,10 +229,4 @@ TAG:ExposureMode=    0
+ TAG:WhiteBalance=    0
+ TAG:DigitalZoomRatio=   4000:4000
+ TAG:SceneCaptureType=    0
+-[SIDE_DATA]
+-side_data_type=QP table data
+-[/SIDE_DATA]
+-[SIDE_DATA]
+-side_data_type=QP table properties
+-[/SIDE_DATA]
+ [/FRAME]
+diff --git a/tests/ref/fate/filter-thumbnail b/tests/ref/fate/filter-thumbnail
+index 36f11f2..4d8c501 100644
+--- a/tests/ref/fate/filter-thumbnail
++++ b/tests/ref/fate/filter-thumbnail
+@@ -1 +1 @@
+-thumbnail           cd429b3d92c33bcc257e8e6a3284dbf7
++thumbnail           8b54dbc891b9cc05742dd0f5b74c0727
+diff --git a/tests/ref/fate/fits-demux b/tests/ref/fate/fits-demux
+index 85605ab..de7aa11 100644
+--- a/tests/ref/fate/fits-demux
++++ b/tests/ref/fate/fits-demux
+@@ -3,8 +3,8 @@
+ #codec_id 0: fits
+ #dimensions 0: 72x36
+ #sar 0: 0/1
+-0,          0,          0,        1,    14320, 0x0ecf72e0
+-0,          1,          1,        1,    14320, 0xd94af6eb
+-0,          2,          2,        1,    14320, 0x15c21892
+-0,          3,          3,        1,    14320, 0xb18adc01
+-0,          4,          4,        1,    14320, 0xc2be706d
++0,          0,          0,        1,    14320, 0xa9ee75a4
++0,          1,          1,        1,    14320, 0xb9daf9af
++0,          2,          2,        1,    14320, 0xf6431b56
++0,          3,          3,        1,    14320, 0x921adec5
++0,          4,          4,        1,    14320, 0xa34e7331
+diff --git a/tests/ref/fate/fitsdec-gray b/tests/ref/fate/fitsdec-gray
+index d080732..488ee71 100644
+--- a/tests/ref/fate/fitsdec-gray
++++ b/tests/ref/fate/fitsdec-gray
+@@ -3,4 +3,4 @@
+ #codec_id 0: rawvideo
+ #dimensions 0: 128x128
+ #sar 0: 0/1
+-0,          0,          0,        1,    16384, 0x353dbacd
++0,          0,          0,        1,    16384, 0xeff50901
+diff --git a/tests/ref/lavf/gbrap.fits b/tests/ref/lavf/gbrap.fits
+index 57c71e1..4662c3e 100644
+--- a/tests/ref/lavf/gbrap.fits
++++ b/tests/ref/lavf/gbrap.fits
+@@ -1,3 +1,3 @@
+-28eb102547b82acca57ef097a6c639d8 *tests/data/lavf/lavf.gbrap.fits
++d953a6a2c719de9d922d0624a7eb796b *tests/data/lavf/lavf.gbrap.fits
+ 10224000 tests/data/lavf/lavf.gbrap.fits
+ tests/data/lavf/lavf.gbrap.fits CRC=0x883af247
+diff --git a/tests/ref/lavf/gbrap16be.fits b/tests/ref/lavf/gbrap16be.fits
+index 030a6d9..7206d24 100644
+--- a/tests/ref/lavf/gbrap16be.fits
++++ b/tests/ref/lavf/gbrap16be.fits
+@@ -1,3 +1,3 @@
+-ff5fb24a67aeabd4f56088ca8b03d8b0 *tests/data/lavf/lavf.gbrap16be.fits
++e9a04d25104fc43ddc62b58eb33ecd08 *tests/data/lavf/lavf.gbrap16be.fits
+ 20376000 tests/data/lavf/lavf.gbrap16be.fits
+ tests/data/lavf/lavf.gbrap16be.fits CRC=0xa981271b
+diff --git a/tests/ref/lavf/gbrp.fits b/tests/ref/lavf/gbrp.fits
+index 2b60ddb..54c2396 100644
+--- a/tests/ref/lavf/gbrp.fits
++++ b/tests/ref/lavf/gbrp.fits
+@@ -1,3 +1,3 @@
+-dae49b5f6eb58981ba91e3e108355717 *tests/data/lavf/lavf.gbrp.fits
++3952247f7f9669f968826c909852bbd7 *tests/data/lavf/lavf.gbrp.fits
+ 7704000 tests/data/lavf/lavf.gbrp.fits
+ tests/data/lavf/lavf.gbrp.fits CRC=0x80745c5e
+diff --git a/tests/ref/lavf/gbrp16be.fits b/tests/ref/lavf/gbrp16be.fits
+index 9aa9db6..5bec5e8 100644
+--- a/tests/ref/lavf/gbrp16be.fits
++++ b/tests/ref/lavf/gbrp16be.fits
+@@ -1,3 +1,3 @@
+-693ea80c33eb9b348db27a0bc4a5cc8a *tests/data/lavf/lavf.gbrp16be.fits
++caf72fec125df9c7a1d59c9d1bc70b80 *tests/data/lavf/lavf.gbrp16be.fits
+ 15336000 tests/data/lavf/lavf.gbrp16be.fits
+ tests/data/lavf/lavf.gbrp16be.fits CRC=0x9573fb2b
+diff --git a/tests/ref/lavf/gray.fits b/tests/ref/lavf/gray.fits
+index ce6783b..4104675 100644
+--- a/tests/ref/lavf/gray.fits
++++ b/tests/ref/lavf/gray.fits
+@@ -1,3 +1,3 @@
+-d76b46a5a336b56f73451817cdf3897c *tests/data/lavf/lavf.gray.fits
++e690dc6db533b87f5f843737007ed070 *tests/data/lavf/lavf.gray.fits
+ 2664000 tests/data/lavf/lavf.gray.fits
+ tests/data/lavf/lavf.gray.fits CRC=0x7aa0122f
+diff --git a/tests/ref/lavf/gray16be.fits b/tests/ref/lavf/gray16be.fits
+index 058fa4a..a0526f3 100644
+--- a/tests/ref/lavf/gray16be.fits
++++ b/tests/ref/lavf/gray16be.fits
+@@ -1,3 +1,3 @@
+-15e85a553bbd07783f92377ed369308b *tests/data/lavf/lavf.gray16be.fits
++262658f437a256cd843db2b401bc20a9 *tests/data/lavf/lavf.gray16be.fits
+ 5184000 tests/data/lavf/lavf.gray16be.fits
+-tests/data/lavf/lavf.gray16be.fits CRC=0x8cdcbeb2
++tests/data/lavf/lavf.gray16be.fits CRC=0x737e8998

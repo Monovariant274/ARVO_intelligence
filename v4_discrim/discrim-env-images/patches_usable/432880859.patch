@@ -1,0 +1,13 @@
+diff --git a/src/lib/ndpi_main.c b/src/lib/ndpi_main.c
+index 0c0ab05..49df7e1 100644
+--- a/src/lib/ndpi_main.c
++++ b/src/lib/ndpi_main.c
+@@ -11447,7 +11447,7 @@ u_int16_t ndpi_match_host_subprotocol(struct ndpi_detection_module_struct *ndpi_
+ 
+   if(!ndpi_str) return(-1);
+ 
+-  snprintf(buf, sizeof(buf), "%*s", _string_to_match_len, _string_to_match);
++  snprintf(buf, sizeof(buf), "%.*s", _string_to_match_len, _string_to_match);
+   string_to_match = (char*)ndpi_get_host_domain(ndpi_str, buf);
+   string_to_match_len = strlen(string_to_match);
+ 

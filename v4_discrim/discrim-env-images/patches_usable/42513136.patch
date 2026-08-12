@@ -1,0 +1,40 @@
+diff --git a/ada_nm.h b/ada_nm.h
+index 017b257..a5a527b 100644
+--- a/ada_nm.h
++++ b/ada_nm.h
+@@ -236,10 +236,7 @@ fuzz_display_file2 (char *filename)
+     {
+       bfd_nonfatal (filename);
+       if (bfd_get_error () == bfd_error_file_ambiguously_recognized)
+-	{
+-	  list_matching_formats (matching);
+-	  free (matching);
+-	}
++	list_matching_formats (matching);
+       retval = false;
+     }
+ 
+diff --git a/ada_objdump.h b/ada_objdump.h
+index 0754b28..94ce331 100644
+--- a/ada_objdump.h
++++ b/ada_objdump.h
+@@ -92,7 +92,6 @@ fuzz_display_object_bfd (bfd *abfd)
+     {
+       nonfatal (bfd_get_filename (abfd));
+       list_matching_formats (matching);
+-      free (matching);
+       return 1;
+     }
+ 
+@@ -111,10 +110,7 @@ fuzz_display_object_bfd (bfd *abfd)
+   nonfatal (bfd_get_filename (abfd));
+ 
+   if (bfd_get_error () == bfd_error_file_ambiguously_recognized)
+-    {
+-      list_matching_formats (matching);
+-      free (matching);
+-    }
++    list_matching_formats (matching);
+   return 1;
+ }
+ 

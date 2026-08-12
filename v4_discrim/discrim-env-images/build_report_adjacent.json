@@ -1,0 +1,608 @@
+{
+  "n": 50,
+  "n_ok": 50,
+  "n_failed": 0,
+  "pushed": true,
+  "bugs": [
+    {
+      "bug_id": "42510353",
+      "project": "libvips",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1649010066",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42510353-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42510353-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42506732",
+      "project": "unrar",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1510861832",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42506732-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42506732-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42503478",
+      "project": "imagemagick",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1634283992",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42503478-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42503478-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42475254",
+      "project": "qtbase",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1557758817",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42475254-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42475254-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42481010",
+      "project": "wavpack",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1576970605",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481010-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481010-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42532755",
+      "project": "gdal",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1519983275",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42532755-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42532755-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42516694",
+      "project": "haproxy",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1664544080",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42516694-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42516694-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42499386",
+      "project": "mruby",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1626922187",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42499386-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42499386-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42496870",
+      "project": "json",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1482931148",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42496870-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42496870-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42485317",
+      "project": "mruby",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1593481286",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42485317-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42485317-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42490829",
+      "project": "kimageformats",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1607898207",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42490829-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42490829-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42516681",
+      "project": "gpsd",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1664593023",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42516681-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42516681-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42529061",
+      "project": "ghostpdl",
+      "ok": true,
+      "pushed": true,
+      "fetch": "full",
+      "epoch": "1696958068",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42529061-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42529061-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42481822",
+      "project": "harfbuzz",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1581456344",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481822-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481822-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42490490",
+      "project": "glib",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1607457447",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42490490-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42490490-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42488096",
+      "project": "openh264",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1602462775",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42488096-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42488096-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42490854",
+      "project": "kimageformats",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1607898207",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42490854-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42490854-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42495801",
+      "project": "wasm3",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1618356946",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42495801-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42495801-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42502085",
+      "project": "file",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1631836782",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42502085-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42502085-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42481120",
+      "project": "harfbuzz",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1578693605",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481120-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481120-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42487091",
+      "project": "openexr",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1598829404",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42487091-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42487091-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42531416",
+      "project": "ndpi",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1703276985",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42531416-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42531416-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42492491",
+      "project": "libssh2",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1612063934",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42492491-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42492491-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42481135",
+      "project": "harfbuzz",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1578693605",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481135-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481135-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42474904",
+      "project": "wget2",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1556012029",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42474904-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42474904-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42510346",
+      "project": "libvips",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1649010066",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42510346-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42510346-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42481045",
+      "project": "uWebSockets",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1578504423",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481045-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42481045-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42526333",
+      "project": "libraw",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1688986422",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42526333-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42526333-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42479381",
+      "project": "openh264",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1571712208",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42479381-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42479381-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42474174",
+      "project": "mupdf",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1552651023",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42474174-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42474174-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42488393",
+      "project": "openh264",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1602462775",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42488393-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42488393-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42470928",
+      "project": "librawspeed",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1538855442",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42470928-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42470928-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42475500",
+      "project": "karchive",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1558821411",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42475500-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42475500-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42509806",
+      "project": "ffmpeg",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1647552941",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42509806-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42509806-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42498672",
+      "project": "re2",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1625330629",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42498672-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42498672-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42475467",
+      "project": "libspng",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1558705615",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42475467-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42475467-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42522642",
+      "project": "libxslt",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1679585505",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42522642-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42522642-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42522648",
+      "project": "libxml2",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1679430953",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42522648-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42522648-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42522792",
+      "project": "simdutf",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1679254773",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42522792-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42522792-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42496296",
+      "project": "wasm3",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1619307243",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42496296-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42496296-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42513063",
+      "project": "libvpx",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1656686252",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42513063-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42513063-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42482052",
+      "project": "pcre2",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1582565340",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42482052-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42482052-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42492002",
+      "project": "leptonica",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1611256549",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42492002-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42492002-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42493031",
+      "project": "ffmpeg",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1612742107",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42493031-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42493031-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42495278",
+      "project": "skcms",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1617243393",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42495278-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42495278-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42506977",
+      "project": "gdal",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1511067317",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42506977-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42506977-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42498988",
+      "project": "fmt",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1625949771",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42498988-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42498988-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42499827",
+      "project": "spice-usbredir",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1625779474",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42499827-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42499827-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42520935",
+      "project": "mupdf",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1675880621",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42520935-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42520935-fix:latest"
+      }
+    },
+    {
+      "bug_id": "42474170",
+      "project": "capstonenext",
+      "ok": true,
+      "pushed": true,
+      "fetch": "shallow",
+      "epoch": "1552754429",
+      "images": {
+        "vul": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42474170-vul:latest",
+        "fix": "us-docker.pkg.dev/triangulate-396717/sysintel-env/sysintel-user-arvo-42474170-fix:latest"
+      }
+    }
+  ]
+}

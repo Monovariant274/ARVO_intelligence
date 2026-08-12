@@ -1,0 +1,13 @@
+diff --git a/src/pcre2_match.c b/src/pcre2_match.c
+index 537e5f3..ad4a43c 100644
+--- a/src/pcre2_match.c
++++ b/src/pcre2_match.c
+@@ -5792,7 +5792,7 @@ fprintf(stderr, "++ op=%d\n", *Fecode);
+       if (Lmax-- <= Lmin) RRETURN(MATCH_NOMATCH);
+       Feptr++;
+ #ifdef SUPPORT_UNICODE
+-      if (utf) { FORWARDCHAR(Feptr); }
++      if (utf) { FORWARDCHARTEST(Feptr, mb->end_subject); }
+ #endif
+       }
+     /* Control never reaches here */

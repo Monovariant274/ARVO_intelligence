@@ -1,0 +1,20 @@
+diff --git a/src/plugins/platforms/cocoa/qnsview_drawing.mm b/src/plugins/platforms/cocoa/qnsview_drawing.mm
+index 3690d6eb..116a9a73 100644
+--- a/src/plugins/platforms/cocoa/qnsview_drawing.mm
++++ b/src/plugins/platforms/cocoa/qnsview_drawing.mm
+@@ -189,6 +189,15 @@
+ 
+ - (void)displayLayer:(CALayer *)layer
+ {
++    if (!NSThread.isMainThread) {
++
++
++
++        qCWarning(lcQpaDrawing) << "Display non non-main thread! Deferring to main thread";
++        dispatch_async(dispatch_get_main_queue(), ^{ self.needsDisplay = YES; });
++        return;
++    }
++
+     Q_ASSERT(layer == self.layer);
+ 
+     if (!m_platformWindow)

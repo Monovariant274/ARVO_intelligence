@@ -1,0 +1,13 @@
+diff --git a/testing/fuzzing/snmp_e2e_fuzzer.c b/testing/fuzzing/snmp_e2e_fuzzer.c
+index 0743d9b..a32f302 100644
+--- a/testing/fuzzing/snmp_e2e_fuzzer.c
++++ b/testing/fuzzing/snmp_e2e_fuzzer.c
+@@ -126,7 +126,7 @@ LLVMFuzzerTestOneInput(const uint8_t * data, size_t size)
+ 
+     free(fake_argv[0]);
+     free(fake_argv[1]);
+-    free(fake_argv[2]);
++
+     free(fake_argv);
+ 
+     return 0;

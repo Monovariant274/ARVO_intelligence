@@ -1,0 +1,58 @@
+diff --git a/coders/bytebuffer-private.h b/coders/bytebuffer-private.h
+index a963c3d..fe5f00c 100644
+--- a/coders/bytebuffer-private.h
++++ b/coders/bytebuffer-private.h
+@@ -48,7 +48,7 @@ static inline int PeekMagickByteBuffer(MagickByteBuffer *buffer)
+       if (buffer->count < 1)
+         return(EOF);
+     }
+-  return(buffer->data[buffer->offset]);
++  return((int) buffer->data[buffer->offset]);
+ }
+ 
+ static inline int ReadMagickByteBuffer(MagickByteBuffer *buffer)
+diff --git a/coders/pdf.c b/coders/pdf.c
+index 2c276f0..3fc1d61 100644
+--- a/coders/pdf.c
++++ b/coders/pdf.c
+@@ -248,6 +248,8 @@ static void ReadPDFInfo(const ImageInfo *image_info,Image *image,
+               version[i++]=(char) c;
+             }
+             version[i]='\0';
++            if (c == EOF)
++              break;
+           }
+         continue;
+       }
+@@ -261,6 +263,8 @@ static void ReadPDFInfo(const ImageInfo *image_info,Image *image,
+       default:
+         continue;
+     }
++    if (c == EOF)
++      break;
+     if (CompareMagickByteBuffer(&buffer,PDFRotate,strlen(PDFRotate)) != MagickFalse)
+       {
+         p=GetMagickByteBufferDatum(&buffer);
+diff --git a/coders/webp.c b/coders/webp.c
+index 19c3596..9719310 100644
+--- a/coders/webp.c
++++ b/coders/webp.c
+@@ -757,7 +757,7 @@ static const char * WebPErrorCodeMessage(WebPEncodingError error_code)
+   switch (error_code)
+   {
+     case VP8_ENC_OK:
+-      return NULL;
++      return "";
+     case VP8_ENC_ERROR_OUT_OF_MEMORY:
+       return "out of memory";
+     case VP8_ENC_ERROR_BITSTREAM_OUT_OF_MEMORY:
+@@ -854,8 +854,7 @@ static MagickBooleanType WriteSingleWEBPPicture(const ImageInfo *image_info,
+ 
+   if (status == MagickFalse)
+     (void) ThrowMagickException(exception,GetMagickModule(),CorruptImageError,
+-      WebPErrorCodeMessage(picture->error_code),"`%s'",
+-      image->filename);
++      WebPErrorCodeMessage(picture->error_code),"`%s'",image->filename);
+ 
+   return(status);
+ }

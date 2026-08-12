@@ -1,0 +1,665 @@
+diff --git a/examples/heif_convert.cc b/examples/heif_convert.cc
+index a1434bc..06b6add 100644
+--- a/examples/heif_convert.cc
++++ b/examples/heif_convert.cc
+@@ -79,11 +79,13 @@ static void show_help(const char* argv0)
+                "Options:\n"
+                "  -h, --help              show help\n"
+                "  -q, --quality           quality (for JPEG output)\n"
++               "  -d, --decoder ID        use a specific decoder (see --list-decoders)\n"
+                "      --with-aux          also write auxiliary images (e.g. depth images)\n"
+                "      --with-xmp          write XMP metadata to file (output filename with .xmp suffix)\n"
+                "      --with-exif         write EXIF metadata to file (output filename with .exif suffix)\n"
+                "      --skip-exif-offset  skip EXIF metadata offset bytes\n"
+                "      --no-colons         replace ':' characters in auxiliary image filenames with '_'\n"
++               "      --list-decoders     list all available decoders (built-in and plugins)\n"
+                "      --quiet             do not output status messages to console\n";
+ }
+ 
+@@ -110,20 +112,51 @@ int option_no_colons = 0;
+ int option_with_xmp = 0;
+ int option_with_exif = 0;
+ int option_skip_exif_offset = 0;
++int option_list_decoders = 0;
+ 
+ static struct option long_options[] = {
+     {(char* const) "quality",          required_argument, 0,                        'q'},
+     {(char* const) "strict",           no_argument,       0,                        's'},
++    {(char* const) "decoder",          required_argument, 0,                        'd'},
+     {(char* const) "quiet",            no_argument,       &option_quiet,            1},
+     {(char* const) "with-aux",         no_argument,       &option_aux,              1},
+     {(char* const) "with-xmp",         no_argument,       &option_with_xmp,         1},
+     {(char* const) "with-exif",        no_argument,       &option_with_exif,        1},
+     {(char* const) "skip-exif-offset", no_argument,       &option_skip_exif_offset, 1},
+     {(char* const) "no-colons",        no_argument,       &option_no_colons,        1},
++    {(char* const) "list-decoders",    no_argument,       &option_list_decoders,    1},
+     {(char* const) "help",             no_argument,       0,                        'h'}
+ };
+ 
+ 
++#define MAX_DECODERS 20
++
++void list_decoders(heif_compression_format format)
++{
++  const heif_decoder_descriptor* decoders[MAX_DECODERS];
++  int n = heif_get_decoder_descriptors(format, decoders, MAX_DECODERS);
++
++  for (int i=0;i<n;i++) {
++    const char* id = heif_decoder_descriptor_get_id_name(decoders[i]);
++    if (id==nullptr) {
++      id = "---";
++    }
++
++    std::cout << "- " << id << " : " << heif_decoder_descriptor_get_name(decoders[i]) << "\n";
++  }
++}
++
++
++void list_all_decoders()
++{
++  std::cout << "HEIC decoders:\n";
++  list_decoders(heif_compression_HEVC);
++
++  std::cout << "AVIF decoders:\n";
++  list_decoders(heif_compression_AV1);
++}
++
++
+ class LibHeifInitializer {
+ public:
+   LibHeifInitializer() { heif_init(nullptr); }
+@@ -138,12 +171,13 @@ int main(int argc, char** argv)
+ 
+   int quality = -1;  // Use default quality.
+   bool strict_decoding = false;
++  const char* decoder_id = nullptr;
+ 
+   UNUSED(quality);  // The quality will only be used by encoders that support it.
+   //while ((opt = getopt(argc, argv, "q:s")) != -1) {
+   while (true) {
+     int option_index = 0;
+-    int c = getopt_long(argc, argv, "hq:s", long_options, &option_index);
++    int c = getopt_long(argc, argv, "hq:sd:", long_options, &option_index);
+     if (c == -1) {
+       break;
+     }
+@@ -152,6 +186,9 @@ int main(int argc, char** argv)
+       case 'q':
+         quality = atoi(optarg);
+         break;
++      case 'd':
++        decoder_id = optarg;
++        break;
+       case 's':
+         strict_decoding = true;
+         break;
+@@ -164,6 +201,11 @@ int main(int argc, char** argv)
+     }
+   }
+ 
++  if (option_list_decoders) {
++    list_all_decoders();
++    return 0;
++  }
++
+   if (optind + 2 > argc) {
+     // Need input and output filenames as additional arguments.
+     show_help(argv[0]);
+@@ -316,6 +358,7 @@ int main(int argc, char** argv)
+     encoder->UpdateDecodingOptions(handle, decode_options);
+ 
+     decode_options->strict_decoding = strict_decoding;
++    decode_options->decoder_id = decoder_id;
+ 
+     int bit_depth = heif_image_handle_get_luma_bits_per_pixel(handle);
+     if (bit_depth < 0) {
+diff --git a/examples/heif_enc.cc b/examples/heif_enc.cc
+index 2c02816..8c1f631 100644
+--- a/examples/heif_enc.cc
++++ b/examples/heif_enc.cc
+@@ -1160,9 +1160,9 @@ static void show_list_of_encoders(const heif_encoder_descriptor* const* encoder_
+ }
+ 
+ 
+-static void show_list_of_all_encoders(heif_context* context)
++static void show_list_of_all_encoders()
+ {
+-  for (auto compression_format : {heif_compression_AV1, heif_compression_HEVC}) {
++  for (auto compression_format : {heif_compression_HEVC, heif_compression_AV1}) {
+ 
+     switch (compression_format) {
+       case heif_compression_AV1:
+@@ -1179,10 +1179,9 @@ static void show_list_of_all_encoders(heif_context* context)
+ 
+ #define MAX_ENCODERS 10
+     const heif_encoder_descriptor* encoder_descriptors[MAX_ENCODERS];
+-    int count = heif_context_get_encoder_descriptors(context,
+-                                                     compression_format,
+-                                                     nullptr,
+-                                                     encoder_descriptors, MAX_ENCODERS);
++    int count = heif_get_encoder_descriptors(compression_format,
++                                             nullptr,
++                                             encoder_descriptors, MAX_ENCODERS);
+ #undef MAX_ENCODERS
+ 
+     show_list_of_encoders(encoder_descriptors, count);
+@@ -1333,18 +1332,10 @@ int main(int argc, char** argv)
+ 
+   // ==============================================================================
+ 
+-  std::shared_ptr<heif_context> context(heif_context_alloc(),
+-                                        [](heif_context* c) { heif_context_free(c); });
+-  if (!context) {
+-    std::cerr << "Could not create context object\n";
+-    return 1;
+-  }
+-
+-
+   struct heif_encoder* encoder = nullptr;
+ 
+   if (list_encoders) {
+-    show_list_of_all_encoders(context.get());
++    show_list_of_all_encoders();
+     return 0;
+   }
+ 
+@@ -1372,12 +1363,19 @@ int main(int argc, char** argv)
+ 
+   // --- select encoder
+ 
++  std::shared_ptr<heif_context> context(heif_context_alloc(),
++                                        [](heif_context* c) { heif_context_free(c); });
++  if (!context) {
++    std::cerr << "Could not create context object\n";
++    return 1;
++  }
++
++
+ #define MAX_ENCODERS 10
+   const heif_encoder_descriptor* encoder_descriptors[MAX_ENCODERS];
+-  int count = heif_context_get_encoder_descriptors(context.get(),
+-                                                   compressionFormat,
+-                                                   nullptr,
+-                                                   encoder_descriptors, MAX_ENCODERS);
++  int count = heif_get_encoder_descriptors(compressionFormat,
++                                           nullptr,
++                                           encoder_descriptors, MAX_ENCODERS);
+ #undef MAX_ENCODERS
+ 
+   const heif_encoder_descriptor* active_encoder_descriptor = nullptr;
+diff --git a/libheif/encoder_fuzzer.cc b/libheif/encoder_fuzzer.cc
+index f516ac7..7b767c4 100644
+--- a/libheif/encoder_fuzzer.cc
++++ b/libheif/encoder_fuzzer.cc
+@@ -151,10 +151,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
+ 
+   static const size_t kMaxEncoders = 5;
+   const heif_encoder_descriptor* encoder_descriptors[kMaxEncoders];
+-  int count = heif_context_get_encoder_descriptors(context.get(),
+-                                                   use_avif ? heif_compression_AV1 : heif_compression_HEVC,
+-                                                   nullptr,
+-                                                   encoder_descriptors, kMaxEncoders);
++  int count = heif_get_encoder_descriptors(use_avif ? heif_compression_AV1 : heif_compression_HEVC,
++                                           nullptr,
++                                           encoder_descriptors, kMaxEncoders);
+   assert(count >= 0);
+   if (count == 0) {
+     return 0;
+diff --git a/libheif/heif.cc b/libheif/heif.cc
+index 6cda068..155e459 100644
+--- a/libheif/heif.cc
++++ b/libheif/heif.cc
+@@ -903,14 +903,14 @@ heif_decoding_options* heif_decoding_options_alloc()
+ {
+   auto options = new heif_decoding_options;
+ 
+-  options->version = 3;
++  options->version = 4;
+ 
+   options->ignore_transformations = false;
+ 
+-  options->start_progress = NULL;
+-  options->on_progress = NULL;
+-  options->end_progress = NULL;
+-  options->progress_user_data = NULL;
++  options->start_progress = nullptr;
++  options->on_progress = nullptr;
++  options->end_progress = nullptr;
++  options->progress_user_data = nullptr;
+ 
+   // version 2
+ 
+@@ -920,6 +920,10 @@ heif_decoding_options* heif_decoding_options_alloc()
+ 
+   options->strict_decoding = false;
+ 
++
++
++  options->decoder_id = nullptr;
++
+   return options;
+ }
+ 
+@@ -1629,7 +1633,7 @@ struct heif_error heif_register_decoder(heif_context* heif, const heif_decoder_p
+   if (!decoder_plugin) {
+     return error_null_parameter;
+   }
+-  else if (decoder_plugin->plugin_api_version > 2) {
++  else if (decoder_plugin->plugin_api_version > 3) {
+     return error_unsupported_plugin_version;
+   }
+ 
+@@ -1643,7 +1647,7 @@ struct heif_error heif_register_decoder_plugin(const heif_decoder_plugin* decode
+   if (!decoder_plugin) {
+     return error_null_parameter;
+   }
+-  else if (decoder_plugin->plugin_api_version > 2) {
++  else if (decoder_plugin->plugin_api_version > 3) {
+     return error_unsupported_plugin_version;
+   }
+ 
+@@ -1735,6 +1739,15 @@ int heif_context_get_encoder_descriptors(struct heif_context* ctx,
+                                          const char* name,
+                                          const struct heif_encoder_descriptor** out_encoder_descriptors,
+                                          int count)
++{
++  return heif_get_encoder_descriptors(format, name, out_encoder_descriptors, count);
++}
++
++
++int heif_get_encoder_descriptors(enum heif_compression_format format,
++                                 const char* name,
++                                 const struct heif_encoder_descriptor** out_encoder_descriptors,
++                                 int count)
+ {
+   if (out_encoder_descriptors == nullptr || count <= 0) {
+     return 0;
+@@ -1764,6 +1777,71 @@ const char* heif_encoder_descriptor_get_id_name(const struct heif_encoder_descri
+ }
+ 
+ 
++int heif_get_decoder_descriptors(enum heif_compression_format format_filter,
++                                 const struct heif_decoder_descriptor** out_decoders,
++                                 int count)
++{
++  struct decoder_with_priority {
++    const heif_decoder_plugin* plugin;
++    int priority;
++  };
++
++  std::vector<decoder_with_priority> plugins;
++  std::vector<heif_compression_format> formats;
++  if (format_filter == heif_compression_undefined) {
++    formats = { heif_compression_HEVC, heif_compression_AV1 };
++  }
++  else {
++    formats.emplace_back(format_filter);
++  }
++
++  for (const auto* plugin : s_decoder_plugins) {
++    for (auto& format : formats) {
++      int priority = plugin->does_support_format(format);
++      if (priority) {
++        plugins.push_back({plugin, priority});
++        break;
++      }
++    }
++  }
++
++  if (out_decoders == nullptr) {
++    return (int)plugins.size();
++  }
++
++  std::sort(plugins.begin(), plugins.end(), [](const decoder_with_priority& a, const decoder_with_priority& b) {
++    return a.priority > b.priority;
++  });
++
++  int nDecodersReturned = std::min(count, (int)plugins.size());
++
++  for (int i=0;i<nDecodersReturned;i++) {
++    out_decoders[i] = (heif_decoder_descriptor*)(plugins[i].plugin);
++  }
++
++  return nDecodersReturned;
++}
++
++
++const char* heif_decoder_descriptor_get_name(const struct heif_decoder_descriptor* descriptor)
++{
++  auto decoder = (heif_decoder_plugin*)descriptor;
++  return decoder->get_plugin_name();
++}
++
++
++const char* heif_decoder_descriptor_get_id_name(const struct heif_decoder_descriptor* descriptor)
++{
++  auto decoder = (heif_decoder_plugin*)descriptor;
++  if (decoder->plugin_api_version < 3) {
++    return nullptr;
++  }
++  else {
++    return decoder->id_name;
++  }
++}
++
++
+ enum heif_compression_format
+ heif_encoder_descriptor_get_compression_format(const struct heif_encoder_descriptor* descriptor)
+ {
+@@ -1822,7 +1900,7 @@ struct heif_error heif_context_get_encoder(struct heif_context* context,
+ 
+ int heif_have_decoder_for_format(enum heif_compression_format format)
+ {
+-  auto plugin = heif::get_decoder(format);
++  auto plugin = heif::get_decoder(format, nullptr);
+   return plugin != nullptr;
+ }
+ 
+diff --git a/libheif/heif.h b/libheif/heif.h
+index 7b9a058..2de78e3 100644
+--- a/libheif/heif.h
++++ b/libheif/heif.h
+@@ -45,6 +45,7 @@ extern "C" {
+ //  1.11         1             2            4             1             1            1
+ //  1.13         1             3            4             1             1            1
+ //  1.14         1             3            5             1             1            1
++
+ 
+ #if defined(_MSC_VER) && !defined(LIBHEIF_STATIC_BUILD)
+ #ifdef LIBHEIF_EXPORTS
+@@ -1023,6 +1024,13 @@ struct heif_decoding_options
+   // When enabled, an error is returned for invalid input. Otherwise, it will try its best and
+   // add decoding warnings to the decoded heif_image. Default is non-strict.
+   uint8_t strict_decoding;
++
++
++
++
++
++
++  const char* decoder_id;
+ };
+ 
+ 
+@@ -1201,7 +1209,29 @@ struct heif_encoder_descriptor;
+ // the parameters are provided.
+ struct heif_encoder_parameter;
+ 
++struct heif_decoder_descriptor;
++
++
++
++
++
++
++LIBHEIF_API
++int heif_get_decoder_descriptors(enum heif_compression_format format_filter,
++                                 const struct heif_decoder_descriptor** out_decoders,
++                                 int count);
++
++
++LIBHEIF_API
++const char* heif_decoder_descriptor_get_name(const struct heif_decoder_descriptor*);
+ 
++
++
++
++LIBHEIF_API
++const char* heif_decoder_descriptor_get_id_name(const struct heif_decoder_descriptor*);
++
++
+ // Get a list of available encoders. You can filter the encoders by compression format and name.
+ // Use format_filter==heif_compression_undefined and name_filter==NULL as wildcards.
+ // The returned list of encoders is sorted by their priority (which is a plugin property).
+@@ -1213,6 +1243,16 @@ int heif_context_get_encoder_descriptors(struct heif_context*, // TODO: why do w
+                                          const struct heif_encoder_descriptor** out_encoders,
+                                          int count);
+ 
++
++
++
++
++LIBHEIF_API
++int heif_get_encoder_descriptors(enum heif_compression_format format_filter,
++                                 const char* name_filter,
++                                 const struct heif_encoder_descriptor** out_encoders,
++                                 int count);
++
+ // Return a long, descriptive name of the encoder (including version information).
+ LIBHEIF_API
+ const char* heif_encoder_descriptor_get_name(const struct heif_encoder_descriptor*);
+diff --git a/libheif/heif_context.cc b/libheif/heif_context.cc
+index bde8458..d6bf387 100644
+--- a/libheif/heif_context.cc
++++ b/libheif/heif_context.cc
+@@ -469,7 +469,7 @@ void HeifContext::register_decoder(const heif_decoder_plugin* decoder_plugin)
+ }
+ 
+ 
+-const struct heif_decoder_plugin* HeifContext::get_decoder(enum heif_compression_format type) const
++const struct heif_decoder_plugin* HeifContext::get_decoder(enum heif_compression_format type, const char* name_id) const
+ {
+   int highest_priority = 0;
+   const struct heif_decoder_plugin* best_plugin = nullptr;
+@@ -477,7 +477,7 @@ const struct heif_decoder_plugin* HeifContext::get_decoder(enum heif_compression
+ 
+   // search global plugins
+ 
+-  best_plugin = heif::get_decoder(type);
++  best_plugin = heif::get_decoder(type, name_id);
+   if (best_plugin != nullptr) {
+     highest_priority = best_plugin->does_support_format(type);
+   }
+@@ -487,6 +487,13 @@ const struct heif_decoder_plugin* HeifContext::get_decoder(enum heif_compression
+ 
+   for (const auto* plugin : m_decoder_plugins) {
+     int priority = plugin->does_support_format(type);
++
++    if (priority > 0 && name_id && plugin->plugin_api_version >= 3) {
++      if (strcmp(name_id, plugin->id_name) == 0) {
++        return plugin;
++      }
++    }
++
+     if (priority > highest_priority) {
+       highest_priority = priority;
+       best_plugin = plugin;
+@@ -1145,11 +1152,13 @@ Error HeifContext::decode_image_planar(heif_item_id ID,
+       compression = heif_compression_AV1;
+     }
+ 
+-    const struct heif_decoder_plugin* decoder_plugin = get_decoder(compression);
++    const struct heif_decoder_plugin* decoder_plugin = get_decoder(compression, options->decoder_id);
+     if (!decoder_plugin) {
+       return Error(heif_error_Unsupported_feature, heif_suberror_Unsupported_codec);
+     }
+ 
++    std::cout << "using decoder: " << decoder_plugin->get_plugin_name() << "\n";
++
+     std::vector<uint8_t> data;
+     error = m_heif_file->get_compressed_image_data(ID, &data);
+     if (error) {
+diff --git a/libheif/heif_context.h b/libheif/heif_context.h
+index 71e8064..2d2d6bf 100644
+--- a/libheif/heif_context.h
++++ b/libheif/heif_context.h
+@@ -412,7 +412,7 @@ namespace heif {
+     void write(StreamWriter& writer);
+ 
+   private:
+-    const struct heif_decoder_plugin* get_decoder(enum heif_compression_format type) const;
++    const struct heif_decoder_plugin* get_decoder(enum heif_compression_format type, const char* name_id) const;
+ 
+     std::set<const struct heif_decoder_plugin*> m_decoder_plugins;
+ 
+diff --git a/libheif/heif_init.cc b/libheif/heif_init.cc
+index a476c64..5cf2080 100644
+--- a/libheif/heif_init.cc
++++ b/libheif/heif_init.cc
+@@ -331,7 +331,6 @@ struct heif_error heif_load_plugins(const char* directory,
+   int nPlugins = 0;
+ 
+   for (const auto& filename : libraryFiles) {
+-
+     const struct heif_plugin_info* info = nullptr;
+     auto err = heif_load_plugin(filename.c_str(), &info);
+     if (err.code == 0) {
+diff --git a/libheif/heif_plugin.h b/libheif/heif_plugin.h
+index 3508556..2f11812 100644
+--- a/libheif/heif_plugin.h
++++ b/libheif/heif_plugin.h
+@@ -41,6 +41,7 @@ extern "C" {
+ //  1.4          1         1          2
+ //  1.8          1         2          2
+ //  1.13         2         3          2
++
+ 
+ 
+ // ====================================================================================================
+@@ -68,7 +69,7 @@ struct heif_decoder_plugin
+ 
+   // Query whether the plugin supports decoding of the given format
+   // Result is a priority value. The plugin with the largest value wins.
+-  // Default priority is 100.
++
+   int (* does_support_format)(enum heif_compression_format format);
+ 
+   // Create a new decoder context for decoding an image
+@@ -102,6 +103,12 @@ struct heif_decoder_plugin
+ 
+   // Reset decoder, such that we can feed in new data for another image.
+   // void (*reset_image)(void* decoder);
++
++
++
++  const char* id_name;
++
++
+ };
+ 
+ 
+diff --git a/libheif/heif_plugin_registry.cc b/libheif/heif_plugin_registry.cc
+index 58b03fd..5587b69 100644
+--- a/libheif/heif_plugin_registry.cc
++++ b/libheif/heif_plugin_registry.cc
+@@ -24,6 +24,7 @@
+ 
+ #include <utility>
+ #include <cstring>
++#include <algorithm>
+ 
+ #include "heif_plugin_registry.h"
+ 
+@@ -118,13 +119,21 @@ void heif::register_decoder(const heif_decoder_plugin* decoder_plugin)
+ }
+ 
+ 
+-const struct heif_decoder_plugin* heif::get_decoder(enum heif_compression_format type)
++const struct heif_decoder_plugin* heif::get_decoder(enum heif_compression_format type, const char* name_id)
+ {
+   int highest_priority = 0;
+   const struct heif_decoder_plugin* best_plugin = nullptr;
+ 
+   for (const auto* plugin : s_decoder_plugins) {
++
+     int priority = plugin->does_support_format(type);
++
++    if (priority > 0 && name_id && plugin->plugin_api_version >= 3) {
++      if (strcmp(name_id, plugin->id_name)==0) {
++        return plugin;
++      }
++    }
++
+     if (priority > highest_priority) {
+       highest_priority = priority;
+       best_plugin = plugin;
+@@ -134,6 +143,7 @@ const struct heif_decoder_plugin* heif::get_decoder(enum heif_compression_format
+   return best_plugin;
+ }
+ 
++
+ void heif::register_encoder(const heif_encoder_plugin* encoder_plugin)
+ {
+   if (encoder_plugin->init_plugin) {
+diff --git a/libheif/heif_plugin_registry.h b/libheif/heif_plugin_registry.h
+index 9b551be..fed5240 100644
+--- a/libheif/heif_plugin_registry.h
++++ b/libheif/heif_plugin_registry.h
+@@ -67,7 +67,7 @@ namespace heif {
+ 
+   void register_encoder(const heif_encoder_plugin* encoder_plugin);
+ 
+-  const struct heif_decoder_plugin* get_decoder(enum heif_compression_format type);
++  const struct heif_decoder_plugin* get_decoder(enum heif_compression_format type, const char* name_id);
+ 
+   const struct heif_encoder_plugin* get_encoder(enum heif_compression_format type);
+ 
+diff --git a/libheif/plugins/heif_decoder_aom.cc b/libheif/plugins/heif_decoder_aom.cc
+index 8a54fda..97242d7 100644
+--- a/libheif/plugins/heif_decoder_aom.cc
++++ b/libheif/plugins/heif_decoder_aom.cc
+@@ -281,7 +281,7 @@ struct heif_error aom_decode_image(void* decoder_raw, struct heif_image** out_im
+ 
+ static const struct heif_decoder_plugin decoder_aom
+     {
+-        2,
++        3,
+         aom_plugin_name,
+         aom_init_plugin,
+         aom_deinit_plugin,
+@@ -290,7 +290,8 @@ static const struct heif_decoder_plugin decoder_aom
+         aom_free_decoder,
+         aom_push_data,
+         aom_decode_image,
+-        aom_set_strict_decoding
++        aom_set_strict_decoding,
++        "aom"
+     };
+ 
+ 
+diff --git a/libheif/plugins/heif_decoder_dav1d.cc b/libheif/plugins/heif_decoder_dav1d.cc
+index 793acd6..e966b51 100644
+--- a/libheif/plugins/heif_decoder_dav1d.cc
++++ b/libheif/plugins/heif_decoder_dav1d.cc
+@@ -297,7 +297,7 @@ struct heif_error dav1d_decode_image(void* decoder_raw, struct heif_image** out_
+ 
+ static const struct heif_decoder_plugin decoder_dav1d
+     {
+-        2,
++        3,
+         dav1d_plugin_name,
+         dav1d_init_plugin,
+         dav1d_deinit_plugin,
+@@ -306,7 +306,8 @@ static const struct heif_decoder_plugin decoder_dav1d
+         dav1d_free_decoder,
+         dav1d_push_data,
+         dav1d_decode_image,
+-        dav1d_set_strict_decoding
++        dav1d_set_strict_decoding,
++        "dav1d"
+     };
+ 
+ 
+diff --git a/libheif/plugins/heif_decoder_libde265.cc b/libheif/plugins/heif_decoder_libde265.cc
+index a254690..f9a5f69 100644
+--- a/libheif/plugins/heif_decoder_libde265.cc
++++ b/libheif/plugins/heif_decoder_libde265.cc
+@@ -381,7 +381,7 @@ static const struct heif_decoder_plugin decoder_libde265
+ 
+ static const struct heif_decoder_plugin decoder_libde265
+     {
+-        2,
++        3,
+         libde265_plugin_name,
+         libde265_init_plugin,
+         libde265_deinit_plugin,
+@@ -390,7 +390,8 @@ static const struct heif_decoder_plugin decoder_libde265
+         libde265_free_decoder,
+         libde265_v1_push_data,
+         libde265_v1_decode_image,
+-        libde265_set_strict_decoding
++        libde265_set_strict_decoding,
++        "libde265"
+     };
+ 
+ #endif

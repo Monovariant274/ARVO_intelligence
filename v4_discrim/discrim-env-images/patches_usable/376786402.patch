@@ -1,0 +1,87 @@
+diff --git a/src/lib/ndpi_utils.c b/src/lib/ndpi_utils.c
+index 782f85f..a51f6c0 100644
+--- a/src/lib/ndpi_utils.c
++++ b/src/lib/ndpi_utils.c
+@@ -929,11 +929,12 @@ static const unsigned char base64_table[65] =
+  * base64_decode - Base64 decode
+  * @src: Data to be decoded
+  * @len: Length of the data to be decoded
+- * @out_len: Pointer to output length variable
++
+  * Returns: Allocated buffer of out_len bytes of decoded data,
+  * or %NULL on failure
+  *
+  * Caller is responsible for freeing the returned buffer.
++
+  */
+ u_char* ndpi_base64_decode(const u_char *src, size_t len, size_t *out_len) {
+   u_char dtable[256], *out, *pos, block[4], tmp;
+@@ -954,8 +955,8 @@ u_char* ndpi_base64_decode(const u_char *src, size_t len, size_t *out_len) {
+   if(count == 0 || count % 4)
+     return NULL;
+ 
+-  olen = count / 4 * 3;
+-  pos = out = ndpi_malloc(olen);
++  olen = count / 4 * 3 + 1;
++  pos = out = ndpi_calloc(1, olen);
+   if(out == NULL)
+     return NULL;
+ 
+diff --git a/src/lib/protocols/http.c b/src/lib/protocols/http.c
+index 1c46816..bdbd74f 100644
+--- a/src/lib/protocols/http.c
++++ b/src/lib/protocols/http.c
+@@ -1027,29 +1027,31 @@ static void check_content_type_and_change_protocol(struct ndpi_detection_module_
+     NDPI_LOG_DBG2(ndpi_struct, "Authorization line found %.*s\n",
+ 		  packet->authorization_line.len, packet->authorization_line.ptr);
+ 
+-    if((a = ndpi_strncasestr((const char*)packet->authorization_line.ptr,
+-			     "Basic", packet->authorization_line.len))
+-       || (b = ndpi_strncasestr((const char*)packet->authorization_line.ptr,
+-				"Digest", packet->authorization_line.len))) {
+-      size_t content_len;
+-      u_int len = b ? 7 : 6;
+-      u_char *content = ndpi_base64_decode((const u_char*)&packet->authorization_line.ptr[len],
+-					   packet->authorization_line.len - len, &content_len);
+-
+-      if(content != NULL) {
+-	char *double_dot = strchr((char*)content, ':');
+-
+-	if(double_dot) {
+-	  double_dot[0] = '\0';
+-	  flow->http.username = ndpi_strdup((char*)content);
+-	  flow->http.password = ndpi_strdup(&double_dot[1]);
+-	}
+-	
+-	ndpi_free(content);
+-      }
++    if(flow->http.username == NULL && flow->http.password == NULL) {
++      if((a = ndpi_strncasestr((const char*)packet->authorization_line.ptr,
++                               "Basic", packet->authorization_line.len))
++         || (b = ndpi_strncasestr((const char*)packet->authorization_line.ptr,
++                                  "Digest", packet->authorization_line.len))) {
++        size_t content_len;
++        u_int len = b ? 7 : 6;
++        u_char *content = ndpi_base64_decode((const u_char*)&packet->authorization_line.ptr[len],
++                                             packet->authorization_line.len - len, &content_len);
++
++        if(content != NULL) {
++          char *double_dot = strchr((char*)content, ':');
++
++          if(double_dot) {
++            double_dot[0] = '\0';
++            flow->http.username = ndpi_strdup((char*)content);
++            flow->http.password = ndpi_strdup(&double_dot[1]);
++          }
+ 
+-      ndpi_set_risk(flow, NDPI_CLEAR_TEXT_CREDENTIALS,
+-		    "Found credentials in HTTP Auth Line");
++          ndpi_free(content);
++        }
++
++        ndpi_set_risk(flow, NDPI_CLEAR_TEXT_CREDENTIALS,
++                      "Found credentials in HTTP Auth Line");
++      }
+     }
+   }
+ 

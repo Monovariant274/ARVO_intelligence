@@ -1,0 +1,144 @@
+diff --git a/fuzz/compress12_lossless.cc b/fuzz/compress12_lossless.cc
+index 3ac10f7..fb94608 100644
+--- a/fuzz/compress12_lossless.cc
++++ b/fuzz/compress12_lossless.cc
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C)2021-2023 D. R. Commander.  All Rights Reserved.
++
+  *
+  * Redistribution and use in source and binary forms, with or without
+  * modification, are permitted provided that the following conditions are met:
+@@ -85,7 +85,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+ 
+     maxBufSize = tj3JPEGBufSize(width, height, TJSAMP_444);
+     if (tj3Get(handle, TJPARAM_NOREALLOC)) {
+-      if ((dstBuf = (unsigned char *)malloc(maxBufSize)) == NULL)
++      if ((dstBuf = (unsigned char *)tj3Alloc(maxBufSize)) == NULL)
+         goto bailout;
+     } else
+       dstBuf = NULL;
+diff --git a/fuzz/compress16_lossless.cc b/fuzz/compress16_lossless.cc
+index 35cfff6..fe646bf 100644
+--- a/fuzz/compress16_lossless.cc
++++ b/fuzz/compress16_lossless.cc
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C)2021-2023 D. R. Commander.  All Rights Reserved.
++
+  *
+  * Redistribution and use in source and binary forms, with or without
+  * modification, are permitted provided that the following conditions are met:
+@@ -85,7 +85,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+ 
+     maxBufSize = tj3JPEGBufSize(width, height, TJSAMP_444);
+     if (tj3Get(handle, TJPARAM_NOREALLOC)) {
+-      if ((dstBuf = (unsigned char *)malloc(maxBufSize)) == NULL)
++      if ((dstBuf = (unsigned char *)tj3Alloc(maxBufSize)) == NULL)
+         goto bailout;
+     } else
+       dstBuf = NULL;
+diff --git a/fuzz/compress_lossless.cc b/fuzz/compress_lossless.cc
+index d094cad..34dbb89 100644
+--- a/fuzz/compress_lossless.cc
++++ b/fuzz/compress_lossless.cc
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C)2021-2023 D. R. Commander.  All Rights Reserved.
++
+  *
+  * Redistribution and use in source and binary forms, with or without
+  * modification, are permitted provided that the following conditions are met:
+@@ -84,7 +84,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+ 
+     maxBufSize = tj3JPEGBufSize(width, height, TJSAMP_444);
+     if (tj3Get(handle, TJPARAM_NOREALLOC)) {
+-      if ((dstBuf = (unsigned char *)malloc(maxBufSize)) == NULL)
++      if ((dstBuf = (unsigned char *)tj3Alloc(maxBufSize)) == NULL)
+         goto bailout;
+     } else
+       dstBuf = NULL;
+diff --git a/fuzz/compress_yuv.cc b/fuzz/compress_yuv.cc
+index ddde0b8..af30b70 100644
+--- a/fuzz/compress_yuv.cc
++++ b/fuzz/compress_yuv.cc
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C)2021-2023 D. R. Commander.  All Rights Reserved.
++
+  *
+  * Redistribution and use in source and binary forms, with or without
+  * modification, are permitted provided that the following conditions are met:
+@@ -87,7 +87,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+       continue;
+ 
+     maxBufSize = tj3JPEGBufSize(width, height, tests[ti].subsamp);
+-    if ((dstBuf = (unsigned char *)malloc(maxBufSize)) == NULL)
++    if ((dstBuf = (unsigned char *)tj3Alloc(maxBufSize)) == NULL)
+       goto bailout;
+     if ((yuvBuf =
+          (unsigned char *)malloc(tj3YUVBufSize(width, 1, height,
+diff --git a/fuzz/decompress.cc b/fuzz/decompress.cc
+index bb14c6b..1b1aefd 100644
+--- a/fuzz/decompress.cc
++++ b/fuzz/decompress.cc
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C)2021-2023 D. R. Commander.  All Rights Reserved.
++
+  *
+  * Redistribution and use in source and binary forms, with or without
+  * modification, are permitted provided that the following conditions are met:
+@@ -95,7 +95,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+         tj3SetCroppingRegion(handle, TJUNCROPPED);
+     }
+ 
+-    if ((dstBuf = malloc(w * h * tjPixelSize[pf] * sampleSize)) == NULL)
++    if ((dstBuf = tj3Alloc(w * h * tjPixelSize[pf] * sampleSize)) == NULL)
+       goto bailout;
+ 
+     if (precision == 8) {
+diff --git a/fuzz/decompress_yuv.cc b/fuzz/decompress_yuv.cc
+index 3625210..3f371c6 100644
+--- a/fuzz/decompress_yuv.cc
++++ b/fuzz/decompress_yuv.cc
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C)2021-2023 D. R. Commander.  All Rights Reserved.
++
+  *
+  * Redistribution and use in source and binary forms, with or without
+  * modification, are permitted provided that the following conditions are met:
+@@ -83,7 +83,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+         tj3SetScalingFactor(handle, TJUNSCALED);
+     }
+ 
+-    if ((dstBuf = (unsigned char *)malloc(w * h * tjPixelSize[pf])) == NULL)
++    if ((dstBuf = (unsigned char *)tj3Alloc(w * h * tjPixelSize[pf])) == NULL)
+       goto bailout;
+     if ((yuvBuf =
+          (unsigned char *)malloc(tj3YUVBufSize(w, 1, h, jpegSubsamp))) == NULL)
+diff --git a/fuzz/transform.cc b/fuzz/transform.cc
+index f3b5b26..ba3acf2 100644
+--- a/fuzz/transform.cc
++++ b/fuzz/transform.cc
+@@ -101,8 +101,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+   transforms[0].options = TJXOPT_GRAY | TJXOPT_CROP | TJXOPT_COPYNONE |
+                           TJXOPT_OPTIMIZE;
+   dstBufs[0] =
+-    (unsigned char *)malloc(tj3JPEGBufSize((height + 1) / 2, (width + 1) / 2,
+-                                           jpegSubsamp));
++    (unsigned char *)tj3Alloc(tj3JPEGBufSize((height + 1) / 2, (width + 1) / 2,
++                                             jpegSubsamp));
+   if (!dstBufs[0])
+     goto bailout;
+ 
+@@ -125,7 +125,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+   transforms[0].op = TJXOP_ROT90;
+   transforms[0].options = TJXOPT_TRIM | TJXOPT_ARITHMETIC;
+   dstBufs[0] =
+-    (unsigned char *)malloc(tj3JPEGBufSize(height, width, jpegSubsamp));
++    (unsigned char *)tj3Alloc(tj3JPEGBufSize(height, width, jpegSubsamp));
+   if (!dstBufs[0])
+     goto bailout;
+ 

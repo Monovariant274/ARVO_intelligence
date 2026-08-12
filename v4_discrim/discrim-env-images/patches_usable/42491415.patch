@@ -1,0 +1,24 @@
+diff --git a/src/imageformats/ani.cpp b/src/imageformats/ani.cpp
+index 47d89a9..13a0a07 100644
+--- a/src/imageformats/ani.cpp
++++ b/src/imageformats/ani.cpp
+@@ -109,6 +109,9 @@ bool ANIHandler::read(QImage *outImage)
+     if (!m_imageSequence.isEmpty()) {
+         if (m_currentImageNumber < m_imageSequence.count()) {
+             const int nextFrame = m_imageSequence.at(m_currentImageNumber);
++            if (nextFrame < 0 || nextFrame >= m_frameOffsets.count()) {
++                return false;
++            }
+             const auto nextOffset = m_frameOffsets.at(nextFrame);
+             device()->seek(nextOffset);
+         } else if (m_currentImageNumber == m_imageSequence.count()) {
+@@ -325,6 +328,9 @@ bool ANIHandler::ensureScanned() const
+     }
+ 
+     const auto riffSizeData = device()->read(sizeof(quint32_le));
++    if (riffSizeData.size() != sizeof(quint32_le)) {
++        return false;
++    }
+     const auto riffSize = *(reinterpret_cast<const quint32_le *>(riffSizeData.data()));
+     // TODO do a basic sanity check if the size is enough to hold some metadata and a frame?
+     if (riffSize == 0) {

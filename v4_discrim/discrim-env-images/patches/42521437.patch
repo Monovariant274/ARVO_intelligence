@@ -1,0 +1,13 @@
+diff --git a/code/AssetLib/MDL/MDLMaterialLoader.cpp b/code/AssetLib/MDL/MDLMaterialLoader.cpp
+index f00b6bd..3d39fa6 100644
+--- a/code/AssetLib/MDL/MDLMaterialLoader.cpp
++++ b/code/AssetLib/MDL/MDLMaterialLoader.cpp
+@@ -481,6 +481,8 @@ void MDLImporter::ParseSkinLump_3DGS_MDL7(
+         pcNew->achFormatHint[2] = 's';
+         pcNew->achFormatHint[3] = '\0';
+ 
++        SizeCheck(szCurrent + pcNew->mWidth);
++
+         pcNew->pcData = (aiTexel *)new unsigned char[pcNew->mWidth];
+         memcpy(pcNew->pcData, szCurrent, pcNew->mWidth);
+         szCurrent += iWidth;

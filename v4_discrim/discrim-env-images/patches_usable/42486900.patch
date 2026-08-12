@@ -1,0 +1,74 @@
+diff --git a/src/core/common/message.cpp b/src/core/common/message.cpp
+index d4341b8..6dbf806 100644
+--- a/src/core/common/message.cpp
++++ b/src/core/common/message.cpp
+@@ -537,7 +537,7 @@ void Message::Write(uint16_t aOffset, uint16_t aLength, const void *aBuf)
+ 
+     while (chunk.GetLength() > 0)
+     {
+-        memcpy(chunk.GetData(), bufPtr, chunk.GetLength());
++        memmove(chunk.GetData(), bufPtr, chunk.GetLength());
+         bufPtr += chunk.GetLength();
+         GetNextChunk(aLength, chunk);
+     }
+@@ -548,6 +548,13 @@ uint16_t Message::CopyTo(uint16_t aSourceOffset, uint16_t aDestinationOffset, ui
+     uint16_t bytesCopied = 0;
+     Chunk    chunk;
+ 
++
++
++
++
++
++    OT_ASSERT((&aMessage != this) || (aSourceOffset >= aDestinationOffset));
++
+     GetFirstChunk(aSourceOffset, aLength, chunk);
+ 
+     while (chunk.GetLength() > 0)
+diff --git a/src/core/common/message.hpp b/src/core/common/message.hpp
+index 3492e91..f9b3349 100644
+--- a/src/core/common/message.hpp
++++ b/src/core/common/message.hpp
+@@ -532,6 +532,10 @@ public:
+     /**
+      * This method copies bytes from one message to another.
+      *
++
++
++
++
+      * @param[in] aSourceOffset       Byte offset within the source message to begin reading.
+      * @param[in] aDestinationOffset  Byte offset within the destination message to begin writing.
+      * @param[in] aLength             Number of bytes to copy.
+diff --git a/tests/unit/test_message.cpp b/tests/unit/test_message.cpp
+index f97494b..86ffcd1 100644
+--- a/tests/unit/test_message.cpp
++++ b/tests/unit/test_message.cpp
+@@ -144,7 +144,27 @@ void TestMessage(void)
+         }
+     }
+ 
++
++
++    for (uint16_t srcOffset = 0; srcOffset < kMaxSize; srcOffset++)
++    {
++        uint16_t bytesCopied;
++
++        message->Write(0, kMaxSize, writeBuffer);
++
++        bytesCopied = message->CopyTo(srcOffset, 0, kMaxSize, *message);
++        VerifyOrQuit(bytesCopied == kMaxSize - srcOffset, "CopyTo() failed");
++
++        VerifyOrQuit(message->Read(0, kMaxSize, readBuffer) == kMaxSize, "Message::Read failed");
++
++        VerifyOrQuit(memcmp(&readBuffer[0], &writeBuffer[srcOffset], bytesCopied) == 0,
++                     "CopyTo() changed before srcOffset");
++        VerifyOrQuit(memcmp(&readBuffer[bytesCopied], &writeBuffer[bytesCopied], kMaxSize - bytesCopied) == 0,
++                     "CopyTo() write error");
++    }
++
+     message->Free();
++    message2->Free();
+ 
+     testFreeInstance(instance);
+ }

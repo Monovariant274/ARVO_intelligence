@@ -1,0 +1,13 @@
+diff --git a/lib/transfer.c b/lib/transfer.c
+index c586c72..9712a7f 100644
+--- a/lib/transfer.c
++++ b/lib/transfer.c
+@@ -1519,7 +1519,7 @@ static void strcpy_url(char *output, const char *url, bool relative)
+       left = FALSE;
+       /* fall through */
+     default:
+-      if(!ISPRINT(*iptr)) {
++      if(*iptr >= 0x80) {
+         snprintf(optr, 4, "%%%02x", *iptr);
+         optr += 3;
+       }

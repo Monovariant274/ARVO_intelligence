@@ -1,0 +1,40 @@
+diff --git a/docs/Doxyfile.local b/docs/Doxyfile.local
+new file mode 100644
+index 0000000..c866189
+--- /dev/null
++++ b/docs/Doxyfile.local
+@@ -0,0 +1,7 @@
++### KApiDox Project-specific Overrides File
++
++# define so that deprecated API is not skipped
++PREDEFINED += \
++    "KARCHIVE_ENABLE_DEPRECATED_SINCE(x, y)=1" \
++    "KARCHIVE_BUILD_DEPRECATED_SINCE(x, y)=1" \
++    "KARCHIVE_DEPRECATED_VERSION(x, y, t)="
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 2b69928..b5d2562 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -124,6 +124,7 @@ if(BUILD_QCH)
+         BLANK_MACROS
+             KARCHIVE_EXPORT
+             KARCHIVE_DEPRECATED
++            "KARCHIVE_DEPRECATED_VERSION(x, y, t)"
+         TAGFILE_INSTALL_DESTINATION ${KDE_INSTALL_QTQCHDIR}
+         QCH_INSTALL_DESTINATION ${KDE_INSTALL_QTQCHDIR}
+         COMPONENT Devel
+diff --git a/src/k7zip.cpp b/src/k7zip.cpp
+index f583804..c7e633a 100644
+--- a/src/k7zip.cpp
++++ b/src/k7zip.cpp
+@@ -1683,6 +1683,10 @@ QByteArray K7Zip::K7ZipPrivate::readAndDecodePackedStreams(bool readMainStreamIn
+         inflatedDatas.clear();
+ 
+         if (folder->unpackCRCDefined) {
++            if ((size_t)inflated.size() < unpackSize) {
++                qCDebug(KArchiveLog) << "wrong crc size data";
++                return QByteArray();
++            }
+             quint32 crc = crc32(0, (Bytef *)(inflated.data()), unpackSize);
+             if (crc != folder->unpackCRC) {
+                 qCDebug(KArchiveLog) << "wrong crc";

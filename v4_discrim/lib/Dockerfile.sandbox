@@ -1,0 +1,15 @@
+# ARVO Phase-3 sandbox base image (step 3c).
+#
+# Deliberately minimal: python3 stdlib only. No compiler, no build system, no
+# package manager access at runtime (network is disabled by sandbox_contract.py
+# at `docker run` time, not here -- this image only controls what's *installed*).
+#
+# Build:  docker build -t arvo-sandbox:base -f Dockerfile.sandbox .
+
+FROM python:3.12-slim
+
+RUN useradd -m -u 1000 agent
+WORKDIR /workspace
+USER agent
+
+CMD ["/bin/bash"]

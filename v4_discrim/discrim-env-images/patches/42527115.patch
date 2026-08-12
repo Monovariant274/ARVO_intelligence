@@ -1,0 +1,36 @@
+diff --git a/bfd/elf64-ia64-vms.c b/bfd/elf64-ia64-vms.c
+index f8e9922f..ab1f18b8 100644
+--- a/bfd/elf64-ia64-vms.c
++++ b/bfd/elf64-ia64-vms.c
+@@ -4713,7 +4713,8 @@ static bool
+ elf64_vms_close_and_cleanup (bfd *abfd)
+ {
+   bool ret = true;
+-  if (bfd_get_format (abfd) == bfd_object)
++  if (bfd_get_format (abfd) == bfd_object
++      && bfd_write_p (abfd))
+     {
+       long isize;
+ 
+diff --git a/bfd/opncls.c b/bfd/opncls.c
+index 56a90046..741d20e8 100644
+--- a/bfd/opncls.c
++++ b/bfd/opncls.c
+@@ -920,13 +920,11 @@ bfd_close_all_done (bfd *abfd)
+ {
+   bool ret = BFD_SEND (abfd, _close_and_cleanup, (abfd));
+ 
+-  if (ret && abfd->iovec != NULL)
+-    {
+-      ret = abfd->iovec->bclose (abfd) == 0;
++  if (abfd->iovec != NULL)
++    ret &= abfd->iovec->bclose (abfd) == 0;
+ 
+-      if (ret)
+-	_maybe_make_executable (abfd);
+-    }
++  if (ret)
++    _maybe_make_executable (abfd);
+ 
+   _bfd_delete_bfd (abfd);
+   free (_bfd_error_buf);

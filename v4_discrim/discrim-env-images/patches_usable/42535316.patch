@@ -1,0 +1,3605 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 35df6d2..84daea4 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -40,7 +40,7 @@ if (ECM_FOUND)
+ endif()
+ 
+ set(POPPLER_MAJOR_VERSION "24")
+-set(POPPLER_MINOR_VERSION_STRING "05")
++set(POPPLER_MINOR_VERSION_STRING "06")
+ # We want the string version to have 08 but the integer version can't have a leading 0 since otherwise it's considered octal
+ # So strip a leading 0 if found in POPPLER_MINOR_VERSION_STRING and store the result in POPPLER_MINOR_VERSION
+ string(REGEX REPLACE "^0?(.+)$" "\\1" POPPLER_MINOR_VERSION "${POPPLER_MINOR_VERSION_STRING}")
+@@ -614,7 +614,7 @@ ADD_GPERF_FILE(TimesItalicWidths)
+ ADD_GPERF_FILE(TimesRomanWidths)
+ ADD_GPERF_FILE(ZapfDingbatsWidths)
+ 
+-set(POPPLER_SOVERSION_NUMBER "137")
++set(POPPLER_SOVERSION_NUMBER "138")
+ 
+ set(LINKER_SCRIPT "${CMAKE_BINARY_DIR}/libpoppler.map")
+ configure_file(
+diff --git a/NEWS b/NEWS
+index 1e07d92..a0f4b52 100644
+--- a/NEWS
++++ b/NEWS
+@@ -1,3 +1,18 @@
++Release 24.06.0:
++        core:
++
++
++
++
++
++
++        qt6:
++
++
++
++        glib:
++
++
+ Release 24.05.0:
+         core:
+          * Fix signing not being totally correct in some kind of PDF files
+diff --git a/cpp/Doxyfile b/cpp/Doxyfile
+index deee0ab..ddc785c 100644
+--- a/cpp/Doxyfile
++++ b/cpp/Doxyfile
+@@ -31,7 +31,7 @@ PROJECT_NAME           = "Poppler CPP"
+ # This could be handy for archiving the generated documentation or
+ # if some version control system is used.
+ 
+-PROJECT_NUMBER         = 24.05.0
++PROJECT_NUMBER         = 24.06.0
+ 
+ # The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute)
+ # base path where the generated documentation will be put.
+diff --git a/fofi/FoFiTrueType.cc b/fofi/FoFiTrueType.cc
+index 020a374..276cb93 100644
+--- a/fofi/FoFiTrueType.cc
++++ b/fofi/FoFiTrueType.cc
+@@ -25,7 +25,8 @@
+ // Copyright (C) 2015, 2016 William Bader <williambader@hotmail.com>
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+ // Copyright (C) 2022 Zachary Travis <ztravis@everlaw.com>
+-// Copyright (C) 2022 Oliver Sander <oliver.sander@tu-dresden.de>
++
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -38,9 +39,9 @@
+ #include <cstring>
+ #include <climits>
+ #include <algorithm>
+-#include "goo/gmem.h"
+ #include "goo/GooLikely.h"
+ #include "goo/GooString.h"
++#include "goo/GooCheckedOps.h"
+ #include "FoFiType1C.h"
+ #include "FoFiTrueType.h"
+ #include "poppler/Error.h"
+@@ -109,28 +110,28 @@
+ 
+ struct TrueTypeTable
+ {
+-    unsigned int tag;
+-    unsigned int checksum;
+-    int offset;
+-    int origOffset;
+-    int len;
++    unsigned int tag = 0;
++    unsigned int checksum = 0;
++    int offset = 0;
++    int origOffset = 0;
++    int len = 0;
+ };
+ 
+ struct TrueTypeCmap
+ {
+-    int platform;
+-    int encoding;
+-    int offset;
+-    int len;
+-    int fmt;
++    int platform = 0;
++    int encoding = 0;
++    int offset = 0;
++    int len = 0;
++    int fmt = 0;
+ };
+ 
+ struct TrueTypeLoca
+ {
+-    int idx;
+-    int origOffset;
+-    int newOffset;
+-    int len;
++    int idx = 0;
++    int origOffset = 0;
++    int newOffset = 0;
++    int len = 0;
+ };
+ 
+ #define cmapTag 0x636d6170
+@@ -482,10 +483,6 @@ std::unique_ptr<FoFiTrueType> FoFiTrueType::load(const char *fileName, int faceI
+ 
+ FoFiTrueType::FoFiTrueType(const unsigned char *fileA, int lenA, bool freeFileDataA, int faceIndexA) : FoFiBase(fileA, lenA, freeFileDataA)
+ {
+-    tables = nullptr;
+-    nTables = 0;
+-    cmaps = nullptr;
+-    nCmaps = 0;
+     parsedOk = false;
+     faceIndex = faceIndexA;
+     gsubFeatureTable = 0;
+@@ -494,15 +491,11 @@ FoFiTrueType::FoFiTrueType(const unsigned char *fileA, int lenA, bool freeFileDa
+     parse();
+ }
+ 
+-FoFiTrueType::~FoFiTrueType()
+-{
+-    gfree(tables);
+-    gfree(cmaps);
+-}
++FoFiTrueType::~FoFiTrueType() = default;
+ 
+ int FoFiTrueType::getNumCmaps() const
+ {
+-    return nCmaps;
++    return cmaps.size();
+ }
+ 
+ int FoFiTrueType::getCmapPlatform(int i) const
+@@ -517,9 +510,7 @@ int FoFiTrueType::getCmapEncoding(int i) const
+ 
+ int FoFiTrueType::findCmap(int platform, int encoding) const
+ {
+-    int i;
+-
+-    for (i = 0; i < nCmaps; ++i) {
++    for (int i = 0; i < (int)cmaps.size(); ++i) {
+         if (cmaps[i].platform == platform && cmaps[i].encoding == encoding) {
+             return i;
+         }
+@@ -536,7 +527,7 @@ int FoFiTrueType::mapCodeToGID(int i, unsigned int c) const
+     unsigned int high, low, idx;
+     bool ok;
+ 
+-    if (i < 0 || i >= nCmaps) {
++    if (i < 0 || i >= (int)cmaps.size()) {
+         return 0;
+     }
+     ok = true;
+@@ -655,12 +646,10 @@ int FoFiTrueType::mapNameToGID(const char *name) const
+ 
+ bool FoFiTrueType::getCFFBlock(char **start, int *length) const
+ {
+-    int i;
+-
+-    if (!openTypeCFF || !tables) {
++    if (!openTypeCFF || tables.empty()) {
+         return false;
+     }
+-    i = seekTable("CFF ");
++    int i = seekTable("CFF ");
+     if (i < 0 || !checkRegion(tables[i].offset, tables[i].len)) {
+         return false;
+     }
+@@ -740,8 +729,8 @@ void FoFiTrueType::convertToType42(const char *psName, char **encoding, int *cod
+ 
+     // write the header
+     ok = true;
+-    std::unique_ptr<GooString> buf = GooString::format("%!PS-TrueTypeFont-{0:2g}\n", (double)getS32BE(0, &ok) / 65536.0);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    std::string buf = GooString::format("%!PS-TrueTypeFont-{0:2g}\n", (double)getS32BE(0, &ok) / 65536.0);
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+ 
+     // begin the font dictionary
+     (*outputFunc)(outputStream, "10 dict begin\n", 14);
+@@ -751,7 +740,7 @@ void FoFiTrueType::convertToType42(const char *psName, char **encoding, int *cod
+     (*outputFunc)(outputStream, "/FontType 42 def\n", 17);
+     (*outputFunc)(outputStream, "/FontMatrix [1 0 0 1 0 0] def\n", 30);
+     buf = GooString::format("/FontBBox [{0:d} {1:d} {2:d} {3:d}] def\n", bbox[0], bbox[1], bbox[2], bbox[3]);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     (*outputFunc)(outputStream, "/PaintType 0 def\n", 17);
+ 
+     // write the guts of the dictionary
+@@ -791,8 +780,8 @@ void FoFiTrueType::convertToCIDType2(const char *psName, const int *cidMap, int
+ 
+     // write the header
+     ok = true;
+-    std::unique_ptr<GooString> buf = GooString::format("%!PS-TrueTypeFont-{0:2g}\n", (double)getS32BE(0, &ok) / 65536.0);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    std::string buf = GooString::format("%!PS-TrueTypeFont-{0:2g}\n", (double)getS32BE(0, &ok) / 65536.0);
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+ 
+     // begin the font dictionary
+     (*outputFunc)(outputStream, "20 dict begin\n", 14);
+@@ -809,7 +798,7 @@ void FoFiTrueType::convertToCIDType2(const char *psName, const int *cidMap, int
+     (*outputFunc)(outputStream, "/GDBytes 2 def\n", 15);
+     if (cidMap) {
+         buf = GooString::format("/CIDCount {0:d} def\n", nCIDs);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         if (nCIDs > 32767) {
+             (*outputFunc)(outputStream, "/CIDMap [", 9);
+             for (i = 0; i < nCIDs; i += 32768 - 16) {
+@@ -819,7 +808,7 @@ void FoFiTrueType::convertToCIDType2(const char *psName, const int *cidMap, int
+                     for (k = 0; k < 16 && i + j + k < nCIDs; ++k) {
+                         cid = cidMap[i + j + k];
+                         buf = GooString::format("{0:02x}{1:02x}", (cid >> 8) & 0xff, cid & 0xff);
+-                        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+                     }
+                     (*outputFunc)(outputStream, "\n", 1);
+                 }
+@@ -834,7 +823,7 @@ void FoFiTrueType::convertToCIDType2(const char *psName, const int *cidMap, int
+                 for (j = 0; j < 16 && i + j < nCIDs; ++j) {
+                     cid = cidMap[i + j];
+                     buf = GooString::format("{0:02x}{1:02x}", (cid >> 8) & 0xff, cid & 0xff);
+-                    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+                 }
+                 (*outputFunc)(outputStream, "\n", 1);
+             }
+@@ -843,27 +832,27 @@ void FoFiTrueType::convertToCIDType2(const char *psName, const int *cidMap, int
+     } else {
+         // direct mapping - just fill the string(s) with s[i]=i
+         buf = GooString::format("/CIDCount {0:d} def\n", nGlyphs);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         if (nGlyphs > 32767) {
+             (*outputFunc)(outputStream, "/CIDMap [\n", 10);
+             for (i = 0; i < nGlyphs; i += 32767) {
+                 j = nGlyphs - i < 32767 ? nGlyphs - i : 32767;
+                 buf = GooString::format("  {0:d} string 0 1 {1:d} {{\n", 2 * j, j - 1);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+                 buf = GooString::format("    2 copy dup 2 mul exch {0:d} add -8 bitshift put\n", i);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+                 buf = GooString::format("    1 index exch dup 2 mul 1 add exch {0:d} add"
+                                         " 255 and put\n",
+                                         i);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+                 (*outputFunc)(outputStream, "  } for\n", 8);
+             }
+             (*outputFunc)(outputStream, "] def\n", 6);
+         } else {
+             buf = GooString::format("/CIDMap {0:d} string\n", 2 * nGlyphs);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             buf = GooString::format("  0 1 {0:d} {{\n", nGlyphs - 1);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             (*outputFunc)(outputStream, "    2 copy dup 2 mul exch -8 bitshift put\n", 42);
+             (*outputFunc)(outputStream, "    1 index exch dup 2 mul 1 add exch 255 and put\n", 50);
+             (*outputFunc)(outputStream, "  } for\n", 8);
+@@ -872,7 +861,7 @@ void FoFiTrueType::convertToCIDType2(const char *psName, const int *cidMap, int
+     }
+     (*outputFunc)(outputStream, "/FontMatrix [1 0 0 1 0 0] def\n", 30);
+     buf = GooString::format("/FontBBox [{0:d} {1:d} {2:d} {3:d}] def\n", bbox[0], bbox[1], bbox[2], bbox[3]);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     (*outputFunc)(outputStream, "/PaintType 0 def\n", 17);
+     (*outputFunc)(outputStream, "/Encoding [] readonly def\n", 26);
+     (*outputFunc)(outputStream, "/CharStrings 1 dict dup begin\n", 30);
+@@ -952,12 +941,12 @@ void FoFiTrueType::convertToType0(const char *psName, int *cidMap, int nCIDs, bo
+         (*outputFunc)(outputStream, "10 dict begin\n", 14);
+         (*outputFunc)(outputStream, "/FontName /", 11);
+         (*outputFunc)(outputStream, psName, strlen(psName));
+-        std::unique_ptr<GooString> buf = GooString::format("_{0:02x} def\n", i >> 8);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        std::string buf = GooString::format("_{0:02x} def\n", i >> 8);
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         (*outputFunc)(outputStream, "/FontType 42 def\n", 17);
+         (*outputFunc)(outputStream, "/FontMatrix [1 0 0 1 0 0] def\n", 30);
+         buf = GooString::format("/FontBBox [{0:d} {1:d} {2:d} {3:d}] def\n", bbox[0], bbox[1], bbox[2], bbox[3]);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         (*outputFunc)(outputStream, "/PaintType 0 def\n", 17);
+         (*outputFunc)(outputStream, "/sfnts ", 7);
+         (*outputFunc)(outputStream, psName, strlen(psName));
+@@ -965,14 +954,14 @@ void FoFiTrueType::convertToType0(const char *psName, int *cidMap, int nCIDs, bo
+         (*outputFunc)(outputStream, "/Encoding 256 array\n", 20);
+         for (j = 0; j < 256 && i + j < n; ++j) {
+             buf = GooString::format("dup {0:d} /c{1:02x} put\n", j, j);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         (*outputFunc)(outputStream, "readonly def\n", 13);
+         (*outputFunc)(outputStream, "/CharStrings 257 dict dup begin\n", 32);
+         (*outputFunc)(outputStream, "/.notdef 0 def\n", 15);
+         for (j = 0; j < 256 && i + j < n; ++j) {
+             buf = GooString::format("/c{0:02x} {1:d} def\n", j, cidMap ? cidMap[i + j] : i + j);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         (*outputFunc)(outputStream, "end readonly def\n", 17);
+         (*outputFunc)(outputStream, "FontName currentdict end definefont pop\n", 40);
+@@ -988,16 +977,16 @@ void FoFiTrueType::convertToType0(const char *psName, int *cidMap, int nCIDs, bo
+     (*outputFunc)(outputStream, "/FMapType 2 def\n", 16);
+     (*outputFunc)(outputStream, "/Encoding [\n", 12);
+     for (i = 0; i < n; i += 256) {
+-        const std::unique_ptr<GooString> buf = GooString::format("{0:d}\n", i >> 8);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        const std::string buf = GooString::format("{0:d}\n", i >> 8);
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     }
+     (*outputFunc)(outputStream, "] def\n", 6);
+     (*outputFunc)(outputStream, "/FDepVector [\n", 14);
+     for (i = 0; i < n; i += 256) {
+         (*outputFunc)(outputStream, "/", 1);
+         (*outputFunc)(outputStream, psName, strlen(psName));
+-        const std::unique_ptr<GooString> buf = GooString::format("_{0:02x} findfont\n", i >> 8);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        const std::string buf = GooString::format("_{0:02x} findfont\n", i >> 8);
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     }
+     (*outputFunc)(outputStream, "] def\n", 6);
+     (*outputFunc)(outputStream, "FontName currentdict end definefont pop\n", 40);
+@@ -1030,15 +1019,15 @@ void FoFiTrueType::cvtEncoding(char **encoding, FoFiOutputFunc outputFunc, void
+             if (!(name = encoding[i])) {
+                 name = ".notdef";
+             }
+-            const std::unique_ptr<GooString> buf = GooString::format("dup {0:d} /", i);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            const std::string buf = GooString::format("dup {0:d} /", i);
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             (*outputFunc)(outputStream, name, strlen(name));
+             (*outputFunc)(outputStream, " put\n", 5);
+         }
+     } else {
+         for (i = 0; i < 256; ++i) {
+-            const std::unique_ptr<GooString> buf = GooString::format("dup {0:d} /c{1:02x} put\n", i, i);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            const std::string buf = GooString::format("dup {0:d} /c{1:02x} put\n", i, i);
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+     }
+     (*outputFunc)(outputStream, "readonly def\n", 13);
+@@ -1055,7 +1044,7 @@ void FoFiTrueType::cvtCharStrings(char **encoding, const int *codeToGID, FoFiOut
+     (*outputFunc)(outputStream, "/.notdef 0 def\n", 15);
+ 
+     // if there's no 'cmap' table, punt
+-    if (nCmaps == 0) {
++    if (cmaps.empty()) {
+         goto err;
+     }
+ 
+@@ -1082,8 +1071,8 @@ void FoFiTrueType::cvtCharStrings(char **encoding, const int *codeToGID, FoFiOut
+             if (k > 0 && k < nGlyphs) {
+                 (*outputFunc)(outputStream, "/", 1);
+                 (*outputFunc)(outputStream, name, strlen(name));
+-                const std::unique_ptr<GooString> buf = GooString::format(" {0:d} def\n", k);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                const std::string buf = GooString::format(" {0:d} def\n", k);
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+         }
+     }
+@@ -1094,16 +1083,15 @@ err:
+ 
+ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const GooString *name, bool needVerticalMetrics, int *maxUsedGlyph) const
+ {
+-    unsigned char headData[54];
+-    TrueTypeLoca *locaTable;
+-    unsigned char *locaData;
++    std::array<unsigned char, 54> headData;
++    std::vector<unsigned char> locaData;
+     TrueTypeTable newTables[nT42Tables];
+     unsigned char tableDir[12 + nT42Tables * 16];
+     bool ok;
+     unsigned int checksum;
+     int nNewTables;
+-    int glyfTableLen, length, pos, glyfPos, i, j, k, vmtxTabLength;
+-    unsigned char vheaTab[36] = {
++    int glyfTableLen, length, glyfPos, j, k;
++    std::array<unsigned char, 36> vheaTab = {
+         0, 1, 0, 0, // table version number
+         0, 0, // ascent
+         0, 0, // descent
+@@ -1122,22 +1110,22 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+         0, 0, // metric data format
+         0, 1 // number of advance heights in vmtx table
+     };
+-    unsigned char *vmtxTab;
++    std::vector<unsigned char> vmtxTab;
+     bool needVhea, needVmtx;
+     int advance;
+ 
+     *maxUsedGlyph = -1;
+ 
+     // construct the 'head' table, zero out the font checksum
+-    i = seekTable("head");
+-    if (i < 0 || i >= nTables) {
++    int i = seekTable("head");
++    if (i < 0 || i >= (int)tables.size()) {
+         return;
+     }
+-    pos = tables[i].offset;
++    int pos = tables[i].offset;
+     if (!checkRegion(pos, 54)) {
+         return;
+     }
+-    memcpy(headData, file + pos, 54);
++    memcpy(headData.data(), file + pos, 54);
+     headData[8] = headData[9] = headData[10] = headData[11] = (unsigned char)0;
+ 
+     // check for a bogus loca format field in the 'head' table
+@@ -1154,7 +1142,7 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+     // table, cmpTrueTypeLocaOffset uses offset as its primary sort key,
+     // and idx as its secondary key (ensuring that adjacent entries with
+     // the same pos value remain in the same order)
+-    locaTable = (TrueTypeLoca *)gmallocn(nGlyphs + 1, sizeof(TrueTypeLoca));
++    std::vector<TrueTypeLoca> locaTable { size_t(nGlyphs + 1) };
+     i = seekTable("loca");
+     pos = tables[i].offset;
+     i = seekTable("glyf");
+@@ -1171,12 +1159,12 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+             locaTable[i].origOffset = glyfTableLen;
+         }
+     }
+-    std::sort(locaTable, locaTable + nGlyphs + 1, cmpTrueTypeLocaOffsetFunctor());
++    std::sort(locaTable.begin(), locaTable.end(), cmpTrueTypeLocaOffsetFunctor());
+     for (i = 0; i < nGlyphs; ++i) {
+         locaTable[i].len = locaTable[i + 1].origOffset - locaTable[i].origOffset;
+     }
+     locaTable[nGlyphs].len = 0;
+-    std::sort(locaTable, locaTable + nGlyphs + 1, cmpTrueTypeLocaIdxFunctor());
++    std::sort(locaTable.begin(), locaTable.end(), cmpTrueTypeLocaIdxFunctor());
+     pos = 0;
+     for (i = 0; i <= nGlyphs; ++i) {
+         locaTable[i].newOffset = pos;
+@@ -1196,7 +1184,7 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+     }
+ 
+     // construct the new 'loca' table
+-    locaData = (unsigned char *)gmallocn(nGlyphs + 1, (locaFmt ? 4 : 2));
++    locaData.resize((nGlyphs + 1) * (locaFmt ? 4 : 2));
+     for (i = 0; i <= nGlyphs; ++i) {
+         pos = locaTable[i].newOffset;
+         if (locaFmt) {
+@@ -1217,8 +1205,6 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+             ++nNewTables;
+         }
+     }
+-    vmtxTab = nullptr; // make gcc happy
+-    vmtxTabLength = 0;
+     advance = 0; // make gcc happy
+     if (needVerticalMetrics) {
+         needVhea = seekTable("vhea") < 0;
+@@ -1244,10 +1230,10 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+         checksum = 0; // make gcc happy
+         if (i == t42HeadTable) {
+             length = 54;
+-            checksum = computeTableChecksum(headData, 54);
++            checksum = computeTableChecksum(headData);
+         } else if (i == t42LocaTable) {
+             length = (nGlyphs + 1) * (locaFmt ? 4 : 2);
+-            checksum = computeTableChecksum(locaData, length);
++            checksum = computeTableChecksum(locaData);
+         } else if (i == t42GlyfTable) {
+             length = 0;
+             checksum = 0;
+@@ -1258,31 +1244,26 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+                     length += 4 - (length & 3);
+                 }
+                 if (checkRegion(glyfPos + locaTable[j].origOffset, locaTable[j].len)) {
+-                    checksum += computeTableChecksum(file + glyfPos + locaTable[j].origOffset, locaTable[j].len);
++                    checksum += computeTableChecksum(std::span(file + glyfPos + locaTable[j].origOffset, locaTable[j].len));
+                 }
+             }
+         } else {
+             if ((j = seekTable(t42Tables[i].tag)) >= 0) {
+                 length = tables[j].len;
+                 if (checkRegion(tables[j].offset, length)) {
+-                    checksum = computeTableChecksum(file + tables[j].offset, length);
++                    checksum = computeTableChecksum(std::span(file + tables[j].offset, length));
+                 }
+             } else if (needVerticalMetrics && i == t42VheaTable) {
+                 vheaTab[10] = advance / 256; // max advance height
+                 vheaTab[11] = advance % 256;
+-                length = sizeof(vheaTab);
+-                checksum = computeTableChecksum(vheaTab, length);
++                length = vheaTab.size();
++                checksum = computeTableChecksum(vheaTab);
+             } else if (needVerticalMetrics && i == t42VmtxTable) {
+                 length = 4 + (nGlyphs - 1) * 2;
+-                vmtxTabLength = length;
+-                vmtxTab = (unsigned char *)gmalloc(length);
++                vmtxTab.resize(length, 0);
+                 vmtxTab[0] = advance / 256;
+                 vmtxTab[1] = advance % 256;
+-                for (j = 2; j < length; j += 2) {
+-                    vmtxTab[j] = 0;
+-                    vmtxTab[j + 1] = 0;
+-                }
+-                checksum = computeTableChecksum(vmtxTab, length);
++                checksum = computeTableChecksum(vmtxTab);
+             } else if (t42Tables[i].required) {
+                 //~ error(-1, "Embedded TrueType font is missing a required table ('%s')",
+                 //~       t42Tables[i].tag);
+@@ -1347,7 +1328,7 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+     }
+ 
+     // compute the font checksum and store it in the head table
+-    checksum = computeTableChecksum(tableDir, 12 + nNewTables * 16);
++    checksum = computeTableChecksum(std::span(tableDir, 12 + nNewTables * 16));
+     for (i = 0; i < nNewTables; ++i) {
+         checksum += newTables[i].checksum;
+     }
+@@ -1367,20 +1348,20 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+     }
+ 
+     // write the table directory
+-    dumpString(tableDir, 12 + nNewTables * 16, outputFunc, outputStream);
++    dumpString(std::span(tableDir, 12 + nNewTables * 16), outputFunc, outputStream);
+ 
+     // write the tables
+     for (i = 0; i < nNewTables; ++i) {
+         if (i == t42HeadTable) {
+-            dumpString(headData, 54, outputFunc, outputStream);
++            dumpString(headData, outputFunc, outputStream);
+         } else if (i == t42LocaTable) {
+             length = (nGlyphs + 1) * (locaFmt ? 4 : 2);
+-            dumpString(locaData, length, outputFunc, outputStream);
++            dumpString(locaData, outputFunc, outputStream);
+         } else if (i == t42GlyfTable) {
+             glyfPos = tables[seekTable("glyf")].offset;
+             for (j = 0; j < nGlyphs; ++j) {
+                 if (locaTable[j].len > 0 && checkRegion(glyfPos + locaTable[j].origOffset, locaTable[j].len)) {
+-                    dumpString(file + glyfPos + locaTable[j].origOffset, locaTable[j].len, outputFunc, outputStream);
++                    dumpString(std::span(file + glyfPos + locaTable[j].origOffset, locaTable[j].len), outputFunc, outputStream);
+                 }
+             }
+         } else {
+@@ -1389,19 +1370,18 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+             // headers
+             if ((length = newTables[i].len) > 0) {
+                 if ((j = seekTable(t42Tables[i].tag)) >= 0 && checkRegion(tables[j].offset, tables[j].len)) {
+-                    dumpString(file + tables[j].offset, tables[j].len, outputFunc, outputStream);
++                    dumpString(std::span(file + tables[j].offset, tables[j].len), outputFunc, outputStream);
+                 } else if (needVerticalMetrics && i == t42VheaTable) {
+                     if (unlikely(length > (int)sizeof(vheaTab))) {
+                         error(errSyntaxWarning, -1, "length bigger than vheaTab size");
+                         length = sizeof(vheaTab);
+                     }
+-                    dumpString(vheaTab, length, outputFunc, outputStream);
++                    dumpString(vheaTab, outputFunc, outputStream);
+                 } else if (needVerticalMetrics && i == t42VmtxTable) {
+-                    if (unlikely(length > vmtxTabLength)) {
++                    if (unlikely(length > (int)vmtxTab.size())) {
+                         error(errSyntaxWarning, -1, "length bigger than vmtxTab size");
+-                        length = vmtxTabLength;
+                     }
+-                    dumpString(vmtxTab, length, outputFunc, outputStream);
++                    dumpString(vmtxTab, outputFunc, outputStream);
+                 }
+             }
+         }
+@@ -1409,33 +1389,25 @@ void FoFiTrueType::cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const
+ 
+     // end the sfnts array
+     (*outputFunc)(outputStream, "] def\n", 6);
+-
+-    gfree(locaData);
+-    gfree(locaTable);
+-    if (vmtxTab) {
+-        gfree(vmtxTab);
+-    }
+ }
+ 
+-void FoFiTrueType::dumpString(const unsigned char *s, int length, FoFiOutputFunc outputFunc, void *outputStream) const
++void FoFiTrueType::dumpString(std::span<const unsigned char> s, FoFiOutputFunc outputFunc, void *outputStream)
+ {
+-    int pad, i, j;
+-
+     (*outputFunc)(outputStream, "<", 1);
+-    for (i = 0; i < length; i += 32) {
+-        for (j = 0; j < 32 && i + j < length; ++j) {
+-            const std::unique_ptr<GooString> buf = GooString::format("{0:02x}", s[i + j] & 0xff);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    for (int i = 0; i < (int)s.size(); i += 32) {
++        for (int j = 0; j < 32 && i + j < (int)s.size(); ++j) {
++            const std::string buf = GooString::format("{0:02x}", s[i + j] & 0xff);
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (i % (65536 - 32) == 65536 - 64) {
+             (*outputFunc)(outputStream, ">\n<", 3);
+-        } else if (i + 32 < length) {
++        } else if (i + 32 < (int)s.size()) {
+             (*outputFunc)(outputStream, "\n", 1);
+         }
+     }
+-    if (length & 3) {
+-        pad = 4 - (length & 3);
+-        for (i = 0; i < pad; ++i) {
++    if (s.size() & 3) {
++        int pad = 4 - (s.size() & 3);
++        for (int i = 0; i < pad; ++i) {
+             (*outputFunc)(outputStream, "00", 2);
+         }
+     }
+@@ -1443,20 +1415,17 @@ void FoFiTrueType::dumpString(const unsigned char *s, int length, FoFiOutputFunc
+     (*outputFunc)(outputStream, "00>\n", 4);
+ }
+ 
+-unsigned int FoFiTrueType::computeTableChecksum(const unsigned char *data, int length) const
++unsigned int FoFiTrueType::computeTableChecksum(std::span<const unsigned char> data)
+ {
+-    unsigned int checksum, word;
+-    int i;
+-
+-    checksum = 0;
+-    for (i = 0; i + 3 < length; i += 4) {
+-        word = ((data[i] & 0xff) << 24) + ((data[i + 1] & 0xff) << 16) + ((data[i + 2] & 0xff) << 8) + (data[i + 3] & 0xff);
++    unsigned checksum = 0;
++    for (size_t i = 0; i + 3 < data.size(); i += 4) {
++        unsigned int word = ((data[i] & 0xff) << 24) + ((data[i + 1] & 0xff) << 16) + ((data[i + 2] & 0xff) << 8) + (data[i + 3] & 0xff);
+         checksum += word;
+     }
+-    if (length & 3) {
+-        word = 0;
+-        i = length & ~3;
+-        switch (length & 3) {
++    if (data.size() & 3) {
++        unsigned int word = 0;
++        int i = data.size() & ~3;
++        switch (data.size() & 3) {
+         case 3:
+             word |= (data[i + 2] & 0xff) << 8;
+             // fallthrough
+@@ -1516,11 +1485,11 @@ void FoFiTrueType::parse()
+     openTypeCFF = ver == 0x4f54544f; // 'OTTO'
+ 
+     // read the table directory
+-    nTables = getU16BE(pos + 4, &parsedOk);
++    int nTables = getU16BE(pos + 4, &parsedOk);
+     if (!parsedOk) {
+         return;
+     }
+-    tables = (TrueTypeTable *)gmallocn(nTables, sizeof(TrueTypeTable));
++    tables.resize(nTables);
+     pos += 12;
+     j = 0;
+     for (i = 0; i < nTables; ++i) {
+@@ -1537,9 +1506,9 @@ void FoFiTrueType::parse()
+     }
+     if (nTables != j) {
+         nTables = j;
+-        tables = (TrueTypeTable *)greallocn_checkoverflow(tables, nTables, sizeof(TrueTypeTable));
++        tables.resize(nTables);
+     }
+-    if (!parsedOk || tables == nullptr) {
++    if (!parsedOk || tables.empty()) {
+         parsedOk = false;
+         return;
+     }
+@@ -1554,12 +1523,12 @@ void FoFiTrueType::parse()
+     // read the cmaps
+     if ((i = seekTable("cmap")) >= 0) {
+         pos = tables[i].offset + 2;
+-        nCmaps = getU16BE(pos, &parsedOk);
++        int nCmaps = getU16BE(pos, &parsedOk);
+         pos += 2;
+         if (!parsedOk) {
+             return;
+         }
+-        cmaps = (TrueTypeCmap *)gmallocn(nCmaps, sizeof(TrueTypeCmap));
++        cmaps.resize(nCmaps);
+         for (j = 0; j < nCmaps; ++j) {
+             cmaps[j].platform = getU16BE(pos, &parsedOk);
+             cmaps[j].encoding = getU16BE(pos + 2, &parsedOk);
+@@ -1569,10 +1538,11 @@ void FoFiTrueType::parse()
+             cmaps[j].len = getU16BE(cmaps[j].offset + 2, &parsedOk);
+         }
+         if (!parsedOk) {
++            cmaps.clear();
+             return;
+         }
+     } else {
+-        nCmaps = 0;
++        cmaps.clear();
+     }
+ 
+     // get the number of glyphs from the maxp table
+@@ -1676,10 +1646,9 @@ err:
+ int FoFiTrueType::seekTable(const char *tag) const
+ {
+     unsigned int tagI;
+-    int i;
+ 
+     tagI = ((tag[0] & 0xff) << 24) | ((tag[1] & 0xff) << 16) | ((tag[2] & 0xff) << 8) | (tag[3] & 0xff);
+-    for (i = 0; i < nTables; ++i) {
++    for (int i = 0; i < (int)tables.size(); ++i) {
+         if (tables[i].tag == tagI) {
+             return i;
+         }
+diff --git a/fofi/FoFiTrueType.h b/fofi/FoFiTrueType.h
+index f98244a..4c464b9 100644
+--- a/fofi/FoFiTrueType.h
++++ b/fofi/FoFiTrueType.h
+@@ -20,6 +20,7 @@
+ // Copyright (C) 2016 William Bader <williambader@hotmail.com>
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+ // Copyright (C) 2022 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -31,8 +32,10 @@
+ 
+ #include <cstddef>
+ #include <memory>
++#include <vector>
+ #include <unordered_map>
+ #include <string>
++#include <span>
+ #include "FoFiBase.h"
+ #include "poppler_private_export.h"
+ 
+@@ -160,8 +163,8 @@ private:
+     void cvtEncoding(char **encoding, FoFiOutputFunc outputFunc, void *outputStream) const;
+     void cvtCharStrings(char **encoding, const int *codeToGID, FoFiOutputFunc outputFunc, void *outputStream) const;
+     void cvtSfnts(FoFiOutputFunc outputFunc, void *outputStream, const GooString *name, bool needVerticalMetrics, int *maxUsedGlyph) const;
+-    void dumpString(const unsigned char *s, int length, FoFiOutputFunc outputFunc, void *outputStream) const;
+-    unsigned int computeTableChecksum(const unsigned char *data, int length) const;
++    static void dumpString(std::span<const unsigned char> s, FoFiOutputFunc outputFunc, void *outputStream);
++    static unsigned int computeTableChecksum(std::span<const unsigned char> data);
+     void parse();
+     void readPostTable();
+     int seekTable(const char *tag) const;
+@@ -171,10 +174,8 @@ private:
+     unsigned int scanLookupSubTable(unsigned int subTable, unsigned int orgGID);
+     int checkGIDInCoverage(unsigned int coverage, unsigned int orgGID);
+ 
+-    TrueTypeTable *tables;
+-    int nTables;
+-    TrueTypeCmap *cmaps;
+-    int nCmaps;
++    std::vector<TrueTypeTable> tables;
++    std::vector<TrueTypeCmap> cmaps;
+     int nGlyphs;
+     int locaFmt;
+     int bbox[4];
+diff --git a/fofi/FoFiType1C.cc b/fofi/FoFiType1C.cc
+index 887bd28..55be23d 100644
+--- a/fofi/FoFiType1C.cc
++++ b/fofi/FoFiType1C.cc
+@@ -18,7 +18,7 @@
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+ // Copyright (C) 2019 Tomoyuki Kubota <himajin100000@gmail.com>
+ // Copyright (C) 2019 Volker Krause <vkrause@kde.org>
+-// Copyright (C) 2022 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -257,29 +257,29 @@ void FoFiType1C::convertToType1(const char *psName, const char **newEncoding, bo
+     } else {
+         (*outputFunc)(outputStream, "/isFixedPitch false def\n", 24);
+     }
+-    std::unique_ptr<GooString> buf = GooString::format("/ItalicAngle {0:.4g} def\n", topDict.italicAngle);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    std::string buf = GooString::format("/ItalicAngle {0:.4g} def\n", topDict.italicAngle);
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     buf = GooString::format("/UnderlinePosition {0:.4g} def\n", topDict.underlinePosition);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     buf = GooString::format("/UnderlineThickness {0:.4g} def\n", topDict.underlineThickness);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     (*outputFunc)(outputStream, "end readonly def\n", 17);
+     (*outputFunc)(outputStream, "/FontName /", 11);
+     (*outputFunc)(outputStream, psName, psNameLen);
+     (*outputFunc)(outputStream, " def\n", 5);
+     buf = GooString::format("/PaintType {0:d} def\n", topDict.paintType);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     (*outputFunc)(outputStream, "/FontType 1 def\n", 16);
+     buf = GooString::format("/FontMatrix [{0:.8g} {1:.8g} {2:.8g} {3:.8g} {4:.8g} {5:.8g}] readonly def\n", topDict.fontMatrix[0], topDict.fontMatrix[1], topDict.fontMatrix[2], topDict.fontMatrix[3], topDict.fontMatrix[4],
+                             topDict.fontMatrix[5]);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     buf = GooString::format("/FontBBox [{0:.4g} {1:.4g} {2:.4g} {3:.4g}] readonly def\n", topDict.fontBBox[0], topDict.fontBBox[1], topDict.fontBBox[2], topDict.fontBBox[3]);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     buf = GooString::format("/StrokeWidth {0:.4g} def\n", topDict.strokeWidth);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     if (topDict.uniqueID != 0) {
+         buf = GooString::format("/UniqueID {0:d} def\n", topDict.uniqueID);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     }
+ 
+     // write the encoding
+@@ -293,7 +293,7 @@ void FoFiType1C::convertToType1(const char *psName, const char **newEncoding, bo
+         for (i = 0; i < 256; ++i) {
+             if (enc && enc[i]) {
+                 buf = GooString::format("dup {0:d} /{1:s} put\n", i, enc[i]);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+         }
+         (*outputFunc)(outputStream, "readonly def\n", 13);
+@@ -322,7 +322,7 @@ void FoFiType1C::convertToType1(const char *psName, const char **newEncoding, bo
+         eexecWrite(&eb, "/BlueValues [");
+         for (i = 0; i < privateDicts[0].nBlueValues; ++i) {
+             buf = GooString::format("{0:s}{1:d}", i > 0 ? " " : "", privateDicts[0].blueValues[i]);
+-            eexecWrite(&eb, buf->c_str());
++            eexecWrite(&eb, buf.c_str());
+         }
+         eexecWrite(&eb, "] def\n");
+     }
+@@ -330,7 +330,7 @@ void FoFiType1C::convertToType1(const char *psName, const char **newEncoding, bo
+         eexecWrite(&eb, "/OtherBlues [");
+         for (i = 0; i < privateDicts[0].nOtherBlues; ++i) {
+             buf = GooString::format("{0:s}{1:d}", i > 0 ? " " : "", privateDicts[0].otherBlues[i]);
+-            eexecWrite(&eb, buf->c_str());
++            eexecWrite(&eb, buf.c_str());
+         }
+         eexecWrite(&eb, "] def\n");
+     }
+@@ -338,7 +338,7 @@ void FoFiType1C::convertToType1(const char *psName, const char **newEncoding, bo
+         eexecWrite(&eb, "/FamilyBlues [");
+         for (i = 0; i < privateDicts[0].nFamilyBlues; ++i) {
+             buf = GooString::format("{0:s}{1:d}", i > 0 ? " " : "", privateDicts[0].familyBlues[i]);
+-            eexecWrite(&eb, buf->c_str());
++            eexecWrite(&eb, buf.c_str());
+         }
+         eexecWrite(&eb, "] def\n");
+     }
+@@ -346,35 +346,35 @@ void FoFiType1C::convertToType1(const char *psName, const char **newEncoding, bo
+         eexecWrite(&eb, "/FamilyOtherBlues [");
+         for (i = 0; i < privateDicts[0].nFamilyOtherBlues; ++i) {
+             buf = GooString::format("{0:s}{1:d}", i > 0 ? " " : "", privateDicts[0].familyOtherBlues[i]);
+-            eexecWrite(&eb, buf->c_str());
++            eexecWrite(&eb, buf.c_str());
+         }
+         eexecWrite(&eb, "] def\n");
+     }
+     if (privateDicts[0].blueScale != 0.039625) {
+         buf = GooString::format("/BlueScale {0:.4g} def\n", privateDicts[0].blueScale);
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+     if (privateDicts[0].blueShift != 7) {
+         buf = GooString::format("/BlueShift {0:d} def\n", privateDicts[0].blueShift);
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+     if (privateDicts[0].blueFuzz != 1) {
+         buf = GooString::format("/BlueFuzz {0:d} def\n", privateDicts[0].blueFuzz);
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+     if (privateDicts[0].hasStdHW) {
+         buf = GooString::format("/StdHW [{0:.4g}] def\n", privateDicts[0].stdHW);
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+     if (privateDicts[0].hasStdVW) {
+         buf = GooString::format("/StdVW [{0:.4g}] def\n", privateDicts[0].stdVW);
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+     if (privateDicts[0].nStemSnapH) {
+         eexecWrite(&eb, "/StemSnapH [");
+         for (i = 0; i < privateDicts[0].nStemSnapH; ++i) {
+             buf = GooString::format("{0:s}{1:.4g}", i > 0 ? " " : "", privateDicts[0].stemSnapH[i]);
+-            eexecWrite(&eb, buf->c_str());
++            eexecWrite(&eb, buf.c_str());
+         }
+         eexecWrite(&eb, "] def\n");
+     }
+@@ -382,25 +382,25 @@ void FoFiType1C::convertToType1(const char *psName, const char **newEncoding, bo
+         eexecWrite(&eb, "/StemSnapV [");
+         for (i = 0; i < privateDicts[0].nStemSnapV; ++i) {
+             buf = GooString::format("{0:s}{1:.4g}", i > 0 ? " " : "", privateDicts[0].stemSnapV[i]);
+-            eexecWrite(&eb, buf->c_str());
++            eexecWrite(&eb, buf.c_str());
+         }
+         eexecWrite(&eb, "] def\n");
+     }
+     if (privateDicts[0].hasForceBold) {
+         buf = GooString::format("/ForceBold {0:s} def\n", privateDicts[0].forceBold ? "true" : "false");
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+     if (privateDicts[0].forceBoldThreshold != 0) {
+         buf = GooString::format("/ForceBoldThreshold {0:.4g} def\n", privateDicts[0].forceBoldThreshold);
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+     if (privateDicts[0].languageGroup != 0) {
+         buf = GooString::format("/LanguageGroup {0:d} def\n", privateDicts[0].languageGroup);
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+     if (privateDicts[0].expansionFactor != 0.06) {
+         buf = GooString::format("/ExpansionFactor {0:.4g} def\n", privateDicts[0].expansionFactor);
+-        eexecWrite(&eb, buf->c_str());
++        eexecWrite(&eb, buf.c_str());
+     }
+ 
+     // set up subroutines
+@@ -412,7 +412,7 @@ void FoFiType1C::convertToType1(const char *psName, const char **newEncoding, bo
+ 
+     // write the CharStrings
+     buf = GooString::format("2 index /CharStrings {0:d} dict dup begin\n", nGlyphs);
+-    eexecWrite(&eb, buf->c_str());
++    eexecWrite(&eb, buf.c_str());
+     for (i = 0; i < nGlyphs; ++i) {
+         ok = true;
+         getIndexVal(&charStringsIdx, i, &val, &ok);
+@@ -547,60 +547,60 @@ void FoFiType1C::convertToCIDType0(const char *psName, const int *codeMap, int n
+         (*outputFunc)(outputStream, "  /Registry (Adobe) def\n", 24);
+         (*outputFunc)(outputStream, "  /Ordering (Identity) def\n", 27);
+     }
+-    std::unique_ptr<GooString> buf = GooString::format("  /Supplement {0:d} def\n", topDict.supplement);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    std::string buf = GooString::format("  /Supplement {0:d} def\n", topDict.supplement);
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     (*outputFunc)(outputStream, "end def\n", 8);
+     if (topDict.hasFontMatrix) {
+         buf = GooString::format("/FontMatrix [{0:.8g} {1:.8g} {2:.8g} {3:.8g} {4:.8g} {5:.8g}] def\n", topDict.fontMatrix[0], topDict.fontMatrix[1], topDict.fontMatrix[2], topDict.fontMatrix[3], topDict.fontMatrix[4],
+                                 topDict.fontMatrix[5]);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     } else if (privateDicts[0].hasFontMatrix) {
+         (*outputFunc)(outputStream, "/FontMatrix [1 0 0 1 0 0] def\n", 30);
+     } else {
+         (*outputFunc)(outputStream, "/FontMatrix [0.001 0 0 0.001 0 0] def\n", 38);
+     }
+     buf = GooString::format("/FontBBox [{0:.4g} {1:.4g} {2:.4g} {3:.4g}] def\n", topDict.fontBBox[0], topDict.fontBBox[1], topDict.fontBBox[2], topDict.fontBBox[3]);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     (*outputFunc)(outputStream, "/FontInfo 1 dict dup begin\n", 27);
+     (*outputFunc)(outputStream, "  /FSType 8 def\n", 16);
+     (*outputFunc)(outputStream, "end def\n", 8);
+ 
+     // CIDFont-specific entries
+     buf = GooString::format("/CIDCount {0:d} def\n", nCIDs);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     (*outputFunc)(outputStream, "/FDBytes 1 def\n", 15);
+     buf = GooString::format("/GDBytes {0:d} def\n", gdBytes);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     (*outputFunc)(outputStream, "/CIDMapOffset 0 def\n", 20);
+     if (topDict.paintType != 0) {
+         buf = GooString::format("/PaintType {0:d} def\n", topDict.paintType);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         buf = GooString::format("/StrokeWidth {0:.4g} def\n", topDict.strokeWidth);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     }
+ 
+     // FDArray entry
+     buf = GooString::format("/FDArray {0:d} array\n", nFDs);
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     for (i = 0; i < nFDs; ++i) {
+         buf = GooString::format("dup {0:d} 10 dict begin\n", i);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         (*outputFunc)(outputStream, "/FontType 1 def\n", 16);
+         if (privateDicts[i].hasFontMatrix) {
+             buf = GooString::format("/FontMatrix [{0:.8g} {1:.8g} {2:.8g} {3:.8g} {4:.8g} {5:.8g}] def\n", privateDicts[i].fontMatrix[0], privateDicts[i].fontMatrix[1], privateDicts[i].fontMatrix[2], privateDicts[i].fontMatrix[3],
+                                     privateDicts[i].fontMatrix[4], privateDicts[i].fontMatrix[5]);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         } else {
+             (*outputFunc)(outputStream, "/FontMatrix [1 0 0 1 0 0] def\n", 30);
+         }
+         buf = GooString::format("/PaintType {0:d} def\n", topDict.paintType);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         (*outputFunc)(outputStream, "/Private 32 dict begin\n", 23);
+         if (privateDicts[i].nBlueValues) {
+             (*outputFunc)(outputStream, "/BlueValues [", 13);
+             for (j = 0; j < privateDicts[i].nBlueValues; ++j) {
+                 buf = GooString::format("{0:s}{1:d}", j > 0 ? " " : "", privateDicts[i].blueValues[j]);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             (*outputFunc)(outputStream, "] def\n", 6);
+         }
+@@ -608,7 +608,7 @@ void FoFiType1C::convertToCIDType0(const char *psName, const int *codeMap, int n
+             (*outputFunc)(outputStream, "/OtherBlues [", 13);
+             for (j = 0; j < privateDicts[i].nOtherBlues; ++j) {
+                 buf = GooString::format("{0:s}{1:d}", j > 0 ? " " : "", privateDicts[i].otherBlues[j]);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             (*outputFunc)(outputStream, "] def\n", 6);
+         }
+@@ -616,7 +616,7 @@ void FoFiType1C::convertToCIDType0(const char *psName, const int *codeMap, int n
+             (*outputFunc)(outputStream, "/FamilyBlues [", 14);
+             for (j = 0; j < privateDicts[i].nFamilyBlues; ++j) {
+                 buf = GooString::format("{0:s}{1:d}", j > 0 ? " " : "", privateDicts[i].familyBlues[j]);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             (*outputFunc)(outputStream, "] def\n", 6);
+         }
+@@ -624,35 +624,35 @@ void FoFiType1C::convertToCIDType0(const char *psName, const int *codeMap, int n
+             (*outputFunc)(outputStream, "/FamilyOtherBlues [", 19);
+             for (j = 0; j < privateDicts[i].nFamilyOtherBlues; ++j) {
+                 buf = GooString::format("{0:s}{1:d}", j > 0 ? " " : "", privateDicts[i].familyOtherBlues[j]);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             (*outputFunc)(outputStream, "] def\n", 6);
+         }
+         if (privateDicts[i].blueScale != 0.039625) {
+             buf = GooString::format("/BlueScale {0:.4g} def\n", privateDicts[i].blueScale);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (privateDicts[i].blueShift != 7) {
+             buf = GooString::format("/BlueShift {0:d} def\n", privateDicts[i].blueShift);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (privateDicts[i].blueFuzz != 1) {
+             buf = GooString::format("/BlueFuzz {0:d} def\n", privateDicts[i].blueFuzz);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (privateDicts[i].hasStdHW) {
+             buf = GooString::format("/StdHW [{0:.4g}] def\n", privateDicts[i].stdHW);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (privateDicts[i].hasStdVW) {
+             buf = GooString::format("/StdVW [{0:.4g}] def\n", privateDicts[i].stdVW);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (privateDicts[i].nStemSnapH) {
+             (*outputFunc)(outputStream, "/StemSnapH [", 12);
+             for (j = 0; j < privateDicts[i].nStemSnapH; ++j) {
+                 buf = GooString::format("{0:s}{1:.4g}", j > 0 ? " " : "", privateDicts[i].stemSnapH[j]);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             (*outputFunc)(outputStream, "] def\n", 6);
+         }
+@@ -660,25 +660,25 @@ void FoFiType1C::convertToCIDType0(const char *psName, const int *codeMap, int n
+             (*outputFunc)(outputStream, "/StemSnapV [", 12);
+             for (j = 0; j < privateDicts[i].nStemSnapV; ++j) {
+                 buf = GooString::format("{0:s}{1:.4g}", j > 0 ? " " : "", privateDicts[i].stemSnapV[j]);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             (*outputFunc)(outputStream, "] def\n", 6);
+         }
+         if (privateDicts[i].hasForceBold) {
+             buf = GooString::format("/ForceBold {0:s} def\n", privateDicts[i].forceBold ? "true" : "false");
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (privateDicts[i].forceBoldThreshold != 0) {
+             buf = GooString::format("/ForceBoldThreshold {0:.4g} def\n", privateDicts[i].forceBoldThreshold);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (privateDicts[i].languageGroup != 0) {
+             buf = GooString::format("/LanguageGroup {0:d} def\n", privateDicts[i].languageGroup);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (privateDicts[i].expansionFactor != 0.06) {
+             buf = GooString::format("/ExpansionFactor {0:.4g} def\n", privateDicts[i].expansionFactor);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         (*outputFunc)(outputStream, "currentdict end def\n", 20);
+         (*outputFunc)(outputStream, "currentdict end put\n", 20);
+@@ -688,7 +688,7 @@ void FoFiType1C::convertToCIDType0(const char *psName, const int *codeMap, int n
+     // start the binary section
+     offset = (nCIDs + 1) * (1 + gdBytes);
+     buf = GooString::format("(Hex) {0:d} StartData\n", offset + charStrings->getLength());
+-    (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++    (*outputFunc)(outputStream, buf.c_str(), buf.size());
+ 
+     // write the charstring offset (CIDMap) table
+     for (i = 0; i <= nCIDs; i += 6) {
+@@ -705,7 +705,7 @@ void FoFiType1C::convertToCIDType0(const char *psName, const int *codeMap, int n
+             }
+             for (k = 0; k <= gdBytes; ++k) {
+                 buf = GooString::format("{0:02x}", buf2[k] & 0xff);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+         }
+         (*outputFunc)(outputStream, "\n", 1);
+@@ -716,7 +716,7 @@ void FoFiType1C::convertToCIDType0(const char *psName, const int *codeMap, int n
+     for (i = 0; i < n; i += 32) {
+         for (j = 0; j < 32 && i + j < n; ++j) {
+             buf = GooString::format("{0:02x}", charStrings->getChar(i + j) & 0xff);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+         }
+         if (i + 32 >= n) {
+             (*outputFunc)(outputStream, ">", 1);
+@@ -798,34 +798,34 @@ void FoFiType1C::convertToType0(const char *psName, const int *codeMap, int nCod
+             (*outputFunc)(outputStream, "16 dict begin\n", 14);
+             (*outputFunc)(outputStream, "/FontName /", 11);
+             (*outputFunc)(outputStream, psName, strlen(psName));
+-            std::unique_ptr<GooString> buf = GooString::format("_{0:02x} def\n", i >> 8);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            std::string buf = GooString::format("_{0:02x} def\n", i >> 8);
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             (*outputFunc)(outputStream, "/FontType 1 def\n", 16);
+             if (privateDicts[fd].hasFontMatrix) {
+                 buf = GooString::format("/FontMatrix [{0:.8g} {1:.8g} {2:.8g} {3:.8g} {4:.8g} {5:.8g}] def\n", privateDicts[fd].fontMatrix[0], privateDicts[fd].fontMatrix[1], privateDicts[fd].fontMatrix[2], privateDicts[fd].fontMatrix[3],
+                                         privateDicts[fd].fontMatrix[4], privateDicts[fd].fontMatrix[5]);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             } else if (topDict.hasFontMatrix) {
+                 (*outputFunc)(outputStream, "/FontMatrix [1 0 0 1 0 0] def\n", 30);
+             } else {
+                 (*outputFunc)(outputStream, "/FontMatrix [0.001 0 0 0.001 0 0] def\n", 38);
+             }
+             buf = GooString::format("/FontBBox [{0:.4g} {1:.4g} {2:.4g} {3:.4g}] def\n", topDict.fontBBox[0], topDict.fontBBox[1], topDict.fontBBox[2], topDict.fontBBox[3]);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             buf = GooString::format("/PaintType {0:d} def\n", topDict.paintType);
+-            (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++            (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             if (topDict.paintType != 0) {
+                 buf = GooString::format("/StrokeWidth {0:.4g} def\n", topDict.strokeWidth);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             (*outputFunc)(outputStream, "/Encoding 256 array\n", 20);
+             for (j = 0; j < 256 && i + j < nCIDs; ++j) {
+                 buf = GooString::format("dup {0:d} /c{1:02x} put\n", j, j);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             if (j < 256) {
+                 buf = GooString::format("{0:d} 1 255 {{ 1 index exch /.notdef put }} for\n", j);
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+             }
+             (*outputFunc)(outputStream, "readonly def\n", 13);
+             (*outputFunc)(outputStream, "currentdict end\n", 16);
+@@ -852,7 +852,7 @@ void FoFiType1C::convertToType0(const char *psName, const int *codeMap, int nCod
+                 eexecWrite(&eb, "/BlueValues [");
+                 for (k = 0; k < privateDicts[fd].nBlueValues; ++k) {
+                     buf = GooString::format("{0:s}{1:d}", k > 0 ? " " : "", privateDicts[fd].blueValues[k]);
+-                    eexecWrite(&eb, buf->c_str());
++                    eexecWrite(&eb, buf.c_str());
+                 }
+                 eexecWrite(&eb, "] def\n");
+             }
+@@ -860,7 +860,7 @@ void FoFiType1C::convertToType0(const char *psName, const int *codeMap, int nCod
+                 eexecWrite(&eb, "/OtherBlues [");
+                 for (k = 0; k < privateDicts[fd].nOtherBlues; ++k) {
+                     buf = GooString::format("{0:s}{1:d}", k > 0 ? " " : "", privateDicts[fd].otherBlues[k]);
+-                    eexecWrite(&eb, buf->c_str());
++                    eexecWrite(&eb, buf.c_str());
+                 }
+                 eexecWrite(&eb, "] def\n");
+             }
+@@ -868,7 +868,7 @@ void FoFiType1C::convertToType0(const char *psName, const int *codeMap, int nCod
+                 eexecWrite(&eb, "/FamilyBlues [");
+                 for (k = 0; k < privateDicts[fd].nFamilyBlues; ++k) {
+                     buf = GooString::format("{0:s}{1:d}", k > 0 ? " " : "", privateDicts[fd].familyBlues[k]);
+-                    eexecWrite(&eb, buf->c_str());
++                    eexecWrite(&eb, buf.c_str());
+                 }
+                 eexecWrite(&eb, "] def\n");
+             }
+@@ -876,35 +876,35 @@ void FoFiType1C::convertToType0(const char *psName, const int *codeMap, int nCod
+                 eexecWrite(&eb, "/FamilyOtherBlues [");
+                 for (k = 0; k < privateDicts[fd].nFamilyOtherBlues; ++k) {
+                     buf = GooString::format("{0:s}{1:d}", k > 0 ? " " : "", privateDicts[fd].familyOtherBlues[k]);
+-                    eexecWrite(&eb, buf->c_str());
++                    eexecWrite(&eb, buf.c_str());
+                 }
+                 eexecWrite(&eb, "] def\n");
+             }
+             if (privateDicts[fd].blueScale != 0.039625) {
+                 buf = GooString::format("/BlueScale {0:.4g} def\n", privateDicts[fd].blueScale);
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+             if (privateDicts[fd].blueShift != 7) {
+                 buf = GooString::format("/BlueShift {0:d} def\n", privateDicts[fd].blueShift);
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+             if (privateDicts[fd].blueFuzz != 1) {
+                 buf = GooString::format("/BlueFuzz {0:d} def\n", privateDicts[fd].blueFuzz);
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+             if (privateDicts[fd].hasStdHW) {
+                 buf = GooString::format("/StdHW [{0:.4g}] def\n", privateDicts[fd].stdHW);
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+             if (privateDicts[fd].hasStdVW) {
+                 buf = GooString::format("/StdVW [{0:.4g}] def\n", privateDicts[fd].stdVW);
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+             if (privateDicts[fd].nStemSnapH) {
+                 eexecWrite(&eb, "/StemSnapH [");
+                 for (k = 0; k < privateDicts[fd].nStemSnapH; ++k) {
+                     buf = GooString::format("{0:s}{1:.4g}", k > 0 ? " " : "", privateDicts[fd].stemSnapH[k]);
+-                    eexecWrite(&eb, buf->c_str());
++                    eexecWrite(&eb, buf.c_str());
+                 }
+                 eexecWrite(&eb, "] def\n");
+             }
+@@ -912,25 +912,25 @@ void FoFiType1C::convertToType0(const char *psName, const int *codeMap, int nCod
+                 eexecWrite(&eb, "/StemSnapV [");
+                 for (k = 0; k < privateDicts[fd].nStemSnapV; ++k) {
+                     buf = GooString::format("{0:s}{1:.4g}", k > 0 ? " " : "", privateDicts[fd].stemSnapV[k]);
+-                    eexecWrite(&eb, buf->c_str());
++                    eexecWrite(&eb, buf.c_str());
+                 }
+                 eexecWrite(&eb, "] def\n");
+             }
+             if (privateDicts[fd].hasForceBold) {
+                 buf = GooString::format("/ForceBold {0:s} def\n", privateDicts[fd].forceBold ? "true" : "false");
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+             if (privateDicts[fd].forceBoldThreshold != 0) {
+                 buf = GooString::format("/ForceBoldThreshold {0:.4g} def\n", privateDicts[fd].forceBoldThreshold);
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+             if (privateDicts[fd].languageGroup != 0) {
+                 buf = GooString::format("/LanguageGroup {0:d} def\n", privateDicts[fd].languageGroup);
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+             if (privateDicts[fd].expansionFactor != 0.06) {
+                 buf = GooString::format("/ExpansionFactor {0:.4g} def\n", privateDicts[fd].expansionFactor);
+-                eexecWrite(&eb, buf->c_str());
++                eexecWrite(&eb, buf.c_str());
+             }
+ 
+             // set up the subroutines
+@@ -957,7 +957,7 @@ void FoFiType1C::convertToType0(const char *psName, const int *codeMap, int nCod
+                     getIndexVal(&charStringsIdx, cidMap[i + j], &val, &ok);
+                     if (ok) {
+                         buf = GooString::format("c{0:02x}", j);
+-                        eexecCvtGlyph(&eb, buf->c_str(), val.pos, val.len, &subrIdx, &privateDicts[fd]);
++                        eexecCvtGlyph(&eb, buf.c_str(), val.pos, val.len, &subrIdx, &privateDicts[fd]);
+                     }
+                 }
+             }
+@@ -988,25 +988,25 @@ void FoFiType1C::convertToType0(const char *psName, const int *codeMap, int nCod
+     (*outputFunc)(outputStream, " def\n", 5);
+     (*outputFunc)(outputStream, "/FontType 0 def\n", 16);
+     if (topDict.hasFontMatrix) {
+-        const std::unique_ptr<GooString> buf = GooString::format("/FontMatrix [{0:.8g} {1:.8g} {2:.8g} {3:.8g} {4:.8g} {5:.8g}] def\n", topDict.fontMatrix[0], topDict.fontMatrix[1], topDict.fontMatrix[2], topDict.fontMatrix[3],
+-                                                                 topDict.fontMatrix[4], topDict.fontMatrix[5]);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        const std::string buf = GooString::format("/FontMatrix [{0:.8g} {1:.8g} {2:.8g} {3:.8g} {4:.8g} {5:.8g}] def\n", topDict.fontMatrix[0], topDict.fontMatrix[1], topDict.fontMatrix[2], topDict.fontMatrix[3], topDict.fontMatrix[4],
++                                                  topDict.fontMatrix[5]);
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     } else {
+         (*outputFunc)(outputStream, "/FontMatrix [1 0 0 1 0 0] def\n", 30);
+     }
+     (*outputFunc)(outputStream, "/FMapType 2 def\n", 16);
+     (*outputFunc)(outputStream, "/Encoding [\n", 12);
+     for (i = 0; i < nCIDs; i += 256) {
+-        const std::unique_ptr<GooString> buf = GooString::format("{0:d}\n", i >> 8);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        const std::string buf = GooString::format("{0:d}\n", i >> 8);
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     }
+     (*outputFunc)(outputStream, "] def\n", 6);
+     (*outputFunc)(outputStream, "/FDepVector [\n", 14);
+     for (i = 0; i < nCIDs; i += 256) {
+         (*outputFunc)(outputStream, "/", 1);
+         (*outputFunc)(outputStream, psName, strlen(psName));
+-        const std::unique_ptr<GooString> buf = GooString::format("_{0:02x} findfont\n", i >> 8);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        const std::string buf = GooString::format("_{0:02x} findfont\n", i >> 8);
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     }
+     (*outputFunc)(outputStream, "] def\n", 6);
+     (*outputFunc)(outputStream, "FontName currentdict end definefont pop\n", 40);
+@@ -1023,8 +1023,8 @@ void FoFiType1C::eexecCvtGlyph(Type1CEexecBuf *eb, const char *glyphName, int of
+     std::set<int> offsetBeingParsed;
+     cvtGlyph(offset, nBytes, charBuf, subrIdx, pDict, true, offsetBeingParsed);
+ 
+-    const std::unique_ptr<GooString> buf = GooString::format("/{0:s} {1:d} RD ", glyphName, charBuf->getLength());
+-    eexecWrite(eb, buf->c_str());
++    const std::string buf = GooString::format("/{0:s} {1:d} RD ", glyphName, charBuf->getLength());
++    eexecWrite(eb, buf.c_str());
+     eexecWriteCharstring(eb, (unsigned char *)charBuf->c_str(), charBuf->getLength());
+     eexecWrite(eb, " ND\n");
+ 
+diff --git a/glib/CMakeLists.txt b/glib/CMakeLists.txt
+index df79929..4fcf973 100644
+--- a/glib/CMakeLists.txt
++++ b/glib/CMakeLists.txt
+@@ -38,7 +38,7 @@ set(poppler_glib_public_headers
+   poppler-structure-element.h
+ )
+ 
+-find_program(GLIB2_MKENUMS glib-mkenums)
++find_program(GLIB2_MKENUMS glib-mkenums REQUIRED)
+ find_program(GLIB2_MKENUMS_PYTHON NAMES python3 python)
+ 
+ add_custom_command(
+diff --git a/glib/demo/fonts.c b/glib/demo/fonts.c
+index 00d80fb..85d28de 100644
+--- a/glib/demo/fonts.c
++++ b/glib/demo/fonts.c
+@@ -125,7 +125,8 @@ static gboolean pgd_fonts_fill_model(PgdFontsDemo *demo)
+ 
+     font_info = poppler_font_info_new(demo->doc);
+ 
+-    while (poppler_font_info_scan(font_info, 20, &fonts_iter)) {
++    while (scanned <= n_pages) {
++        poppler_font_info_scan(font_info, 20, &fonts_iter);
+         pgd_fonts_update_progress(demo, n_pages, scanned);
+ 
+         while (gtk_events_pending()) {
+diff --git a/glib/poppler-document.cc b/glib/poppler-document.cc
+index fac52af..f0513b7 100644
+--- a/glib/poppler-document.cc
++++ b/glib/poppler-document.cc
+@@ -3148,7 +3148,10 @@ PopplerFontInfo *poppler_font_info_new(PopplerDocument *document)
+  *
+  * <informalexample><programlisting>
+  * font_info = poppler_font_info_new (document);
+- * while (poppler_font_info_scan (font_info, 20, &fonts_iter)) {
++
++
++
++
+  *         if (!fonts_iter)
+  *                 continue; /<!-- -->* No fonts found in these 20 pages *<!-- -->/
+  *         do {
+@@ -3159,7 +3162,7 @@ PopplerFontInfo *poppler_font_info_new(PopplerDocument *document)
+  * }
+  * </programlisting></informalexample>
+  *
+- * Returns: %TRUE, if there are more fonts left to scan
++
+  */
+ gboolean poppler_font_info_scan(PopplerFontInfo *font_info, int n_pages, PopplerFontsIter **iter)
+ {
+@@ -3801,7 +3804,7 @@ GooString *_poppler_convert_date_time_to_pdf_date(GDateTime *datetime)
+ {
+     int offset_min;
+     gchar *date_str;
+-    std::unique_ptr<GooString> out_str;
++    std::string out_str;
+ 
+     offset_min = g_date_time_get_utc_offset(datetime) / 1000000 / 60;
+     date_str = g_date_time_format(datetime, "D:%Y%m%d%H%M%S");
+@@ -3815,7 +3818,7 @@ GooString *_poppler_convert_date_time_to_pdf_date(GDateTime *datetime)
+     }
+ 
+     g_free(date_str);
+-    return out_str.release();
++    return new GooString(std::move(out_str));
+ }
+ 
+ static void _poppler_sign_document_thread(GTask *task, PopplerDocument *document, const PopplerSigningData *signing_data, GCancellable *cancellable)
+diff --git a/glib/tests/fuzzing/doc_attr_fuzzer.cc b/glib/tests/fuzzing/doc_attr_fuzzer.cc
+index 18d3811..011b744 100644
+--- a/glib/tests/fuzzing/doc_attr_fuzzer.cc
++++ b/glib/tests/fuzzing/doc_attr_fuzzer.cc
+@@ -29,5 +29,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+     poppler_document_set_title(doc, buf);
+ 
+     free(buf);
++    g_object_unref(doc);
+     return 0;
+ }
+diff --git a/glib/tests/fuzzing/find_text_fuzzer.cc b/glib/tests/fuzzing/find_text_fuzzer.cc
+index e7d0ba9..8f9c456 100644
+--- a/glib/tests/fuzzing/find_text_fuzzer.cc
++++ b/glib/tests/fuzzing/find_text_fuzzer.cc
+@@ -19,6 +19,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+ 
+     npages = poppler_document_get_n_pages(doc);
+     if (npages < 1) {
++        g_object_unref(doc);
+         return 0;
+     }
+ 
+@@ -31,9 +32,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+         if (!page) {
+             continue;
+         }
+-        poppler_page_find_text(page, buf);
++        if (g_utf8_validate(buf, -1, NULL)) {
++            poppler_page_find_text(page, buf);
++        }
+         g_object_unref(page);
+     }
+     free(buf);
++    g_object_unref(doc);
+     return 0;
+ }
+diff --git a/glib/tests/fuzzing/label_fuzzer.cc b/glib/tests/fuzzing/label_fuzzer.cc
+index 825a57a..2e831d3 100644
+--- a/glib/tests/fuzzing/label_fuzzer.cc
++++ b/glib/tests/fuzzing/label_fuzzer.cc
+@@ -19,6 +19,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+ 
+     npages = poppler_document_get_n_pages(doc);
+     if (npages < 1) {
++        g_object_unref(doc);
+         return 0;
+     }
+ 
+@@ -34,5 +35,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
+         g_object_unref(page);
+     }
+     free(buf);
++    g_object_unref(doc);
+     return 0;
+ }
+diff --git a/goo/GooString.cc b/goo/GooString.cc
+index a657e82..dde3536 100644
+--- a/goo/GooString.cc
++++ b/goo/GooString.cc
+@@ -125,25 +125,25 @@ void formatDoubleSmallAware(double x, char *buf, int bufSize, int prec, bool tri
+ 
+ //------------------------------------------------------------------------
+ 
+-std::unique_ptr<GooString> GooString::format(const char *fmt, ...)
++std::string GooString::format(const char *fmt, ...)
+ {
+-    auto s = std::make_unique<GooString>();
++    GooString s;
+ 
+     va_list argList;
+     va_start(argList, fmt);
+-    s->appendfv(fmt, argList);
++    s.appendfv(fmt, argList);
+     va_end(argList);
+ 
+-    return s;
++    return s.toStr();
+ }
+ 
+-std::unique_ptr<GooString> GooString::formatv(const char *fmt, va_list argList)
++std::string GooString::formatv(const char *fmt, va_list argList)
+ {
+-    auto s = std::make_unique<GooString>();
++    GooString s;
+ 
+-    s->appendfv(fmt, argList);
++    s.appendfv(fmt, argList);
+ 
+-    return s;
++    return s.toStr();
+ }
+ 
+ GooString *GooString::appendf(const char *fmt, ...)
+diff --git a/goo/GooString.h b/goo/GooString.h
+index 5659b34..ea62b67 100644
+--- a/goo/GooString.h
++++ b/goo/GooString.h
+@@ -140,8 +140,8 @@ public:
+     //     t -- GooString *
+     //     w -- blank space; arg determines width
+     // To get literal curly braces, use {{ or }}.
+-    POPPLER_PRIVATE_EXPORT static std::unique_ptr<GooString> format(const char *fmt, ...) GOOSTRING_FORMAT;
+-    POPPLER_PRIVATE_EXPORT static std::unique_ptr<GooString> formatv(const char *fmt, va_list argList);
++    POPPLER_PRIVATE_EXPORT static std::string format(const char *fmt, ...) GOOSTRING_FORMAT;
++    POPPLER_PRIVATE_EXPORT static std::string formatv(const char *fmt, va_list argList);
+ 
+     // Get length.
+     int getLength() const { return size(); }
+diff --git a/poppler/Annot.cc b/poppler/Annot.cc
+index 7841637..3336544 100644
+--- a/poppler/Annot.cc
++++ b/poppler/Annot.cc
+@@ -5233,8 +5233,8 @@ bool AnnotAppearanceBuilder::drawSignatureFieldText(const FormFieldSignature *fi
+         Matrix matrix = { 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 };
+         matrix.scale(width, height);
+         static const char *IMG_TMPL = "\nq {0:.1g} {1:.1g} {2:.1g} {3:.1g} {4:.1g} {5:.1g} cm /{6:s} Do Q\n";
+-        const std::unique_ptr<GooString> imgBuffer = GooString::format(IMG_TMPL, matrix.m[0], matrix.m[1], matrix.m[2], matrix.m[3], matrix.m[4], matrix.m[5], imageResourceId);
+-        append(imgBuffer->c_str());
++        const std::string imgBuffer = GooString::format(IMG_TMPL, matrix.m[0], matrix.m[1], matrix.m[2], matrix.m[3], matrix.m[4], matrix.m[5], imageResourceId);
++        append(imgBuffer.c_str());
+     }
+ 
+     const GooString &leftText = field->getCustomAppearanceLeftContent();
+@@ -5840,8 +5840,8 @@ void AnnotStamp::generateStampDefaultAppearance()
+     }
+ 
+     const double bboxArray[4] = { 0, 0, rect->x2 - rect->x1, rect->y2 - rect->y1 };
+-    const std::unique_ptr<GooString> scale = GooString::format("{0:.6g} 0 0 {1:.6g} 0 0 cm\nq\n", bboxArray[2] / stampUnscaledWidth, bboxArray[3] / stampUnscaledHeight);
+-    defaultAppearanceBuilder.append(scale->c_str());
++    const std::string scale = GooString::format("{0:.6g} 0 0 {1:.6g} 0 0 cm\nq\n", bboxArray[2] / stampUnscaledWidth, bboxArray[3] / stampUnscaledHeight);
++    defaultAppearanceBuilder.append(scale.c_str());
+     defaultAppearanceBuilder.append(stampCode);
+     defaultAppearanceBuilder.append("Q\n");
+ 
+diff --git a/poppler/CairoFontEngine.cc b/poppler/CairoFontEngine.cc
+index db8a3db..8c0c845 100644
+--- a/poppler/CairoFontEngine.cc
++++ b/poppler/CairoFontEngine.cc
+@@ -21,7 +21,7 @@
+ // Copyright (C) 2006, 2007, 2010, 2011 Carlos Garcia Campos <carlosgc@gnome.org>
+ // Copyright (C) 2007 Koji Otani <sho@bbr.jp>
+ // Copyright (C) 2008, 2009 Chris Wilson <chris@chris-wilson.co.uk>
+-// Copyright (C) 2008, 2012, 2014, 2016, 2017, 2022, 2023 Adrian Johnson <ajohnson@redneon.com>
++
+ // Copyright (C) 2009 Darren Kenny <darren.kenny@sun.com>
+ // Copyright (C) 2010 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+ // Copyright (C) 2010 Jan Kümmel <jan+freedesktop@snorc.org>
+diff --git a/poppler/CairoOutputDev.cc b/poppler/CairoOutputDev.cc
+index 5d7abbb..6ad3ed5 100644
+--- a/poppler/CairoOutputDev.cc
++++ b/poppler/CairoOutputDev.cc
+@@ -20,7 +20,7 @@
+ // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
+ // Copyright (C) 2006-2011, 2013, 2014, 2017, 2018 Carlos Garcia Campos <carlosgc@gnome.org>
+ // Copyright (C) 2008 Carl Worth <cworth@cworth.org>
+-// Copyright (C) 2008-2018, 2021-2023 Adrian Johnson <ajohnson@redneon.com>
++
+ // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
+ // Copyright (C) 2008, 2009 Chris Wilson <chris@chris-wilson.co.uk>
+ // Copyright (C) 2008, 2012 Hib Eris <hib@hiberis.nl>
+@@ -153,11 +153,6 @@ CairoOutputDev::CairoOutputDev()
+     strokePathClip = nullptr;
+     cairo = nullptr;
+     currentFont = nullptr;
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 14, 0)
+-    prescaleImages = false;
+-#else
+-    prescaleImages = true;
+-#endif
+     printing = true;
+     use_show_text_glyphs = false;
+     inUncoloredPattern = false;
+@@ -1527,7 +1522,6 @@ bool CairoOutputDev::tilingPatternFill(GfxState *state, Gfx *gfxA, Catalog *cat,
+     return true;
+ }
+ 
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
+ bool CairoOutputDev::functionShadedFill(GfxState *state, GfxFunctionShading *shading)
+ {
+     // Function shaded fills are subdivided to rectangles that are the
+@@ -1615,7 +1609,6 @@ bool CairoOutputDev::functionShadedFill(GfxState *state, GfxFunctionShading *sha
+ 
+     return true;
+ }
+-#endif /* CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0) */
+ 
+ bool CairoOutputDev::axialShadedFill(GfxState *state, GfxAxialShading *shading, double tMin, double tMax)
+ {
+@@ -1686,7 +1679,6 @@ bool CairoOutputDev::radialShadedSupportExtend(GfxState *state, GfxRadialShading
+     return (shading->getExtend0() == shading->getExtend1());
+ }
+ 
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
+ bool CairoOutputDev::gouraudTriangleShadedFill(GfxState *state, GfxGouraudTriangleShading *shading)
+ {
+     double x0, y0, x1, y1, x2, y2;
+@@ -1814,7 +1806,6 @@ bool CairoOutputDev::patchMeshShadedFill(GfxState *state, GfxPatchMeshShading *s
+ 
+     return true;
+ }
+-#endif /* CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0) */
+ 
+ void CairoOutputDev::clip(GfxState *state)
+ {
+@@ -2548,17 +2539,7 @@ void CairoOutputDev::drawImageMask(GfxState *state, Object *ref, Stream *str, in
+     cairo_get_matrix(cairo, &matrix);
+     // XXX: it is possible that we should only do sub pixel positioning if
+     // we are rendering fonts */
+-    if (!printing
+-        && prescaleImages
+-        /* not rotated */
+-        && matrix.xy == 0
+-        && matrix.yx == 0
+-        /* axes not flipped / not 180 deg rotated */
+-        && matrix.xx > 0 && (upsideDown() ? -1 : 1) * matrix.yy > 0) {
+-        drawImageMaskPrescaled(state, ref, str, width, height, invert, interpolate, inlineImg);
+-    } else {
+-        drawImageMaskRegular(state, ref, str, width, height, invert, interpolate, inlineImg);
+-    }
++    drawImageMaskRegular(state, ref, str, width, height, invert, interpolate, inlineImg);
+ }
+ 
+ void CairoOutputDev::setSoftMaskFromImageMask(GfxState *state, Object *ref, Stream *str, int width, int height, bool invert, bool inlineImg, double *baseMatrix)
+@@ -2601,11 +2582,7 @@ void CairoOutputDev::setSoftMaskFromImageMask(GfxState *state, Object *ref, Stre
+         cairo_get_matrix(cairo, &matrix);
+         // XXX: it is possible that we should only do sub pixel positioning if
+         // we are rendering fonts */
+-        if (!printing && prescaleImages && matrix.xy == 0.0 && matrix.yx == 0.0) {
+-            drawImageMaskPrescaled(state, ref, str, width, height, invert, false, inlineImg);
+-        } else {
+-            drawImageMaskRegular(state, ref, str, width, height, invert, false, inlineImg);
+-        }
++        drawImageMaskRegular(state, ref, str, width, height, invert, false, inlineImg);
+ 
+         if (state->getFillColorSpace()->getMode() == csPattern) {
+             cairo_set_source_rgb(cairo, 1, 1, 1);
+@@ -2744,297 +2721,6 @@ cleanup:
+     delete imgStr;
+ }
+ 
+-void CairoOutputDev::drawImageMaskPrescaled(GfxState *state, Object *ref, Stream *str, int width, int height, bool invert, bool interpolate, bool inlineImg)
+-{
+-    unsigned char *buffer;
+-    cairo_surface_t *image;
+-    cairo_pattern_t *pattern;
+-    ImageStream *imgStr;
+-    unsigned char *pix;
+-    cairo_matrix_t matrix;
+-    int invert_bit;
+-    ptrdiff_t row_stride;
+-
+-    /* cairo does a very poor job of scaling down images so we scale them ourselves */
+-
+-    LOG(printf("drawImageMaskPrescaled %dx%d\n", width, height));
+-
+-    /* this scaling code is adopted from the splash image scaling code */
+-    cairo_get_matrix(cairo, &matrix);
+-#if 0
+-  printf("[%f %f], [%f %f], %f %f\n", matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.x0, matrix.y0);
+-#endif
+-    /* this whole computation should be factored out */
+-    double xScale = matrix.xx;
+-    double yScale = matrix.yy;
+-    int tx, tx2, ty, ty2; /* the integer co-ordinates of the resulting image */
+-    int scaledHeight;
+-    int scaledWidth;
+-    if (xScale >= 0) {
+-        tx = splashRound(matrix.x0 - 0.01);
+-        tx2 = splashRound(matrix.x0 + xScale + 0.01) - 1;
+-    } else {
+-        tx = splashRound(matrix.x0 + 0.01) - 1;
+-        tx2 = splashRound(matrix.x0 + xScale - 0.01);
+-    }
+-    scaledWidth = abs(tx2 - tx) + 1;
+-    // scaledWidth = splashRound(fabs(xScale));
+-    if (scaledWidth == 0) {
+-        // technically, this should draw nothing, but it generally seems
+-        // better to draw a one-pixel-wide stripe rather than throwing it
+-        // away
+-        scaledWidth = 1;
+-    }
+-    if (yScale >= 0) {
+-        ty = splashFloor(matrix.y0 + 0.01);
+-        ty2 = splashCeil(matrix.y0 + yScale - 0.01);
+-    } else {
+-        ty = splashCeil(matrix.y0 - 0.01);
+-        ty2 = splashFloor(matrix.y0 + yScale + 0.01);
+-    }
+-    scaledHeight = abs(ty2 - ty);
+-    if (scaledHeight == 0) {
+-        scaledHeight = 1;
+-    }
+-#if 0
+-  printf("xscale: %g, yscale: %g\n", xScale, yScale);
+-  printf("width: %d, height: %d\n", width, height);
+-  printf("scaledWidth: %d, scaledHeight: %d\n", scaledWidth, scaledHeight);
+-#endif
+-
+-    /* compute the required padding */
+-    /* Padding is used to preserve the aspect ratio.
+-       We compute total_pad to make (height+total_pad)/scaledHeight as close to height/yScale as possible */
+-    int head_pad = 0;
+-    int tail_pad = 0;
+-    int total_pad = splashRound(height * (scaledHeight / fabs(yScale)) - height);
+-
+-    /* compute the two pieces of padding */
+-    if (total_pad > 0) {
+-        // XXX: i'm not positive fabs() is correct
+-        float tail_error = fabs(matrix.y0 - ty);
+-        float head_error = fabs(ty2 - (matrix.y0 + yScale));
+-        float tail_fraction = tail_error / (tail_error + head_error);
+-        tail_pad = splashRound(total_pad * tail_fraction);
+-        head_pad = total_pad - tail_pad;
+-    } else {
+-        tail_pad = 0;
+-        head_pad = 0;
+-    }
+-    int origHeight = height;
+-    height += tail_pad;
+-    height += head_pad;
+-#if 0
+-  printf("head_pad: %d tail_pad: %d\n", head_pad, tail_pad);
+-  printf("origHeight: %d height: %d\n", origHeight, height);
+-  printf("ty: %d, ty2: %d\n", ty, ty2);
+-#endif
+-
+-    /* TODO: Do we want to cache these? */
+-    imgStr = new ImageStream(str, width, 1, 1);
+-    imgStr->reset();
+-
+-    invert_bit = invert ? 1 : 0;
+-
+-    image = cairo_image_surface_create(CAIRO_FORMAT_A8, scaledWidth, scaledHeight);
+-    if (cairo_surface_status(image)) {
+-        imgStr->close();
+-        delete imgStr;
+-        return;
+-    }
+-
+-    buffer = cairo_image_surface_get_data(image);
+-    row_stride = cairo_image_surface_get_stride(image);
+-
+-    int yp = height / scaledHeight;
+-    int yq = height % scaledHeight;
+-    int xp = width / scaledWidth;
+-    int xq = width % scaledWidth;
+-    int yt = 0;
+-    int origHeight_c = origHeight;
+-    /* use MIN() because yp might be > origHeight because of padding */
+-    unsigned char *pixBuf = (unsigned char *)malloc(MIN(yp + 1, origHeight) * width);
+-    int lastYStep = 1;
+-    int total = 0;
+-    for (int y = 0; y < scaledHeight; y++) {
+-        // y scale Bresenham
+-        int yStep = yp;
+-        yt += yq;
+-
+-        if (yt >= scaledHeight) {
+-            yt -= scaledHeight;
+-            ++yStep;
+-        }
+-
+-        // read row (s) from image ignoring the padding as appropriate
+-        {
+-            int n = (yp > 0) ? yStep : lastYStep;
+-            total += n;
+-            if (n > 0) {
+-                unsigned char *p = pixBuf;
+-                int head_pad_count = head_pad;
+-                int origHeight_count = origHeight;
+-                int tail_pad_count = tail_pad;
+-                for (int i = 0; i < n; i++) {
+-                    // get row
+-                    if (head_pad_count) {
+-                        head_pad_count--;
+-                    } else if (origHeight_count) {
+-                        pix = imgStr->getLine();
+-                        for (int j = 0; j < width; j++) {
+-                            if (pix[j] ^ invert_bit) {
+-                                p[j] = 0;
+-                            } else {
+-                                p[j] = 255;
+-                            }
+-                        }
+-                        origHeight_count--;
+-                        p += width;
+-                    } else if (tail_pad_count) {
+-                        tail_pad_count--;
+-                    } else {
+-                        printf("%d %d\n", n, total);
+-                        assert(0 && "over run\n");
+-                    }
+-                }
+-            }
+-        }
+-
+-        lastYStep = yStep;
+-
+-        int xt = 0;
+-        int xSrc = 0;
+-        int n = yStep > 0 ? yStep : 1;
+-        int origN = n;
+-
+-        /* compute the size of padding and pixels that will be used for this row */
+-        int head_pad_size = MIN(n, head_pad);
+-        n -= head_pad_size;
+-        head_pad -= MIN(head_pad_size, yStep);
+-
+-        int pix_size = MIN(n, origHeight);
+-        n -= pix_size;
+-        origHeight -= MIN(pix_size, yStep);
+-
+-        int tail_pad_size = MIN(n, tail_pad);
+-        n -= tail_pad_size;
+-        tail_pad -= MIN(tail_pad_size, yStep);
+-        if (n != 0) {
+-            printf("n = %d (%d %d %d)\n", n, head_pad_size, pix_size, tail_pad_size);
+-            assert(n == 0);
+-        }
+-
+-        for (int x = 0; x < scaledWidth; ++x) {
+-            int xStep = xp;
+-            xt += xq;
+-            if (xt >= scaledWidth) {
+-                xt -= scaledWidth;
+-                ++xStep;
+-            }
+-            int m = xStep > 0 ? xStep : 1;
+-            float pixAcc0 = 0;
+-            /* could m * head_pad_size * tail_pad_size  overflow? */
+-            if (invert_bit) {
+-                pixAcc0 += m * head_pad_size * tail_pad_size * 255;
+-            } else {
+-                pixAcc0 += m * head_pad_size * tail_pad_size * 0;
+-            }
+-            /* Accumulate all of the source pixels for the destination pixel */
+-            for (int i = 0; i < pix_size; ++i) {
+-                for (int j = 0; j < m; ++j) {
+-                    if (xSrc + i * width + j > MIN(yp + 1, origHeight_c) * width) {
+-                        printf("%d > %d (%d %d %d %d) (%d %d %d)\n", xSrc + i * width + j, MIN(yp + 1, origHeight_c) * width, xSrc, i, width, j, yp, origHeight_c, width);
+-                        printf("%d %d %d\n", head_pad_size, pix_size, tail_pad_size);
+-                        assert(0 && "bad access\n");
+-                    }
+-                    pixAcc0 += pixBuf[xSrc + i * width + j];
+-                }
+-            }
+-            buffer[y * row_stride + x] = splashFloor(pixAcc0 / (origN * m));
+-            xSrc += xStep;
+-        }
+-    }
+-    free(pixBuf);
+-
+-    cairo_surface_mark_dirty(image);
+-    pattern = cairo_pattern_create_for_surface(image);
+-    cairo_surface_destroy(image);
+-    if (cairo_pattern_status(pattern)) {
+-        imgStr->close();
+-        delete imgStr;
+-        return;
+-    }
+-
+-    /* we should actually be using CAIRO_FILTER_NEAREST here. However,
+-     * cairo doesn't yet do minifaction filtering causing scaled down
+-     * images with CAIRO_FILTER_NEAREST to look really bad */
+-    cairo_pattern_set_filter(pattern, interpolate ? CAIRO_FILTER_GOOD : CAIRO_FILTER_FAST);
+-
+-    if (state->getFillColorSpace()->getMode() == csPattern) {
+-        cairo_matrix_init_translate(&matrix, 0, scaledHeight);
+-        cairo_matrix_scale(&matrix, scaledWidth, -scaledHeight);
+-        cairo_pattern_set_matrix(pattern, &matrix);
+-        if (cairo_pattern_status(pattern)) {
+-            cairo_pattern_destroy(pattern);
+-            imgStr->close();
+-            delete imgStr;
+-            return;
+-        }
+-
+-        mask = cairo_pattern_reference(pattern);
+-        cairo_get_matrix(cairo, &mask_matrix);
+-    } else {
+-        cairo_save(cairo);
+-
+-        /* modify our current transformation so that the prescaled image
+-         * goes where it is supposed to */
+-        cairo_get_matrix(cairo, &matrix);
+-        cairo_scale(cairo, 1.0 / matrix.xx, 1.0 / matrix.yy);
+-        // get integer co-ords
+-        cairo_translate(cairo, tx - matrix.x0, ty2 - matrix.y0);
+-        if (yScale > 0) {
+-            cairo_scale(cairo, 1, -1);
+-        }
+-
+-        cairo_rectangle(cairo, 0., 0., scaledWidth, scaledHeight);
+-        cairo_clip(cairo);
+-        if (strokePathClip) {
+-            cairo_push_group(cairo);
+-            fillToStrokePathClip(state);
+-            cairo_pop_group_to_source(cairo);
+-        }
+-        cairo_mask(cairo, pattern);
+-
+-        // cairo_get_matrix(cairo, &matrix);
+-        // printf("mask at: [%f %f], [%f %f], %f %f\n\n", matrix.xx, matrix.xy, matrix.yx, matrix.yy, matrix.x0, matrix.y0);
+-        cairo_restore(cairo);
+-    }
+-
+-    if (cairo_shape) {
+-        cairo_save(cairo_shape);
+-
+-        /* modify our current transformation so that the prescaled image
+-         * goes where it is supposed to */
+-        cairo_get_matrix(cairo_shape, &matrix);
+-        cairo_scale(cairo_shape, 1.0 / matrix.xx, 1.0 / matrix.yy);
+-        // get integer co-ords
+-        cairo_translate(cairo_shape, tx - matrix.x0, ty2 - matrix.y0);
+-        if (yScale > 0) {
+-            cairo_scale(cairo_shape, 1, -1);
+-        }
+-
+-        cairo_rectangle(cairo_shape, 0., 0., scaledWidth, scaledHeight);
+-        cairo_fill(cairo_shape);
+-
+-        cairo_restore(cairo_shape);
+-    }
+-
+-    cairo_pattern_destroy(pattern);
+-
+-    imgStr->close();
+-    delete imgStr;
+-}
+-
+ void CairoOutputDev::drawMaskedImage(GfxState *state, Object *ref, Stream *str, int width, int height, GfxImageColorMap *colorMap, bool interpolate, Stream *maskStr, int maskWidth, int maskHeight, bool maskInvert, bool maskInterpolate)
+ {
+     ImageStream *maskImgStr, *imgStr;
+@@ -3421,7 +3107,6 @@ static bool colorMapHasIdentityDecodeMap(GfxImageColorMap *colorMap)
+     return true;
+ }
+ 
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 11, 2)
+ static cairo_status_t setMimeIdFromRef(cairo_surface_t *surface, const char *mime_type, const char *mime_id_prefix, Ref ref)
+ {
+     GooString *mime_id;
+@@ -3444,9 +3129,7 @@ static cairo_status_t setMimeIdFromRef(cairo_surface_t *surface, const char *mim
+     }
+     return status;
+ }
+-#endif
+ 
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 14, 0)
+ bool CairoOutputDev::setMimeDataForJBIG2Globals(Stream *str, cairo_surface_t *image)
+ {
+     JBIG2Stream *jb2Str = static_cast<JBIG2Stream *>(str);
+@@ -3474,9 +3157,7 @@ bool CairoOutputDev::setMimeDataForJBIG2Globals(Stream *str, cairo_surface_t *im
+ 
+     return true;
+ }
+-#endif
+ 
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 15, 10)
+ bool CairoOutputDev::setMimeDataForCCITTParams(Stream *str, cairo_surface_t *image, int height)
+ {
+     CCITTFaxStream *ccittStr = static_cast<CCITTFaxStream *>(str);
+@@ -3499,7 +3180,6 @@ bool CairoOutputDev::setMimeDataForCCITTParams(Stream *str, cairo_surface_t *ima
+ 
+     return true;
+ }
+-#endif
+ 
+ void CairoOutputDev::setMimeData(GfxState *state, Stream *str, Object *ref, GfxImageColorMap *colorMap, cairo_surface_t *image, int height)
+ {
+@@ -3515,8 +3195,7 @@ void CairoOutputDev::setMimeData(GfxState *state, Stream *str, Object *ref, GfxI
+         return;
+     }
+ 
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 11, 2)
+-    // Since 1.5.10 the cairo PS backend stores images with UNIQUE_ID in PS memory so the
++
+     // image can be re-used multiple times. As we don't know how large the images are or
+     // how many times they are used, there is no benefit in enabling this. Issue #106
+     if (cairo_surface_get_type(cairo_get_target(cairo)) != CAIRO_SURFACE_TYPE_PS) {
+@@ -3527,7 +3206,6 @@ void CairoOutputDev::setMimeData(GfxState *state, Stream *str, Object *ref, GfxI
+             }
+         }
+     }
+-#endif
+ 
+     switch (strKind) {
+     case strDCT:
+@@ -3536,16 +3214,12 @@ void CairoOutputDev::setMimeData(GfxState *state, Stream *str, Object *ref, GfxI
+     case strJPX:
+         mime_type = CAIRO_MIME_TYPE_JP2;
+         break;
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 14, 0)
+     case strJBIG2:
+         mime_type = CAIRO_MIME_TYPE_JBIG2;
+         break;
+-#endif
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 15, 10)
+     case strCCITTFax:
+         mime_type = CAIRO_MIME_TYPE_CCITT_FAX;
+         break;
+-#endif
+     default:
+         mime_type = nullptr;
+         break;
+@@ -3586,17 +3260,13 @@ void CairoOutputDev::setMimeData(GfxState *state, Stream *str, Object *ref, GfxI
+         return;
+     }
+ 
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 14, 0)
+     if (strKind == strJBIG2 && !setMimeDataForJBIG2Globals(str, image)) {
+         return;
+     }
+-#endif
+ 
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 15, 10)
+     if (strKind == strCCITTFax && !setMimeDataForCCITTParams(str, image, height)) {
+         return;
+     }
+-#endif
+ 
+     if (mime_type) {
+         if (getStreamData(str->getNextStream(), &strBuffer, &len)) {
+@@ -3805,16 +3475,7 @@ void CairoOutputDev::drawImage(GfxState *state, Object *ref, Stream *str, int wi
+     }
+ 
+     if (!inlineImg) { /* don't read stream twice if it is an inline image */
+-        // cairo 1.15.10 allows mime image data to have different size to cairo image
+-        // mime image size will be scaled to same size as cairo image
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 15, 10)
+-        bool requireSameSize = false;
+-#else
+-        bool requireSameSize = true;
+-#endif
+-        if (!requireSameSize || (width == widthA && height == heightA)) {
+-            setMimeData(state, str, ref, colorMap, image, heightA);
+-        }
++        setMimeData(state, str, ref, colorMap, image, heightA);
+     }
+ 
+     pattern = cairo_pattern_create_for_surface(image);
+diff --git a/poppler/CairoOutputDev.h b/poppler/CairoOutputDev.h
+index a955115..349ec61 100644
+--- a/poppler/CairoOutputDev.h
++++ b/poppler/CairoOutputDev.h
+@@ -18,7 +18,7 @@
+ // Copyright (C) 2005, 2006 Kristian Høgsberg <krh@redhat.com>
+ // Copyright (C) 2005 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
+ // Copyright (C) 2006-2011, 2013 Carlos Garcia Campos <carlosgc@gnome.org>
+-// Copyright (C) 2008, 2009, 2011-2017, 2022, 2023 Adrian Johnson <ajohnson@redneon.com>
++
+ // Copyright (C) 2008 Michael Vrable <mvrable@cs.ucsd.edu>
+ // Copyright (C) 2010-2013 Thomas Freitag <Thomas.Freitag@alfa.de>
+ // Copyright (C) 2015 Suzuki Toshiya <mpsuzuki@hiroshima-u.ac.jp>
+@@ -124,11 +124,7 @@ public:
+     // Does this device use functionShadedFill(), axialShadedFill(), and
+     // radialShadedFill()?  If this returns false, these shaded fills
+     // will be reduced to a series of other drawing operations.
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
+     bool useShadedFills(int type) override { return type <= 7; }
+-#else
+-    bool useShadedFills(int type) override { return type > 1 && type < 4; }
+-#endif
+ 
+     // Does this device use FillColorStop()?
+     bool useFillColorStop() override { return true; }
+@@ -185,17 +181,13 @@ public:
+     void eoFill(GfxState *state) override;
+     void clipToStrokePath(GfxState *state) override;
+     bool tilingPatternFill(GfxState *state, Gfx *gfx, Catalog *cat, GfxTilingPattern *tPat, const double *mat, int x0, int y0, int x1, int y1, double xStep, double yStep) override;
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
+     bool functionShadedFill(GfxState *state, GfxFunctionShading *shading) override;
+-#endif
+     bool axialShadedFill(GfxState *state, GfxAxialShading *shading, double tMin, double tMax) override;
+     bool axialShadedSupportExtend(GfxState *state, GfxAxialShading *shading) override;
+     bool radialShadedFill(GfxState *state, GfxRadialShading *shading, double sMin, double sMax) override;
+     bool radialShadedSupportExtend(GfxState *state, GfxRadialShading *shading) override;
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 12, 0)
+     bool gouraudTriangleShadedFill(GfxState *state, GfxGouraudTriangleShading *shading) override;
+     bool patchMeshShadedFill(GfxState *state, GfxPatchMeshShading *shading) override;
+-#endif
+ 
+     //----- path clipping
+     void clip(GfxState *state) override;
+@@ -220,7 +212,6 @@ public:
+     void drawImageMask(GfxState *state, Object *ref, Stream *str, int width, int height, bool invert, bool interpolate, bool inlineImg) override;
+     void setSoftMaskFromImageMask(GfxState *state, Object *ref, Stream *str, int width, int height, bool invert, bool inlineImg, double *baseMatrix) override;
+     void unsetSoftMaskFromImageMask(GfxState *state, double *baseMatrix) override;
+-    void drawImageMaskPrescaled(GfxState *state, Object *ref, Stream *str, int width, int height, bool invert, bool interpolate, bool inlineImg);
+     void drawImageMaskRegular(GfxState *state, Object *ref, Stream *str, int width, int height, bool invert, bool interpolate, bool inlineImg);
+ 
+     void drawImage(GfxState *state, Object *ref, Stream *str, int width, int height, GfxImageColorMap *colorMap, bool interpolate, const int *maskColors, bool inlineImg) override;
+@@ -297,12 +288,8 @@ protected:
+     bool checkIfStructElementNeeded(const StructElement *element);
+     void emitStructElement(const StructElement *elem);
+     void startFirstPage(int pageNum, GfxState *state, XRef *xrefA);
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 14, 0)
+     bool setMimeDataForJBIG2Globals(Stream *str, cairo_surface_t *image);
+-#endif
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 15, 10)
+     bool setMimeDataForCCITTParams(Stream *str, cairo_surface_t *image, int height);
+-#endif
+     static void textStringToQuotedUtf8(const GooString *text, GooString *s);
+     bool isPDF();
+ 
+@@ -359,7 +346,6 @@ protected:
+     bool t3_glyph_has_color;
+     bool has_color;
+     double t3_glyph_bbox[4];
+-    bool prescaleImages;
+     bool logicalStruct;
+     bool firstPage;
+     int pdfPageNum; // page number of the PDF file
+@@ -444,11 +430,7 @@ public:
+     // Does this device use functionShadedFill(), axialShadedFill(), and
+     // radialShadedFill()?  If this returns false, these shaded fills
+     // will be reduced to a series of other drawing operations.
+-#if CAIRO_VERSION >= CAIRO_VERSION_ENCODE(1, 11, 2)
+     bool useShadedFills(int type) override { return type <= 7; }
+-#else
+-    bool useShadedFills(int type) override { return type < 4; }
+-#endif
+ 
+     // Does this device use FillColorStop()?
+     bool useFillColorStop() override { return false; }
+diff --git a/poppler/Catalog.cc b/poppler/Catalog.cc
+index 211197a..3c2a2bb 100644
+--- a/poppler/Catalog.cc
++++ b/poppler/Catalog.cc
+@@ -41,6 +41,7 @@
+ // Copyright (C) 2020 Klarälvdalens Datakonsult AB, a KDAB Group company, <info@kdab.com>. Work sponsored by Technische Universität Dresden
+ // Copyright (C) 2021 RM <rm+git@arcsin.org>
+ // Copyright (C) 2023 Ilaï Deutel <idtl@google.com>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -346,9 +347,9 @@ bool Catalog::cachePageTree(int page)
+ 
+ int Catalog::findPage(const Ref pageRef)
+ {
+-    int i;
++    const int count = getNumPages();
+ 
+-    for (i = 0; i < getNumPages(); ++i) {
++    for (int i = 0; i < count; ++i) {
+         Ref *ref = getPageRef(i + 1);
+         if (ref != nullptr && *ref == pageRef) {
+             return i + 1;
+diff --git a/poppler/CurlCachedFile.cc b/poppler/CurlCachedFile.cc
+index 4ec0e20..6b5cbb9 100644
+--- a/poppler/CurlCachedFile.cc
++++ b/poppler/CurlCachedFile.cc
+@@ -7,6 +7,7 @@
+ // Copyright 2009 Stefan Thomas <thomas@eload24.com>
+ // Copyright 2010, 2011 Hib Eris <hib@hiberis.nl>
+ // Copyright 2010, 2019, 2021, 2022 Albert Astals Cid <aacid@kde.org>
++
+ //
+ //========================================================================
+ 
+@@ -75,12 +76,12 @@ int CurlCachedFileLoader::load(const std::vector<ByteRange> &ranges, CachedFileW
+ 
+         fromByte = bRange.offset;
+         toByte = fromByte + bRange.length - 1;
+-        const std::unique_ptr<GooString> range = GooString::format("{0:ulld}-{1:ulld}", fromByte, toByte);
++        const std::string range = GooString::format("{0:ulld}-{1:ulld}", fromByte, toByte);
+ 
+         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, load_cb);
+         curl_easy_setopt(curl, CURLOPT_WRITEDATA, writer);
+-        curl_easy_setopt(curl, CURLOPT_RANGE, range->c_str());
++        curl_easy_setopt(curl, CURLOPT_RANGE, range.c_str());
+         r = curl_easy_perform(curl);
+         curl_easy_reset(curl);
+ 
+diff --git a/poppler/Error.cc b/poppler/Error.cc
+index f821bba..c9b0725 100644
+--- a/poppler/Error.cc
++++ b/poppler/Error.cc
+@@ -19,6 +19,7 @@
+ // Copyright (C) 2012 Marek Kasik <mkasik@redhat.com>
+ // Copyright (C) 2013, 2017 Adrian Johnson <ajohnson@redneon.com>
+ // Copyright (C) 2020 Adam Reichold <adam.reichold@t-online.de>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -53,12 +54,11 @@ void CDECL error(ErrorCategory category, Goffset pos, const char *msg, ...)
+         return;
+     }
+     va_start(args, msg);
+-    const std::unique_ptr<GooString> s = GooString::formatv(msg, args);
++    const std::string s = GooString::formatv(msg, args);
+     va_end(args);
+ 
+     GooString sanitized;
+-    for (int i = 0; i < s->getLength(); ++i) {
+-        const char c = s->getChar(i);
++    for (const char c : s) {
+         if (c < (char)0x20 || c >= (char)0x7f) {
+             sanitized.appendf("<{0:02x}>", c & 0xff);
+         } else {
+diff --git a/poppler/GfxFont.cc b/poppler/GfxFont.cc
+index 9d17f12..e1c43e9 100644
+--- a/poppler/GfxFont.cc
++++ b/poppler/GfxFont.cc
+@@ -38,6 +38,7 @@
+ // Copyright (C) 2021, 2022, 2024 Oliver Sander <oliver.sander@tu-dresden.de>
+ // Copyright (C) 2023 Khaled Hosny <khaled@aliftype.com>
+ // Copyright (C) 2024 Nelson Benítez León <nbenitezl@gmail.com>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -1733,7 +1734,6 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, std::optional<std:
+     Object desFontDictObj;
+     Object obj1, obj2, obj3, obj4, obj5, obj6;
+     int c1, c2;
+-    int excepsSize;
+ 
+     ascent = 0.95;
+     descent = -0.35;
+@@ -1744,10 +1744,6 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, std::optional<std:
+     widths.defWidth = 1.0;
+     widths.defHeight = -1.0;
+     widths.defVY = 0.880;
+-    widths.exceps = nullptr;
+-    widths.nExceps = 0;
+-    widths.excepsV = nullptr;
+-    widths.nExcepsV = 0;
+     cidToGID = nullptr;
+     cidToGIDLen = 0;
+ 
+@@ -1863,7 +1859,6 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, std::optional<std:
+     // char width exceptions
+     obj1 = desFontDict->lookup("W");
+     if (obj1.isArray()) {
+-        excepsSize = 0;
+         int i = 0;
+         while (i + 1 < obj1.arrayGetLength()) {
+             obj2 = obj1.arrayGet(i);
+@@ -1871,33 +1866,21 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, std::optional<std:
+             if (obj2.isInt() && obj3.isInt() && i + 2 < obj1.arrayGetLength()) {
+                 obj4 = obj1.arrayGet(i + 2);
+                 if (obj4.isNum()) {
+-                    if (widths.nExceps == excepsSize) {
+-                        excepsSize += 16;
+-                        widths.exceps = (GfxFontCIDWidthExcep *)greallocn(widths.exceps, excepsSize, sizeof(GfxFontCIDWidthExcep));
+-                    }
+-                    widths.exceps[widths.nExceps].first = obj2.getInt();
+-                    widths.exceps[widths.nExceps].last = obj3.getInt();
+-                    widths.exceps[widths.nExceps].width = obj4.getNum() * 0.001;
+-                    ++widths.nExceps;
++                    GfxFontCIDWidthExcep excep { static_cast<CID>(obj2.getInt()), static_cast<CID>(obj3.getInt()), obj4.getNum() * 0.001 };
++                    widths.exceps.push_back(excep);
+                 } else {
+                     error(errSyntaxError, -1, "Bad widths array in Type 0 font");
+                 }
+                 i += 3;
+             } else if (obj2.isInt() && obj3.isArray()) {
+-                if (widths.nExceps + obj3.arrayGetLength() > excepsSize) {
+-                    excepsSize = (widths.nExceps + obj3.arrayGetLength() + 15) & ~15;
+-                    widths.exceps = (GfxFontCIDWidthExcep *)greallocn(widths.exceps, excepsSize, sizeof(GfxFontCIDWidthExcep));
+-                }
+                 int j = obj2.getInt();
+                 if (likely(j < INT_MAX - obj3.arrayGetLength())) {
+                     for (int k = 0; k < obj3.arrayGetLength(); ++k) {
+                         obj4 = obj3.arrayGet(k);
+                         if (obj4.isNum()) {
+-                            widths.exceps[widths.nExceps].first = j;
+-                            widths.exceps[widths.nExceps].last = j;
+-                            widths.exceps[widths.nExceps].width = obj4.getNum() * 0.001;
++                            GfxFontCIDWidthExcep excep { static_cast<CID>(j), static_cast<CID>(j), obj4.getNum() * 0.001 };
++                            widths.exceps.push_back(excep);
+                             ++j;
+-                            ++widths.nExceps;
+                         } else {
+                             error(errSyntaxError, -1, "Bad widths array in Type 0 font");
+                         }
+@@ -1909,7 +1892,7 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, std::optional<std:
+                 ++i;
+             }
+         }
+-        std::sort(widths.exceps, widths.exceps + widths.nExceps, cmpWidthExcepFunctor());
++        std::sort(widths.exceps.begin(), widths.exceps.end(), cmpWidthExcepFunctor());
+     }
+ 
+     // default metrics for vertical font
+@@ -1928,42 +1911,25 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, std::optional<std:
+     // char metric exceptions for vertical font
+     obj1 = desFontDict->lookup("W2");
+     if (obj1.isArray()) {
+-        excepsSize = 0;
+         int i = 0;
+         while (i + 1 < obj1.arrayGetLength()) {
+             obj2 = obj1.arrayGet(i);
+             obj3 = obj1.arrayGet(i + 1);
+             if (obj2.isInt() && obj3.isInt() && i + 4 < obj1.arrayGetLength()) {
+                 if ((obj4 = obj1.arrayGet(i + 2), obj4.isNum()) && (obj5 = obj1.arrayGet(i + 3), obj5.isNum()) && (obj6 = obj1.arrayGet(i + 4), obj6.isNum())) {
+-                    if (widths.nExcepsV == excepsSize) {
+-                        excepsSize += 16;
+-                        widths.excepsV = (GfxFontCIDWidthExcepV *)greallocn(widths.excepsV, excepsSize, sizeof(GfxFontCIDWidthExcepV));
+-                    }
+-                    widths.excepsV[widths.nExcepsV].first = obj2.getInt();
+-                    widths.excepsV[widths.nExcepsV].last = obj3.getInt();
+-                    widths.excepsV[widths.nExcepsV].height = obj4.getNum() * 0.001;
+-                    widths.excepsV[widths.nExcepsV].vx = obj5.getNum() * 0.001;
+-                    widths.excepsV[widths.nExcepsV].vy = obj6.getNum() * 0.001;
+-                    ++widths.nExcepsV;
++                    GfxFontCIDWidthExcepV excepV { static_cast<CID>(obj2.getInt()), static_cast<CID>(obj3.getInt()), obj4.getNum() * 0.001, obj5.getNum() * 0.001, obj6.getNum() * 0.001 };
++                    widths.excepsV.push_back(excepV);
+                 } else {
+                     error(errSyntaxError, -1, "Bad widths (W2) array in Type 0 font");
+                 }
+                 i += 5;
+             } else if (obj2.isInt() && obj3.isArray()) {
+-                if (widths.nExcepsV + obj3.arrayGetLength() / 3 > excepsSize) {
+-                    excepsSize = (widths.nExcepsV + obj3.arrayGetLength() / 3 + 15) & ~15;
+-                    widths.excepsV = (GfxFontCIDWidthExcepV *)greallocn(widths.excepsV, excepsSize, sizeof(GfxFontCIDWidthExcepV));
+-                }
+                 int j = obj2.getInt();
+                 for (int k = 0; k < obj3.arrayGetLength(); k += 3) {
+                     if ((obj4 = obj3.arrayGet(k), obj4.isNum()) && (obj5 = obj3.arrayGet(k + 1), obj5.isNum()) && (obj6 = obj3.arrayGet(k + 2), obj6.isNum())) {
+-                        widths.excepsV[widths.nExcepsV].first = j;
+-                        widths.excepsV[widths.nExcepsV].last = j;
+-                        widths.excepsV[widths.nExcepsV].height = obj4.getNum() * 0.001;
+-                        widths.excepsV[widths.nExcepsV].vx = obj5.getNum() * 0.001;
+-                        widths.excepsV[widths.nExcepsV].vy = obj6.getNum() * 0.001;
++                        GfxFontCIDWidthExcepV excepV { static_cast<CID>(j), static_cast<CID>(j), obj4.getNum() * 0.001, obj5.getNum() * 0.001, obj6.getNum() * 0.001 };
++                        widths.excepsV.push_back(excepV);
+                         ++j;
+-                        ++widths.nExcepsV;
+                     } else {
+                         error(errSyntaxError, -1, "Bad widths (W2) array in Type 0 font");
+                     }
+@@ -1974,7 +1940,7 @@ GfxCIDFont::GfxCIDFont(XRef *xref, const char *tagA, Ref idA, std::optional<std:
+                 ++i;
+             }
+         }
+-        std::sort(widths.excepsV, widths.excepsV + widths.nExcepsV, cmpWidthExcepVFunctor());
++        std::sort(widths.excepsV.begin(), widths.excepsV.end(), cmpWidthExcepVFunctor());
+     }
+ 
+     ok = true;
+@@ -1988,8 +1954,6 @@ GfxCIDFont::~GfxCIDFont()
+     if (ctu) {
+         ctu->decRefCnt();
+     }
+-    gfree(widths.exceps);
+-    gfree(widths.excepsV);
+     if (cidToGID) {
+         gfree(cidToGID);
+     }
+@@ -2036,9 +2000,9 @@ int GfxCIDFont::getNextChar(const char *s, int len, CharCode *code, Unicode cons
+         h = widths.defHeight;
+         vx = getWidth(cid) / 2;
+         vy = widths.defVY;
+-        if (widths.nExcepsV > 0 && cid >= widths.excepsV[0].first) {
++        if (widths.excepsV.size() > 0 && cid >= widths.excepsV[0].first) {
+             a = 0;
+-            b = widths.nExcepsV;
++            b = widths.excepsV.size();
+             // invariant: widths.excepsV[a].first <= cid < widths.excepsV[b].first
+             while (b - a > 1) {
+                 m = (a + b) / 2;
+@@ -2331,9 +2295,9 @@ double GfxCIDFont::getWidth(CID cid) const
+     int a, b, m;
+ 
+     w = widths.defWidth;
+-    if (widths.nExceps > 0 && cid >= widths.exceps[0].first) {
++    if (widths.exceps.size() > 0 && cid >= widths.exceps[0].first) {
+         a = 0;
+-        b = widths.nExceps;
++        b = widths.exceps.size();
+         // invariant: widths.exceps[a].first <= cid < widths.exceps[b].first
+         while (b - a > 1) {
+             m = (a + b) / 2;
+diff --git a/poppler/GfxFont.h b/poppler/GfxFont.h
+index fbc08de..c4dde6c 100644
+--- a/poppler/GfxFont.h
++++ b/poppler/GfxFont.h
+@@ -25,6 +25,7 @@
+ // Copyright (C) 2015 Thomas Freitag <Thomas.Freitag@alfa.de>
+ // Copyright (C) 2018 Klarälvdalens Datakonsult AB, a KDAB Group company, <info@kdab.com>. Work sponsored by the LiMux project of the city of Munich
+ // Copyright (C) 2021, 2022 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -97,11 +98,8 @@ struct GfxFontCIDWidths
+     double defWidth; // default char width
+     double defHeight; // default char height
+     double defVY; // default origin position
+-    GfxFontCIDWidthExcep *exceps; // exceptions
+-    int nExceps; // number of valid entries in exceps
+-    GfxFontCIDWidthExcepV * // exceptions for vertical font
+-            excepsV;
+-    int nExcepsV; // number of valid entries in excepsV
++    std::vector<GfxFontCIDWidthExcep> exceps;
++    std::vector<GfxFontCIDWidthExcepV> excepsV;
+ };
+ 
+ //------------------------------------------------------------------------
+diff --git a/poppler/PSOutputDev.cc b/poppler/PSOutputDev.cc
+index 9ecfb12..30cd6a0 100644
+--- a/poppler/PSOutputDev.cc
++++ b/poppler/PSOutputDev.cc
+@@ -35,7 +35,7 @@
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+ // Copyright (C) 2018 Philipp Knechtges <philipp-dev@knechtges.com>
+ // Copyright (C) 2019, 2021 Christian Persch <chpe@src.gnome.org>
+-// Copyright (C) 2019, 2021-2023 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2020, 2021 Philipp Knechtges <philipp-dev@knechtges.com>
+ // Copyright (C) 2021 Hubert Figuiere <hub@figuiere.net>
+ // Copyright (C) 2023 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
+@@ -1366,7 +1366,7 @@ void PSOutputDev::postInit()
+                 media++;
+             }
+             if (name.empty()) {
+-                name = GooString::format("{0:d}x{1:d}mm", int(w * 25.4 / 72), int(h * 25.4 / 72))->toStr();
++                name = GooString::format("{0:d}x{1:d}mm", int(w * 25.4 / 72), int(h * 25.4 / 72));
+             }
+             paperSizes.emplace_back(std::move(name), w, h);
+         }
+@@ -1571,23 +1571,23 @@ void PSOutputDev::writeHeader(int nPages, const PDFRectangle *mediaBox, const PD
+         break;
+     }
+     Object info = xref->getDocInfo();
+-    std::unique_ptr<GooString> creator = GooString::format("poppler pdftops version: {0:s} (http://poppler.freedesktop.org)", PACKAGE_VERSION);
++    std::string creator = GooString::format("poppler pdftops version: {0:s} (http:
+     if (info.isDict()) {
+         Object obj1 = info.dictLookup("Creator");
+         if (obj1.isString()) {
+             const GooString *pdfCreator = obj1.getString();
+             if (pdfCreator && !pdfCreator->toStr().empty()) {
+-                creator->append(". PDF Creator: ");
++                creator.append(". PDF Creator: ");
+                 if (hasUnicodeByteOrderMark(pdfCreator->toStr())) {
+-                    creator->append(TextStringToUtf8(pdfCreator->toStr()));
++                    creator.append(TextStringToUtf8(pdfCreator->toStr()));
+                 } else {
+-                    creator->append(pdfCreator);
++                    creator.append(pdfCreator->toStr());
+                 }
+             }
+         }
+     }
+     writePS("%%Creator: ");
+-    writePSTextLine(creator.get());
++    writePSTextLine(creator);
+     if (title) {
+         char *sanitizedTitle = strdup(title);
+         for (size_t i = 0; i < strlen(sanitizedTitle); ++i) {
+@@ -1954,7 +1954,7 @@ void PSOutputDev::setupFont(GfxFont *font, Dict *parentResDict)
+     subst = false;
+ 
+     if (font->getType() == fontType3) {
+-        psName = GooString::format("T3_{0:d}_{1:d}", font->getID()->num, font->getID()->gen).release();
++        psName = new GooString(GooString::format("T3_{0:d}_{1:d}", font->getID()->num, font->getID()->gen));
+         setupType3Font(font, psName, parentResDict);
+     } else {
+         std::optional<GfxFontLoc> fontLoc = font->locateFont(xref, this);
+@@ -2726,13 +2726,13 @@ void PSOutputDev::setupType3Font(GfxFont *font, GooString *psName, Dict *parentR
+             Object charProc = charProcs->getVal(i);
+             gfx->display(&charProc);
+             if (t3String) {
+-                std::unique_ptr<GooString> buf;
++                std::string buf;
+                 if (t3Cacheable) {
+                     buf = GooString::format("{0:.6g} {1:.6g} {2:.6g} {3:.6g} {4:.6g} {5:.6g} setcachedevice\n", t3WX, t3WY, t3LLX, t3LLY, t3URX, t3URY);
+                 } else {
+                     buf = GooString::format("{0:.6g} {1:.6g} setcharwidth\n", t3WX, t3WY);
+                 }
+-                (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++                (*outputFunc)(outputStream, buf.c_str(), buf.size());
+                 (*outputFunc)(outputStream, t3String->c_str(), t3String->getLength());
+                 delete t3String;
+                 t3String = nullptr;
+@@ -2771,7 +2771,7 @@ GooString *PSOutputDev::makePSFontName(GfxFont *font, const Ref *id)
+             return new GooString(std::move(psName));
+         }
+     }
+-    GooString *psName = GooString::format("FF{0:d}_{1:d}", id->num, id->gen).release();
++    GooString *psName = new GooString(GooString::format("FF{0:d}_{1:d}", id->num, id->gen));
+     if ((s = font->getEmbeddedFontName())) {
+         std::string filteredName = filterPSName(s->toStr());
+         psName->append('_')->append(filteredName);
+@@ -6608,25 +6608,25 @@ void PSOutputDev::dumpColorSpaceL2(GfxState *state, GfxColorSpace *colorSpace, b
+         Ref ref = iccBasedCS->getRef();
+         const bool validref = ref != Ref::INVALID();
+         int intent = state->getCmsRenderingIntent();
+-        std::unique_ptr<GooString> name;
++        std::string name;
+         if (validref) {
+             name = GooString::format("ICCBased-{0:d}-{1:d}-{2:d}", ref.num, ref.gen, intent);
+         } else {
+             const unsigned long long hash = std::hash<GfxLCMSProfilePtr> {}(iccBasedCS->getProfile());
+             name = GooString::format("ICCBased-hashed-{0:ullX}-{1:d}", hash, intent);
+         }
+-        const auto &it = iccEmitted.find(name->toStr());
++        const auto &it = iccEmitted.find(name);
+         if (it != iccEmitted.end()) {
+-            writePSFmt("{0:t}", name.get());
++            writePSFmt("{0:s}", name.c_str());
+             if (genXform) {
+                 writePS(" {}");
+             }
+         } else {
+             char *csa = iccBasedCS->getPostScriptCSA();
+             if (csa) {
+-                writePSFmt("userdict /{0:t} {1:s} put\n", name.get(), csa);
+-                iccEmitted.emplace(name->toStr());
+-                writePSFmt("{0:t}", name.get());
++                writePSFmt("userdict /{0:s} {1:s} put\n", name.c_str(), csa);
++                iccEmitted.emplace(name);
++                writePSFmt("{0:s}", name.c_str());
+                 if (genXform) {
+                     writePS(" {}");
+                 }
+@@ -7328,8 +7328,8 @@ void PSOutputDev::writePSFmt(const char *fmt, ...)
+     if (t3String) {
+         t3String->appendfv((char *)fmt, args);
+     } else {
+-        const std::unique_ptr<GooString> buf = GooString::formatv((char *)fmt, args);
+-        (*outputFunc)(outputStream, buf->c_str(), buf->getLength());
++        const std::string buf = GooString::formatv((char *)fmt, args);
++        (*outputFunc)(outputStream, buf.c_str(), buf.size());
+     }
+     va_end(args);
+ }
+@@ -7454,8 +7454,8 @@ GooString *PSOutputDev::filterPSLabel(GooString *label, bool *needParens)
+         } else if (c == '(') {
+             label2->append("\\(");
+         } else if (c < 0x20 || c > 0x7e) {
+-            std::unique_ptr<GooString> aux = GooString::format("\\{0:03o}", c);
+-            label2->append(aux.get());
++            std::string aux = GooString::format("\\{0:03o}", c);
++            label2->append(aux);
+             j += 4;
+         } else {
+             label2->append(c);
+@@ -7469,9 +7469,10 @@ GooString *PSOutputDev::filterPSLabel(GooString *label, bool *needParens)
+ }
+ 
+ // Write a DSC-compliant <textline>.
+-void PSOutputDev::writePSTextLine(const GooString *s)
++void PSOutputDev::writePSTextLine(const std::string &s)
+ {
+-    int i, j, step;
++    std::size_t i;
++    int j, step;
+     int c;
+ 
+     // - DSC comments must be printable ASCII; control chars and
+@@ -7481,15 +7482,15 @@ void PSOutputDev::writePSTextLine(const GooString *s)
+     //   for the keyword, which was emitted by the caller)
+     // - lines that start with a left paren are treated as <text>
+     //   instead of <textline>, so we escape a leading paren
+-    if (s->getLength() >= 2 && (s->getChar(0) & 0xff) == 0xfe && (s->getChar(1) & 0xff) == 0xff) {
++    if (s.starts_with(unicodeByteOrderMark)) {
+         i = 3;
+         step = 2;
+     } else {
+         i = 0;
+         step = 1;
+     }
+-    for (j = 0; i < s->getLength() && j < 200; i += step) {
+-        c = s->getChar(i) & 0xff;
++    for (j = 0; i < s.size() && j < 200; i += step) {
++        c = s[i] & 0xff;
+         if (c == '\\') {
+             writePS("\\\\");
+             j += 2;
+diff --git a/poppler/PSOutputDev.h b/poppler/PSOutputDev.h
+index f27fadb..9e64598 100644
+--- a/poppler/PSOutputDev.h
++++ b/poppler/PSOutputDev.h
+@@ -27,7 +27,7 @@
+ // Copyright (C) 2018 Klarälvdalens Datakonsult AB, a KDAB Group company, <info@kdab.com>. Work sponsored by the LiMux project of the city of Munich
+ // Copyright (C) 2018 Adam Reichold <adam.reichold@t-online.de>
+ // Copyright (C) 2018, 2020 Philipp Knechtges <philipp-dev@knechtges.com>
+-// Copyright (C) 2019, 2023 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2021 Hubert Figuiere <hub@figuiere.net>
+ // Copyright (C) 2021 Christian Persch <chpe@src.gnome.org>
+ // Copyright (C) 2023 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
+@@ -415,7 +415,7 @@ private:
+     void writePSString(const std::string &s);
+     void writePSName(const char *s);
+     GooString *filterPSLabel(GooString *label, bool *needParens = nullptr);
+-    void writePSTextLine(const GooString *s);
++    void writePSTextLine(const std::string &s);
+ 
+     PSLevel level; // PostScript level (1, 2, separation)
+     PSOutMode mode; // PostScript mode (PS, EPS, form)
+diff --git a/poppler/Stream.h b/poppler/Stream.h
+index 05f9a99..b1b8b49 100644
+--- a/poppler/Stream.h
++++ b/poppler/Stream.h
+@@ -15,7 +15,7 @@
+ //
+ // Copyright (C) 2005 Jeff Muizelaar <jeff@infidigm.net>
+ // Copyright (C) 2008 Julien Rebetez <julien@fhtagn.net>
+-// Copyright (C) 2008, 2010, 2011, 2016-2022 Albert Astals Cid <aacid@kde.org>
++
+ // Copyright (C) 2009 Carlos Garcia Campos <carlosgc@gnome.org>
+ // Copyright (C) 2009 Stefan Thomas <thomas@eload24.com>
+ // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+@@ -34,6 +34,7 @@
+ // Copyright (C) 2021 Christian Persch <chpe@src.gnome.org>
+ // Copyright (C) 2021 Georgiy Sgibnev <georgiy@sgibnev.com>. Work sponsored by lab50.net.
+ // Copyright (C) 2024 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
++
+ //
+ // To see a description of the changes please see the Changelog file that
+ // came with your tarball or type make ChangeLog if you are building from git
+@@ -172,8 +173,15 @@ public:
+             length += readChars;
+             if (readChars == charsToRead) {
+                 if (lookChar() != EOF) {
+-                    size += sizeIncrement;
++                    if (unlikely(checkedAdd(size, sizeIncrement, &size))) {
++                        error(errInternal, -1, "toUnsignedChars size grew too much");
++                        return {};
++                    }
+                     charsToRead = sizeIncrement;
++                    if (unlikely(static_cast<size_t>(size) > buf.max_size())) {
++                        error(errInternal, -1, "toUnsignedChars size grew too much");
++                        return {};
++                    }
+                     buf.resize(size);
+                 } else {
+                     continueReading = false;
+@@ -673,7 +681,7 @@ public:
+ 
+     int lookChar() override { return (bufPtr < bufEnd) ? (*bufPtr & 0xff) : EOF; }
+ 
+-    Goffset getPos() override { return (int)(bufPtr - buf); }
++    Goffset getPos() override { return bufPtr - buf; }
+ 
+     void setPos(Goffset pos, int dir = 0) override
+     {
+diff --git a/poppler/UTF.cc b/poppler/UTF.cc
+index f8ebb8c..2269a37 100644
+--- a/poppler/UTF.cc
++++ b/poppler/UTF.cc
+@@ -432,7 +432,7 @@ int utf16CountUtf8Bytes(const uint16_t *utf16)
+         utf16++;
+     }
+     if (state != UTF8_ACCEPT && state != UTF8_REJECT) {
+-        count++; // replace with REPLACEMENT_CHAR
++        count += 3;
+     }
+ 
+     return count;
+@@ -487,12 +487,12 @@ int utf16ToUtf8(const uint16_t *utf16, char *utf8, int maxUtf8, int maxUtf16)
+ // Allocate utf8 string and convert utf16 into it.
+ char *utf16ToUtf8(const uint16_t *utf16, int *len)
+ {
+-    int n = utf16CountUtf8Bytes(utf16);
++    const int n = utf16CountUtf8Bytes(utf16);
+     if (len) {
+         *len = n;
+     }
+     char *utf8 = (char *)gmalloc(n + 1);
+-    utf16ToUtf8(utf16, utf8);
++    utf16ToUtf8(utf16, utf8, n + 1, INT_MAX);
+     return utf8;
+ }
+ 
+diff --git a/poppler/UTF.h b/poppler/UTF.h
+index a51e2e3..eaa656b 100644
+--- a/poppler/UTF.h
++++ b/poppler/UTF.h
+@@ -131,7 +131,7 @@ int POPPLER_PRIVATE_EXPORT utf16CountUtf8Bytes(const uint16_t *utf16);
+ //  maxUtf16 - maximum number of UTF-16 code units to convert. Conversion stops when
+ //            either this count is reached or a null is encountered.
+ // Returns number of UTF-8 bytes written (excluding NULL).
+-int POPPLER_PRIVATE_EXPORT utf16ToUtf8(const uint16_t *utf16, char *utf8, int maxUtf8 = INT_MAX, int maxUtf16 = INT_MAX);
++int POPPLER_PRIVATE_EXPORT utf16ToUtf8(const uint16_t *utf16, char *utf8, int maxUtf8, int maxUtf16);
+ 
+ // Allocate utf8 string and convert utf16 into it.
+ char POPPLER_PRIVATE_EXPORT *utf16ToUtf8(const uint16_t *utf16, int *len = nullptr);
+diff --git a/poppler/XRef.cc b/poppler/XRef.cc
+index e97a00c..d8c6670 100644
+--- a/poppler/XRef.cc
++++ b/poppler/XRef.cc
+@@ -257,6 +257,7 @@ XRef::XRef() : objStrs { 5 }
+     permFlags = defPermFlags;
+     ownerPasswordOk = false;
+     rootNum = -1;
++    rootGen = -1;
+     strOwner = false;
+     xrefReconstructed = false;
+     encAlgorithm = cryptNone;
+diff --git a/qt5/src/Doxyfile b/qt5/src/Doxyfile
+index b196bfd..32c64bb 100644
+--- a/qt5/src/Doxyfile
++++ b/qt5/src/Doxyfile
+@@ -31,7 +31,7 @@ PROJECT_NAME           = "Poppler Qt5"
+ # This could be handy for archiving the generated documentation or
+ # if some version control system is used.
+ 
+-PROJECT_NUMBER         = 24.05.0
++PROJECT_NUMBER         = 24.06.0
+ 
+ # The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute)
+ # base path where the generated documentation will be put.
+diff --git a/qt5/src/poppler-document.cc b/qt5/src/poppler-document.cc
+index 6daed69..bae6b72 100644
+--- a/qt5/src/poppler-document.cc
++++ b/qt5/src/poppler-document.cc
+@@ -770,6 +770,37 @@ OptContentModel *Document::optionalContentModel()
+     return (OptContentModel *)m_doc->m_optContentModel;
+ }
+ 
++Link *Document::additionalAction(DocumentAdditionalActionsType type) const
++{
++    Catalog::DocumentAdditionalActionsType actionType;
++    switch (type) {
++    case CloseDocument:
++        actionType = Catalog::actionCloseDocument;
++        break;
++    case SaveDocumentStart:
++        actionType = Catalog::actionSaveDocumentStart;
++        break;
++    case SaveDocumentFinish:
++        actionType = Catalog::actionSaveDocumentFinish;
++        break;
++    case PrintDocumentStart:
++        actionType = Catalog::actionPrintDocumentStart;
++        break;
++    case PrintDocumentFinish:
++        actionType = Catalog::actionPrintDocumentFinish;
++        break;
++    default:
++        return {};
++    }
++
++    Link *action = nullptr;
++    if (std::unique_ptr<::LinkAction> act = m_doc->doc->getCatalog()->getAdditionalAction(actionType)) {
++        action = PageData::convertLinkActionToLink(act.get(), m_doc, QRectF());
++    }
++
++    return action;
++}
++
+ QStringList Document::scripts() const
+ {
+     Catalog *catalog = m_doc->doc->getCatalog();
+diff --git a/qt5/src/poppler-qt5.h b/qt5/src/poppler-qt5.h
+index 4236de0..f1cdb7c 100644
+--- a/qt5/src/poppler-qt5.h
++++ b/qt5/src/poppler-qt5.h
+@@ -1879,6 +1879,31 @@ QString subject = m_doc->info("Subject");
+     */
+     QStringList scripts() const;
+ 
++
++      Describes the flags for additional document actions i.e.
++      for executing document scripts at different events.
++      This flag is used by additionalAction method to return the
++      particular Link.
++
++      \since 24.07
++
++    enum DocumentAdditionalActionsType
++    {
++        CloseDocument,
++        SaveDocumentStart,
++        SaveDocumentFinish,
++        PrintDocumentStart,
++        PrintDocumentFinish,
++    };
++
++
++      Returns the additional action of the given @p type for the document or
++      @c 0 if no action has been defined.
++
++      \since 24.07
++
++    Link *additionalAction(DocumentAdditionalActionsType type) const;
++
+     /**
+        The PDF identifiers.
+ 
+diff --git a/qt5/tests/check_annotations.cpp b/qt5/tests/check_annotations.cpp
+index 6c3f1b6..e922d8b 100644
+--- a/qt5/tests/check_annotations.cpp
++++ b/qt5/tests/check_annotations.cpp
+@@ -35,8 +35,8 @@ void TestAnnotations::checkQColorPrecision()
+     bool precisionOk = true;
+     for (int i = std::numeric_limits<uint16_t>::min(); i <= std::numeric_limits<uint16_t>::max(); i++) {
+         double normalized = static_cast<uint16_t>(i) / static_cast<double>(std::numeric_limits<uint16_t>::max());
+-        const std::unique_ptr<GooString> serialized = GooString::format("{0:.5f}", normalized);
+-        double deserialized = gatof(serialized->c_str());
++        const std::string serialized = GooString::format("{0:.5f}", normalized);
++        double deserialized = gatof(serialized.c_str());
+         uint16_t denormalized = std::round(deserialized * std::numeric_limits<uint16_t>::max());
+         if (static_cast<uint16_t>(i) != denormalized) {
+             precisionOk = false;
+diff --git a/qt5/tests/check_goostring.cpp b/qt5/tests/check_goostring.cpp
+index a82b5b1..110bf17 100644
+--- a/qt5/tests/check_goostring.cpp
++++ b/qt5/tests/check_goostring.cpp
+@@ -64,60 +64,61 @@ void TestGooString::testInsert()
+ void TestGooString::testFormat()
+ {
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:d},{1:x}", 1, 0xF));
+-        QCOMPARE(goo->c_str(), "1,f");
++        const std::string goo(GooString::format("{0:d},{1:x}", 1, 0xF));
++        QCOMPARE(goo.c_str(), "1,f");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:d},{0:x},{0:X},{0:o},{0:b},{0:w}", 0xA));
+-        QCOMPARE(goo->c_str(), "10,a,A,12,1010,          ");
++        const std::string goo(GooString::format("{0:d},{0:x},{0:X},{0:o},{0:b},{0:w}", 0xA));
++        QCOMPARE(goo.c_str(), "10,a,A,12,1010,          ");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:d},{0:x},{0:X},{0:o},{0:b}", -0xA));
+-        QCOMPARE(goo->c_str(), "-10,-a,-A,-12,-1010");
++        const std::string goo(GooString::format("{0:d},{0:x},{0:X},{0:o},{0:b}", -0xA));
++        QCOMPARE(goo.c_str(), "-10,-a,-A,-12,-1010");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:c}{1:c}{2:c}{3:c}", 'T', (char)'E', (short)'S', (int)'T'));
+-        QCOMPARE(goo->c_str(), "TEST");
++        const std::string goo(GooString::format("{0:c}{1:c}{2:c}{3:c}", 'T', (char)'E', (short)'S', (int)'T'));
++        QCOMPARE(goo.c_str(), "TEST");
+ 
+-        const std::unique_ptr<GooString> goo2(GooString::format("{0:s} {1:t}", "TEST", goo.get()));
+-        QCOMPARE(goo2->c_str(), "TEST TEST");
++        GooString gooGoo(goo);
++        const std::string goo2(GooString::format("{0:s} {1:t}", "TEST", &gooGoo));
++        QCOMPARE(goo2.c_str(), "TEST TEST");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:ud} {1:d} {2:d}", UINT_MAX, INT_MAX, INT_MIN));
++        const std::string goo(GooString::format("{0:ud} {1:d} {2:d}", UINT_MAX, INT_MAX, INT_MIN));
+         const QByteArray expected = QStringLiteral("%1 %2 %3").arg(UINT_MAX).arg(INT_MAX).arg(INT_MIN).toLatin1();
+-        QCOMPARE(goo->c_str(), expected.constData());
++        QCOMPARE(goo.c_str(), expected.constData());
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:uld} {1:ld} {2:ld}", ULONG_MAX, LONG_MAX, LONG_MIN));
++        const std::string goo(GooString::format("{0:uld} {1:ld} {2:ld}", ULONG_MAX, LONG_MAX, LONG_MIN));
+         const QByteArray expected = QStringLiteral("%1 %2 %3").arg(ULONG_MAX).arg(LONG_MAX).arg(LONG_MIN).toLatin1();
+-        QCOMPARE(goo->c_str(), expected.constData());
++        QCOMPARE(goo.c_str(), expected.constData());
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:ulld} {1:lld} {2:lld}", ULLONG_MAX, LLONG_MAX, LLONG_MIN));
++        const std::string goo(GooString::format("{0:ulld} {1:lld} {2:lld}", ULLONG_MAX, LLONG_MAX, LLONG_MIN));
+         const QByteArray expected = QStringLiteral("%1 %2 %3").arg(ULLONG_MAX).arg(LLONG_MAX).arg(LLONG_MIN).toLatin1();
+-        QCOMPARE(goo->c_str(), expected.constData());
++        QCOMPARE(goo.c_str(), expected.constData());
+     }
+     {
+-        const std::unique_ptr<GooString> gooD(GooString::format("{0:.1f} {0:.1g} {0:.1gs} | {1:.1f} {1:.1g} {1:.1gs}", 1., .012));
+-        const std::unique_ptr<GooString> gooF(GooString::format("{0:.1f} {0:.1g} {0:.1gs} | {1:.1f} {1:.1g} {1:.1gs}", 1.f, .012f));
+-        QCOMPARE(gooD->c_str(), "1.0 1 1 | 0.0 0 0.01");
+-        QCOMPARE(gooF->c_str(), "1.0 1 1 | 0.0 0 0.01");
++        const std::string gooD(GooString::format("{0:.1f} {0:.1g} {0:.1gs} | {1:.1f} {1:.1g} {1:.1gs}", 1., .012));
++        const std::string gooF(GooString::format("{0:.1f} {0:.1g} {0:.1gs} | {1:.1f} {1:.1g} {1:.1gs}", 1.f, .012f));
++        QCOMPARE(gooD.c_str(), "1.0 1 1 | 0.0 0 0.01");
++        QCOMPARE(gooF.c_str(), "1.0 1 1 | 0.0 0 0.01");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:.4f} {0:.4g} {0:.4gs}", .012));
+-        QCOMPARE(goo->c_str(), "0.0120 0.012 0.012");
++        const std::string goo(GooString::format("{0:.4f} {0:.4g} {0:.4gs}", .012));
++        QCOMPARE(goo.c_str(), "0.0120 0.012 0.012");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{{ SomeText {0:d} }}", 1));
+-        QCOMPARE(goo->c_str(), "{ SomeText 1 }");
++        const std::string goo(GooString::format("{{ SomeText {0:d} }}", 1));
++        QCOMPARE(goo.c_str(), "{ SomeText 1 }");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{{{{ {{ SomeText {0:d}", 2));
+-        QCOMPARE(goo->c_str(), "{{ { SomeText 2");
++        const std::string goo(GooString::format("{{{{ {{ SomeText {0:d}", 2));
++        QCOMPARE(goo.c_str(), "{{ { SomeText 2");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("SomeText {0:d} }} }}}}", 3));
+-        QCOMPARE(goo->c_str(), "SomeText 3 } }}");
++        const std::string goo(GooString::format("SomeText {0:d} }} }}}}", 3));
++        QCOMPARE(goo.c_str(), "SomeText 3 } }}");
+     }
+ }
+ 
+diff --git a/qt5/tests/check_utf_conversion.cpp b/qt5/tests/check_utf_conversion.cpp
+index 93bae4a..e3933e8 100644
+--- a/qt5/tests/check_utf_conversion.cpp
++++ b/qt5/tests/check_utf_conversion.cpp
+@@ -113,7 +113,7 @@ void TestUTFConversion::testUTF()
+     QCOMPARE(len, (int)strlen(str));
+     Q_ASSERT(len < (int)sizeof(utf8Buf)); // if this fails, make utf8Buf larger
+ 
+-    len = utf16ToUtf8(s.utf16(), utf8Buf);
++    len = utf16ToUtf8(s.utf16(), utf8Buf, sizeof(utf8Buf), INT_MAX);
+     QVERIFY(compare(utf8Buf, str));
+     QCOMPARE(len, (int)strlen(str));
+ 
+diff --git a/qt6/src/Doxyfile b/qt6/src/Doxyfile
+index d3911df..66f8fc6 100644
+--- a/qt6/src/Doxyfile
++++ b/qt6/src/Doxyfile
+@@ -31,7 +31,7 @@ PROJECT_NAME           = "Poppler Qt6"
+ # This could be handy for archiving the generated documentation or
+ # if some version control system is used.
+ 
+-PROJECT_NUMBER         = 24.05.0
++PROJECT_NUMBER         = 24.06.0
+ 
+ # The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute)
+ # base path where the generated documentation will be put.
+diff --git a/qt6/src/Mainpage.dox b/qt6/src/Mainpage.dox
+index da7970d..2b41168 100644
+--- a/qt6/src/Mainpage.dox
++++ b/qt6/src/Mainpage.dox
+@@ -57,12 +57,11 @@ A PDF document can then be loaded as follows:
+ @code
+ QString filename;
+ 
+-Poppler::Document* document = Poppler::Document::load(filename);
++std::unique_ptr<Poppler::Document> document = Poppler::Document::load(filename);
+ if (!document || document->isLocked()) {
+ 
+   // ... error message ....
+ 
+-  delete document;
+   return;
+ }
+ @endcode
+@@ -71,14 +70,14 @@ Pages can be rendered to QImages with the following commands:
+ 
+ @code
+ // Paranoid safety check
+-if (document == 0) {
++if (!document) {
+   // ... error message ...
+   return;
+ }
+ 
+ // Access page of the PDF file
+-Poppler::Page* pdfPage = document->page(pageNumber);  // Document starts at page 0
+-if (pdfPage == 0) {
++std::unique_ptr<Poppler::Page> pdfPage = document->page(pageNumber);
++if (!pdfPage) {
+   // ... error message ...
+   return;
+ }
+@@ -93,7 +92,6 @@ if (image.isNull()) {
+ // ... use image ...
+ 
+ // after the usage, the page must be deleted
+-delete pdfPage;
+ @endcode
+ 
+ Finally, don't forget to destroy the document:
+diff --git a/qt6/src/poppler-document.cc b/qt6/src/poppler-document.cc
+index 57c70e5..ef35cbb 100644
+--- a/qt6/src/poppler-document.cc
++++ b/qt6/src/poppler-document.cc
+@@ -756,6 +756,36 @@ QStringList Document::scripts() const
+     return scripts;
+ }
+ 
++std::unique_ptr<Link> Document::additionalAction(DocumentAdditionalActionsType type) const
++{
++    Catalog::DocumentAdditionalActionsType actionType;
++    switch (type) {
++    case CloseDocument:
++        actionType = Catalog::actionCloseDocument;
++        break;
++    case SaveDocumentStart:
++        actionType = Catalog::actionSaveDocumentStart;
++        break;
++    case SaveDocumentFinish:
++        actionType = Catalog::actionSaveDocumentFinish;
++        break;
++    case PrintDocumentStart:
++        actionType = Catalog::actionPrintDocumentStart;
++        break;
++    case PrintDocumentFinish:
++        actionType = Catalog::actionPrintDocumentFinish;
++        break;
++    default:
++        return {};
++    }
++
++    if (std::unique_ptr<::LinkAction> act = m_doc->doc->getCatalog()->getAdditionalAction(actionType)) {
++        return PageData::convertLinkActionToLink(act.get(), m_doc, QRectF());
++    }
++
++    return {};
++}
++
+ bool Document::getPdfId(QByteArray *permanentId, QByteArray *updateId) const
+ {
+     GooString gooPermanentId;
+diff --git a/qt6/src/poppler-qt6.h b/qt6/src/poppler-qt6.h
+index f12bc03..995a32a 100644
+--- a/qt6/src/poppler-qt6.h
++++ b/qt6/src/poppler-qt6.h
+@@ -1680,6 +1680,31 @@ QString subject = m_doc->info("Subject");
+     */
+     QStringList scripts() const;
+ 
++
++      Describes the flags for additional document actions i.e.
++      for executing document scripts at different events.
++      This flag is used by additionalAction method to return the
++      particular Link.
++
++      \since 24.07
++
++    enum DocumentAdditionalActionsType
++    {
++        CloseDocument,
++        SaveDocumentStart,
++        SaveDocumentFinish,
++        PrintDocumentStart,
++        PrintDocumentFinish,
++    };
++
++
++      Returns the additional action of the given @p type for the document or
++      @c 0 if no action has been defined.
++
++      \since 24.07
++
++    std::unique_ptr<Link> additionalAction(DocumentAdditionalActionsType type) const;
++
+     /**
+        The PDF identifiers.
+ 
+diff --git a/qt6/tests/check_annotations.cpp b/qt6/tests/check_annotations.cpp
+index bf9d244..514dd3e 100644
+--- a/qt6/tests/check_annotations.cpp
++++ b/qt6/tests/check_annotations.cpp
+@@ -35,8 +35,8 @@ void TestAnnotations::checkQColorPrecision()
+     bool precisionOk = true;
+     for (int i = std::numeric_limits<uint16_t>::min(); i <= std::numeric_limits<uint16_t>::max(); i++) {
+         double normalized = static_cast<uint16_t>(i) / static_cast<double>(std::numeric_limits<uint16_t>::max());
+-        const std::unique_ptr<GooString> serialized = GooString::format("{0:.5f}", normalized);
+-        double deserialized = gatof(serialized->c_str());
++        const std::string serialized = GooString::format("{0:.5f}", normalized);
++        double deserialized = gatof(serialized.c_str());
+         uint16_t denormalized = std::round(deserialized * std::numeric_limits<uint16_t>::max());
+         if (static_cast<uint16_t>(i) != denormalized) {
+             precisionOk = false;
+diff --git a/qt6/tests/check_goostring.cpp b/qt6/tests/check_goostring.cpp
+index a82b5b1..110bf17 100644
+--- a/qt6/tests/check_goostring.cpp
++++ b/qt6/tests/check_goostring.cpp
+@@ -64,60 +64,61 @@ void TestGooString::testInsert()
+ void TestGooString::testFormat()
+ {
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:d},{1:x}", 1, 0xF));
+-        QCOMPARE(goo->c_str(), "1,f");
++        const std::string goo(GooString::format("{0:d},{1:x}", 1, 0xF));
++        QCOMPARE(goo.c_str(), "1,f");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:d},{0:x},{0:X},{0:o},{0:b},{0:w}", 0xA));
+-        QCOMPARE(goo->c_str(), "10,a,A,12,1010,          ");
++        const std::string goo(GooString::format("{0:d},{0:x},{0:X},{0:o},{0:b},{0:w}", 0xA));
++        QCOMPARE(goo.c_str(), "10,a,A,12,1010,          ");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:d},{0:x},{0:X},{0:o},{0:b}", -0xA));
+-        QCOMPARE(goo->c_str(), "-10,-a,-A,-12,-1010");
++        const std::string goo(GooString::format("{0:d},{0:x},{0:X},{0:o},{0:b}", -0xA));
++        QCOMPARE(goo.c_str(), "-10,-a,-A,-12,-1010");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:c}{1:c}{2:c}{3:c}", 'T', (char)'E', (short)'S', (int)'T'));
+-        QCOMPARE(goo->c_str(), "TEST");
++        const std::string goo(GooString::format("{0:c}{1:c}{2:c}{3:c}", 'T', (char)'E', (short)'S', (int)'T'));
++        QCOMPARE(goo.c_str(), "TEST");
+ 
+-        const std::unique_ptr<GooString> goo2(GooString::format("{0:s} {1:t}", "TEST", goo.get()));
+-        QCOMPARE(goo2->c_str(), "TEST TEST");
++        GooString gooGoo(goo);
++        const std::string goo2(GooString::format("{0:s} {1:t}", "TEST", &gooGoo));
++        QCOMPARE(goo2.c_str(), "TEST TEST");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:ud} {1:d} {2:d}", UINT_MAX, INT_MAX, INT_MIN));
++        const std::string goo(GooString::format("{0:ud} {1:d} {2:d}", UINT_MAX, INT_MAX, INT_MIN));
+         const QByteArray expected = QStringLiteral("%1 %2 %3").arg(UINT_MAX).arg(INT_MAX).arg(INT_MIN).toLatin1();
+-        QCOMPARE(goo->c_str(), expected.constData());
++        QCOMPARE(goo.c_str(), expected.constData());
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:uld} {1:ld} {2:ld}", ULONG_MAX, LONG_MAX, LONG_MIN));
++        const std::string goo(GooString::format("{0:uld} {1:ld} {2:ld}", ULONG_MAX, LONG_MAX, LONG_MIN));
+         const QByteArray expected = QStringLiteral("%1 %2 %3").arg(ULONG_MAX).arg(LONG_MAX).arg(LONG_MIN).toLatin1();
+-        QCOMPARE(goo->c_str(), expected.constData());
++        QCOMPARE(goo.c_str(), expected.constData());
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:ulld} {1:lld} {2:lld}", ULLONG_MAX, LLONG_MAX, LLONG_MIN));
++        const std::string goo(GooString::format("{0:ulld} {1:lld} {2:lld}", ULLONG_MAX, LLONG_MAX, LLONG_MIN));
+         const QByteArray expected = QStringLiteral("%1 %2 %3").arg(ULLONG_MAX).arg(LLONG_MAX).arg(LLONG_MIN).toLatin1();
+-        QCOMPARE(goo->c_str(), expected.constData());
++        QCOMPARE(goo.c_str(), expected.constData());
+     }
+     {
+-        const std::unique_ptr<GooString> gooD(GooString::format("{0:.1f} {0:.1g} {0:.1gs} | {1:.1f} {1:.1g} {1:.1gs}", 1., .012));
+-        const std::unique_ptr<GooString> gooF(GooString::format("{0:.1f} {0:.1g} {0:.1gs} | {1:.1f} {1:.1g} {1:.1gs}", 1.f, .012f));
+-        QCOMPARE(gooD->c_str(), "1.0 1 1 | 0.0 0 0.01");
+-        QCOMPARE(gooF->c_str(), "1.0 1 1 | 0.0 0 0.01");
++        const std::string gooD(GooString::format("{0:.1f} {0:.1g} {0:.1gs} | {1:.1f} {1:.1g} {1:.1gs}", 1., .012));
++        const std::string gooF(GooString::format("{0:.1f} {0:.1g} {0:.1gs} | {1:.1f} {1:.1g} {1:.1gs}", 1.f, .012f));
++        QCOMPARE(gooD.c_str(), "1.0 1 1 | 0.0 0 0.01");
++        QCOMPARE(gooF.c_str(), "1.0 1 1 | 0.0 0 0.01");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{0:.4f} {0:.4g} {0:.4gs}", .012));
+-        QCOMPARE(goo->c_str(), "0.0120 0.012 0.012");
++        const std::string goo(GooString::format("{0:.4f} {0:.4g} {0:.4gs}", .012));
++        QCOMPARE(goo.c_str(), "0.0120 0.012 0.012");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{{ SomeText {0:d} }}", 1));
+-        QCOMPARE(goo->c_str(), "{ SomeText 1 }");
++        const std::string goo(GooString::format("{{ SomeText {0:d} }}", 1));
++        QCOMPARE(goo.c_str(), "{ SomeText 1 }");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("{{{{ {{ SomeText {0:d}", 2));
+-        QCOMPARE(goo->c_str(), "{{ { SomeText 2");
++        const std::string goo(GooString::format("{{{{ {{ SomeText {0:d}", 2));
++        QCOMPARE(goo.c_str(), "{{ { SomeText 2");
+     }
+     {
+-        const std::unique_ptr<GooString> goo(GooString::format("SomeText {0:d} }} }}}}", 3));
+-        QCOMPARE(goo->c_str(), "SomeText 3 } }}");
++        const std::string goo(GooString::format("SomeText {0:d} }} }}}}", 3));
++        QCOMPARE(goo.c_str(), "SomeText 3 } }}");
+     }
+ }
+ 
+diff --git a/qt6/tests/check_utf8document.cpp b/qt6/tests/check_utf8document.cpp
+index c58ec0b..165e318 100644
+--- a/qt6/tests/check_utf8document.cpp
++++ b/qt6/tests/check_utf8document.cpp
+@@ -21,7 +21,7 @@ inline QString outlineItemTitle(OutlineItem *item)
+         return {};
+     }
+     const std::vector<Unicode> &title = item->getTitle();
+-    return QString::fromUcs4(title.data(), title.size());
++    return QString::fromUcs4(reinterpret_cast<const char32_t *>(title.data()), title.size());
+ }
+ 
+ void TestUtf8Document::checkStrings()
+diff --git a/qt6/tests/check_utf_conversion.cpp b/qt6/tests/check_utf_conversion.cpp
+index d5fb0e2..943c553 100644
+--- a/qt6/tests/check_utf_conversion.cpp
++++ b/qt6/tests/check_utf_conversion.cpp
+@@ -111,7 +111,7 @@ void TestUTFConversion::testUTF()
+     QCOMPARE(len, (int)strlen(str));
+     Q_ASSERT(len < (int)sizeof(utf8Buf)); // if this fails, make utf8Buf larger
+ 
+-    len = utf16ToUtf8(s.utf16(), utf8Buf);
++    len = utf16ToUtf8(s.utf16(), utf8Buf, sizeof(utf8Buf), INT_MAX);
+     QVERIFY(compare(utf8Buf, str));
+     QCOMPARE(len, (int)strlen(str));
+ 
+diff --git a/splash/Splash.cc b/splash/Splash.cc
+index 5b247ec..86cae28 100644
+--- a/splash/Splash.cc
++++ b/splash/Splash.cc
+@@ -11,7 +11,7 @@
+ // All changes made under the Poppler project to this file are licensed
+ // under GPL version 2 or later
+ //
+-// Copyright (C) 2005-2023 Albert Astals Cid <aacid@kde.org>
++
+ // Copyright (C) 2005 Marco Pesenti Gritti <mpg@redhat.com>
+ // Copyright (C) 2010-2016 Thomas Freitag <Thomas.Freitag@alfa.de>
+ // Copyright (C) 2010 Christian Feuersänger <cfeuersaenger@googlemail.com>
+@@ -3705,11 +3705,19 @@ SplashError Splash::arbitraryTransformImage(SplashImageSource src, SplashICCTran
+ 
+     // compute the scale factors
+     if (splashAbs(mat[0]) >= splashAbs(mat[1])) {
+-        scaledWidth = xMax - xMin;
+-        scaledHeight = yMax - yMin;
++        if (unlikely(checkedSubtraction(xMax, xMin, &scaledWidth))) {
++            return splashErrBadArg;
++        }
++        if (unlikely(checkedSubtraction(yMax, yMin, &scaledHeight))) {
++            return splashErrBadArg;
++        }
+     } else {
+-        scaledWidth = yMax - yMin;
+-        scaledHeight = xMax - xMin;
++        if (unlikely(checkedSubtraction(yMax, yMin, &scaledWidth))) {
++            return splashErrBadArg;
++        }
++        if (unlikely(checkedSubtraction(xMax, xMin, &scaledHeight))) {
++            return splashErrBadArg;
++        }
+     }
+     if (scaledHeight <= 1 || scaledWidth <= 1 || tilingPattern) {
+         if (mat[0] >= 0) {
+diff --git a/utils/HtmlOutputDev.cc b/utils/HtmlOutputDev.cc
+index 36e9dc7..bc7d646 100644
+--- a/utils/HtmlOutputDev.cc
++++ b/utils/HtmlOutputDev.cc
+@@ -86,7 +86,7 @@
+ class HtmlImage
+ {
+ public:
+-    HtmlImage(std::unique_ptr<GooString> &&_fName, GfxState *state) : fName(std::move(_fName))
++    HtmlImage(std::string &&_fName, GfxState *state) : fName(std::move(_fName))
+     {
+         state->transform(0, 0, &xMin, &yMax);
+         state->transform(1, 1, &xMax, &yMin);
+@@ -97,7 +97,7 @@ public:
+ 
+     double xMin, xMax; // image x coordinates
+     double yMin, yMax; // image y coordinates
+-    std::unique_ptr<GooString> fName; // image file name
++    std::string fName;
+ };
+ 
+ // returns true if x is closer to y than x is to z
+@@ -135,20 +135,20 @@ static GooString* Dirname(GooString* str){
+ }
+ #endif
+ 
+-static std::unique_ptr<GooString> print_matrix(const double *mat)
++static std::string print_matrix(const double *mat)
+ {
+     return GooString::format("[{0:g} {1:g} {2:g} {3:g} {4:g} {5:g}]", *mat, mat[1], mat[2], mat[3], mat[4], mat[5]);
+ }
+ 
+-static std::unique_ptr<GooString> print_uni_str(const Unicode *u, const unsigned uLen)
++static std::string print_uni_str(const Unicode *u, const unsigned uLen)
+ {
+     if (!uLen) {
+-        return std::make_unique<GooString>("");
++        return "";
+     }
+-    std::unique_ptr<GooString> gstr_buff0 = GooString::format("{0:c}", (*u < 0x7F ? *u & 0xFF : '?'));
++    std::string gstr_buff0 = GooString::format("{0:c}", (*u < 0x7F ? *u & 0xFF : '?'));
+     for (unsigned i = 1; i < uLen; i++) {
+         if (u[i] < 0x7F) {
+-            gstr_buff0->append(static_cast<char>(u[i]) & 0xFF);
++            gstr_buff0.push_back(static_cast<char>(u[i]) & 0xFF);
+         }
+     }
+ 
+@@ -186,16 +186,16 @@ HtmlString::HtmlString(GfxState *state, double fontSize, HtmlFontAccu *_fonts) :
+             // browser rotates the opposite way
+             // so flip the sign of the angle -> sin() components change sign
+             if (debug) {
+-                std::cerr << DEBUG << "before transform: " << print_matrix(normalizedMatrix)->c_str() << std::endl;
++                std::cerr << DEBUG << "before transform: " << print_matrix(normalizedMatrix) << std::endl;
+             }
+             normalizedMatrix[1] *= -1;
+             normalizedMatrix[2] *= -1;
+             if (debug) {
+-                std::cerr << DEBUG << "after reflecting angle: " << print_matrix(normalizedMatrix)->c_str() << std::endl;
++                std::cerr << DEBUG << "after reflecting angle: " << print_matrix(normalizedMatrix) << std::endl;
+             }
+             normalizeRotMat(normalizedMatrix);
+             if (debug) {
+-                std::cerr << DEBUG << "after norm: " << print_matrix(normalizedMatrix)->c_str() << std::endl;
++                std::cerr << DEBUG << "after norm: " << print_matrix(normalizedMatrix) << std::endl;
+             }
+             hfont.setRotMat(normalizedMatrix);
+         }
+@@ -371,8 +371,8 @@ void HtmlPage::addChar(GfxState *state, double x, double y, double dx, double dy
+         // sin q is zero iff there is no rotation, or 180 deg. rotation;
+         // for 180 rotation, cos q will be negative
+         if (text_mat[0] < 0 || !is_within(text_mat[1], .1, 0)) {
+-            std::cerr << DEBUG << "rotation matrix for \"" << print_uni_str(u, uLen)->c_str() << '"' << std::endl;
+-            std::cerr << "text " << print_matrix(state->getTextMat())->c_str();
++            std::cerr << DEBUG << "rotation matrix for \"" << print_uni_str(u, uLen) << '"' << std::endl;
++            std::cerr << "text " << print_matrix(state->getTextMat());
+         }
+     }
+     if (n > 0 && // don't start a new string, unless there is already a string
+@@ -730,7 +730,7 @@ void HtmlPage::dumpAsXML(FILE *f, int page)
+             fprintf(f, "<image top=\"%f\" left=\"%f\" ", img->yMin, img->xMin);
+             fprintf(f, "width=\"%f\" height=\"%f\" ", img->xMax - img->xMin, img->yMax - img->yMin);
+         }
+-        fprintf(f, "src=\"%s\"/>\n", img->fName->c_str());
++        fprintf(f, "src=\"%s\"/>\n", img->fName.c_str());
+         delete img;
+     }
+     imgList.clear();
+@@ -937,7 +937,7 @@ void HtmlPage::dump(FILE *f, int pageNum, const std::vector<std::string> &backgr
+                 style_index += 2; // yFlip
+             }
+ 
+-            fprintf(f, "<img%s src=\"%s\"/><br/>\n", styles[style_index], img->fName->c_str());
++            fprintf(f, "<img%s src=\"%s\"/><br/>\n", styles[style_index], img->fName.c_str());
+             delete img;
+         }
+         imgList.clear();
+@@ -985,7 +985,7 @@ void HtmlPage::setDocName(const char *fname)
+     DocName = new GooString(fname);
+ }
+ 
+-void HtmlPage::addImage(std::unique_ptr<GooString> &&fname, GfxState *state)
++void HtmlPage::addImage(std::string &&fname, GfxState *state)
+ {
+     HtmlImage *img = new HtmlImage(std::move(fname), state);
+     imgList.push_back(img);
+@@ -1308,10 +1308,10 @@ void HtmlOutputDev::drawJpegImage(GfxState *state, Stream *str)
+     int c;
+ 
+     // open the image file
+-    std::unique_ptr<GooString> fName = createImageFileName("jpg");
+-    f1 = dataUrls ? ims.open("wb") : fopen(fName->c_str(), "wb");
++    std::string fName = createImageFileName("jpg");
++    f1 = dataUrls ? ims.open("wb") : fopen(fName.c_str(), "wb");
+     if (!f1) {
+-        error(errIO, -1, "Couldn't open image file '{0:t}'", fName.get());
++        error(errIO, -1, "Couldn't open image file '{0:s}'", fName.c_str());
+         return;
+     }
+ 
+@@ -1327,7 +1327,7 @@ void HtmlOutputDev::drawJpegImage(GfxState *state, Stream *str)
+     fclose(f1);
+ 
+     if (dataUrls) {
+-        fName = std::make_unique<GooString>(std::string("data:image/jpeg;base64,") + gbase64Encode(ims.getBuffer()));
++        fName = std::string("data:image/jpeg;base64,") + gbase64Encode(ims.getBuffer());
+     }
+     pages->addImage(std::move(fName), state);
+ }
+@@ -1344,17 +1344,17 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
+     }
+ 
+     // open the image file
+-    std::unique_ptr<GooString> fName = createImageFileName("png");
+-    f1 = dataUrls ? ims.open("wb") : fopen(fName->c_str(), "wb");
++    std::string fName = createImageFileName("png");
++    f1 = dataUrls ? ims.open("wb") : fopen(fName.c_str(), "wb");
+     if (!f1) {
+-        error(errIO, -1, "Couldn't open image file '{0:t}'", fName.get());
++        error(errIO, -1, "Couldn't open image file '{0:s}'", fName.c_str());
+         return;
+     }
+ 
+     PNGWriter *writer = new PNGWriter(isMask ? PNGWriter::MONOCHROME : PNGWriter::RGB);
+     // TODO can we calculate the resolution of the image?
+     if (!writer->init(f1, width, height, 72, 72)) {
+-        error(errInternal, -1, "Can't init PNG for image '{0:t}'", fName.get());
++        error(errInternal, -1, "Can't init PNG for image '{0:s}'", fName.c_str());
+         delete writer;
+         fclose(f1);
+         return;
+@@ -1376,7 +1376,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
+             // Convert into a PNG row
+             p = imgStr->getLine();
+             if (!p) {
+-                error(errIO, -1, "Failed to read PNG. '{0:t}' will be incorrect", fName.get());
++                error(errIO, -1, "Failed to read PNG. '{0:s}' will be incorrect", fName.c_str());
+                 gfree(row);
+                 delete writer;
+                 delete imgStr;
+@@ -1393,7 +1393,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
+             }
+ 
+             if (!writer->writeRow(row_pointer)) {
+-                error(errIO, -1, "Failed to write into PNG '{0:t}'", fName.get());
++                error(errIO, -1, "Failed to write into PNG '{0:s}'", fName.c_str());
+                 delete writer;
+                 delete imgStr;
+                 fclose(f1);
+@@ -1430,7 +1430,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
+             }
+ 
+             if (!writer->writeRow(&png_row)) {
+-                error(errIO, -1, "Failed to write into PNG '{0:t}'", fName.get());
++                error(errIO, -1, "Failed to write into PNG '{0:s}'", fName.c_str());
+                 delete writer;
+                 fclose(f1);
+                 gfree(png_row);
+@@ -1448,7 +1448,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
+     fclose(f1);
+ 
+     if (dataUrls) {
+-        fName = std::make_unique<GooString>(std::string("data:image/png;base64,") + gbase64Encode(ims.getBuffer()));
++        fName = std::string("data:image/png;base64,") + gbase64Encode(ims.getBuffer());
+     }
+     pages->addImage(std::move(fName), state);
+ #else
+@@ -1456,7 +1456,7 @@ void HtmlOutputDev::drawPngImage(GfxState *state, Stream *str, int width, int he
+ #endif
+ }
+ 
+-std::unique_ptr<GooString> HtmlOutputDev::createImageFileName(const char *ext)
++std::string HtmlOutputDev::createImageFileName(const char *ext)
+ {
+     return GooString::format("{0:s}-{1:d}_{2:d}.{3:s}", Docname->c_str(), pageNum, pages->getNumImages() + 1, ext);
+ }
+diff --git a/utils/HtmlOutputDev.h b/utils/HtmlOutputDev.h
+index cf846e1..4dcc479 100644
+--- a/utils/HtmlOutputDev.h
++++ b/utils/HtmlOutputDev.h
+@@ -25,7 +25,7 @@
+ // Copyright (C) 2012 Fabio D'Urso <fabiodurso@hotmail.it>
+ // Copyright (C) 2013 Thomas Freitag <Thomas.Freitag@alfa.de>
+ // Copyright (C) 2018 Klarälvdalens Datakonsult AB, a KDAB Group company, <info@kdab.com>. Work sponsored by the LiMux project of the city of Munich
+-// Copyright (C) 2019 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright (C) 2024 g10 Code GmbH, Author: Sune Stolborg Vuorela <sune@vuorela.dk>
+ //
+ // To see a description of the changes please see the Changelog file that
+@@ -145,7 +145,7 @@ public:
+     void AddLink(const HtmlLink &x) { links->AddLink(x); }
+ 
+     // add an image to the current page
+-    void addImage(std::unique_ptr<GooString> &&fname, GfxState *state);
++    void addImage(std::string &&fname, GfxState *state);
+ 
+     // number of images on the current page
+     int getNumImages() { return imgList.size(); }
+@@ -295,7 +295,7 @@ private:
+     int getOutlinePageNum(OutlineItem *item);
+     void drawJpegImage(GfxState *state, Stream *str);
+     void drawPngImage(GfxState *state, Stream *str, int width, int height, GfxImageColorMap *colorMap, bool isMask = false);
+-    std::unique_ptr<GooString> createImageFileName(const char *ext);
++    std::string createImageFileName(const char *ext);
+ 
+     FILE *fContentsFrame;
+     FILE *page; // html file
+diff --git a/utils/pdfinfo.cc b/utils/pdfinfo.cc
+index 5d37ef6..7d56974 100644
+--- a/utils/pdfinfo.cc
++++ b/utils/pdfinfo.cc
+@@ -15,7 +15,7 @@
+ // under GPL version 2 or later
+ //
+ // Copyright (C) 2006 Dom Lachowicz <cinamod@hotmail.com>
+-// Copyright (C) 2007-2010, 2012, 2016-2022 Albert Astals Cid <aacid@kde.org>
++
+ // Copyright (C) 2010 Hib Eris <hib@hiberis.nl>
+ // Copyright (C) 2011 Vittal Aithal <vittal.aithal@cognidox.com>
+ // Copyright (C) 2012, 2013, 2016-2018, 2021 Adrian Johnson <ajohnson@redneon.com>
+@@ -113,16 +113,21 @@ static const ArgDesc argDesc[] = { { "-f", argInt, &firstPage, 0, "first page to
+                                    { "-?", argFlag, &printHelp, 0, "print usage information" },
+                                    {} };
+ 
+-static void printTextString(const GooString *s, const UnicodeMap *uMap)
++static void printStdTextString(const std::string &s, const UnicodeMap *uMap)
+ {
+     char buf[8];
+-    std::vector<Unicode> u = TextStringToUCS4(s->toStr());
++    const std::vector<Unicode> u = TextStringToUCS4(s);
+     for (const auto &c : u) {
+         int n = uMap->mapUnicode(c, buf, sizeof(buf));
+         fwrite(buf, 1, n, stdout);
+     }
+ }
+ 
++static void printTextString(const GooString *s, const UnicodeMap *uMap)
++{
++    printStdTextString(s->toStr(), uMap);
++}
++
+ static void printUCS4String(const Unicode *u, int len, const UnicodeMap *uMap)
+ {
+     char buf[8];
+@@ -294,11 +299,6 @@ static void printStruct(const StructElement *element, unsigned indent)
+     }
+ }
+ 
+-struct GooStringCompare
+-{
+-    bool operator()(GooString *lhs, GooString *rhs) const { return lhs->cmp(const_cast<GooString *>(rhs)) < 0; }
+-};
+-
+ static void printLinkDest(const std::unique_ptr<LinkDest> &dest)
+ {
+     GooString s;
+@@ -369,29 +369,25 @@ static void printLinkDest(const std::unique_ptr<LinkDest> &dest)
+ 
+ static void printDestinations(PDFDoc *doc, const UnicodeMap *uMap)
+ {
+-    std::map<Ref, std::map<GooString *, std::unique_ptr<LinkDest>, GooStringCompare>> map;
++    std::map<Ref, std::map<std::string, std::unique_ptr<LinkDest>>> map;
+ 
+     int numDests = doc->getCatalog()->numDestNameTree();
+     for (int i = 0; i < numDests; i++) {
+-        GooString *name = new GooString(doc->getCatalog()->getDestNameTreeName(i));
++        const GooString *name = doc->getCatalog()->getDestNameTreeName(i);
+         std::unique_ptr<LinkDest> dest = doc->getCatalog()->getDestNameTreeDest(i);
+-        if (dest && dest->isPageRef()) {
++        if (name && dest && dest->isPageRef()) {
+             Ref pageRef = dest->getPageRef();
+-            map[pageRef].insert(std::make_pair(name, std::move(dest)));
+-        } else {
+-            delete name;
++            map[pageRef].insert(std::make_pair(name->toStr(), std::move(dest)));
+         }
+     }
+ 
+     numDests = doc->getCatalog()->numDests();
+     for (int i = 0; i < numDests; i++) {
+-        GooString *name = new GooString(doc->getCatalog()->getDestsName(i));
++        const char *name = doc->getCatalog()->getDestsName(i);
+         std::unique_ptr<LinkDest> dest = doc->getCatalog()->getDestsDest(i);
+-        if (dest && dest->isPageRef()) {
++        if (name && dest && dest->isPageRef()) {
+             Ref pageRef = dest->getPageRef();
+             map[pageRef].insert(std::make_pair(name, std::move(dest)));
+-        } else {
+-            delete name;
+         }
+     }
+ 
+@@ -405,9 +401,8 @@ static void printDestinations(PDFDoc *doc, const UnicodeMap *uMap)
+                     printf("%4d ", i);
+                     printLinkDest(it.second);
+                     printf(" \"");
+-                    printTextString(it.first, uMap);
++                    printStdTextString(it.first, uMap);
+                     printf("\"\n");
+-                    delete it.first;
+                 }
+             }
+         }
+diff --git a/utils/pdfsig.cc b/utils/pdfsig.cc
+index fe588f1..7c61e1f 100644
+--- a/utils/pdfsig.cc
++++ b/utils/pdfsig.cc
+@@ -12,7 +12,7 @@
+ // Copyright 2017, 2019 Adrian Johnson <ajohnson@redneon.com>
+ // Copyright 2018 Chinmoy Ranjan Pradhan <chinmoyrp65@protonmail.com>
+ // Copyright 2019 Alexey Pavlov <alexpux@gmail.com>
+-// Copyright 2019. 2023 Oliver Sander <oliver.sander@tu-dresden.de>
++
+ // Copyright 2019 Nelson Efrain A. Cruz <neac03@gmail.com>
+ // Copyright 2021 Georgiy Sgibnev <georgiy@sgibnev.com>. Work sponsored by lab50.net.
+ // Copyright 2021 Theofilos Intzoglou <int.teo@gmail.com>
+@@ -129,10 +129,10 @@ static bool dumpSignature(int sig_num, int sigCount, FormFieldSignature *s, cons
+     // We want format to be {0:s}.sig{1:Xd} where X is sigCountLength
+     // since { is the magic character to replace things we need to put it twice where
+     // we don't want it to be replaced
+-    const std::unique_ptr<GooString> format = GooString::format("{{0:s}}.sig{{1:{0:d}d}}", sigCountLength);
+-    const std::unique_ptr<GooString> path = GooString::format(format->c_str(), gbasename(filename).c_str(), sig_num);
+-    printf("Signature #%d (%u bytes) => %s\n", sig_num, signature->getLength(), path->c_str());
+-    std::ofstream outfile(path->c_str(), std::ofstream::binary);
++    const std::string format = GooString::format("{{0:s}}.sig{{1:{0:d}d}}", sigCountLength);
++    const std::string path = GooString::format(format.c_str(), gbasename(filename).c_str(), sig_num);
++    printf("Signature #%d (%u bytes) => %s\n", sig_num, signature->getLength(), path.c_str());
++    std::ofstream outfile(path.c_str(), std::ofstream::binary);
+     outfile.write(signature->c_str(), signature->getLength());
+     outfile.close();
+ 
+@@ -541,7 +541,7 @@ int main(int argc, char *argv[])
+         const std::string signerName = certInfo->getSubjectInfo().commonName;
+         const std::string timestamp = timeToStringWithFormat(nullptr, "%Y.%m.%d %H:%M:%S %z");
+         const AnnotColor blackColor(0, 0, 0);
+-        const std::string signatureText(GooString::format(_("Digitally signed by {0:s}"), signerName.c_str())->toStr() + "\n" + GooString::format(_("Date: {0:s}"), timestamp.c_str())->toStr());
++        const std::string signatureText(GooString::format(_("Digitally signed by {0:s}"), signerName.c_str()) + "\n" + GooString::format(_("Date: {0:s}"), timestamp.c_str()));
+         const auto gSignatureText = std::make_unique<GooString>((signatureText.empty() || noAppearance) ? "" : utf8ToUtf16WithBom(signatureText));
+         const auto gSignatureLeftText = std::make_unique<GooString>((signerName.empty() || noAppearance) ? "" : utf8ToUtf16WithBom(signerName));
+         const bool success = fws->signDocumentWithAppearance(argv[2], std::string { certNickname }, std::string { password }, rs.get(), nullptr, {}, {}, *gSignatureText, *gSignatureLeftText, 0, 0, std::make_unique<AnnotColor>(blackColor));
+diff --git a/utils/pdftohtml.cc b/utils/pdftohtml.cc
+index 999ad00..6468b72 100644
+--- a/utils/pdftohtml.cc
++++ b/utils/pdftohtml.cc
+@@ -354,10 +354,10 @@ int main(int argc, char *argv[])
+             doc->displayPage(splashOut, pg, 72 * scale, 72 * scale, 0, true, false, false);
+             SplashBitmap *bitmap = splashOut->getBitmap();
+ 
+-            const std::unique_ptr<GooString> imgFileName = GooString::format("{0:s}{1:03d}.{2:s}", htmlFileName->c_str(), pg, extension);
+-            auto f1 = dataUrls ? imf.open("wb") : fopen(imgFileName->c_str(), "wb");
++            const std::string imgFileName = GooString::format("{0:s}{1:03d}.{2:s}", htmlFileName->c_str(), pg, extension);
++            auto f1 = dataUrls ? imf.open("wb") : fopen(imgFileName.c_str(), "wb");
+             if (!f1) {
+-                fprintf(stderr, "Could not open %s\n", imgFileName->c_str());
++                fprintf(stderr, "Could not open %s\n", imgFileName.c_str());
+                 continue;
+             }
+             bitmap->writeImgFile(format, f1, 72 * scale, 72 * scale);
+@@ -365,7 +365,7 @@ int main(int argc, char *argv[])
+             if (dataUrls) {
+                 htmlOut->addBackgroundImage(std::string((format == splashFormatJpeg) ? "data:image/jpeg;base64," : "data:image/png;base64,") + gbase64Encode(imf.getBuffer()));
+             } else {
+-                htmlOut->addBackgroundImage(gbasename(imgFileName->c_str()));
++                htmlOut->addBackgroundImage(gbasename(imgFileName.c_str()));
+             }
+         }
+ 
